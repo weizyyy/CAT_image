@@ -66,7 +66,7 @@ export function restoreImageBlocks() {
 // ══════════════════════════════
 // ── v2.4 轻量渲染（酒馆AI模式）：只替换 [img:…] 占位符为图卡，正文/状态栏原文 HTML 全部保留 ──
 // 修复：旧 renderEnhanced 全量重建（escape+<br>）→ 文字挤成一坨、原文 HTML 结构（状态栏等）丢失
-export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex = 0, blockIds) {
+export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex = 0, blockIds, mode = getActiveMode()) {
     var blocks = [];
     if (!enhancedText) return blocks;
     var re = /\[image:\s*([\s\S]*?)\]/g;
@@ -79,7 +79,7 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
         // [Fix] 提示词只用【提示词】块内容（无则回退场景）：导演模式场景是主 LLM 写的长叙事
         // （人物动作/表情/衣着），拼进提示词会把剧情文字+角色名喂给生图模型
         var fullPrompt = resolveFacePrompt(promptContent || scene);
-        if (isEnglishMode()) { var _c = cleanPromptForMode(fullPrompt, getActiveMode()); if (_c) fullPrompt = _c; }
+        if (isEnglishMode(mode)) { var _c = cleanPromptForMode(fullPrompt, mode); if (_c) fullPrompt = _c; }
         // [Fix] 旧缓存 key 兼容（644d40c 前缓存 key=scene+', '+prompt），否则刷新后需重新生成
         var bid = blockIds?.[blockIdx] || (blockKey ? blockKey + '#' + blockIdx : '');
         blockIdx++;
@@ -88,7 +88,7 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
     return blocks;
 }
 
-export function renderEnhancedLite(element, enhancedText, blockKey, sourceText) {
+export function renderEnhancedLite(element, enhancedText, blockKey, sourceText, autoGenerate = true) {
     const root = element?.[0];
     if (!root) return;
     const tokens = tokenizePlaceholders(sourceText ?? root.textContent);
@@ -96,7 +96,7 @@ export function renderEnhancedLite(element, enhancedText, blockKey, sourceText) 
     mountSlots(root, tokens, blockKey, blocks);
     bindImageButtonsIn(root.ownerDocument);
     if (blocks) updateSlots(root, blockKey, blocks);
-    if (blocks && settings.autoGen === 1 && settings.pluginOn !== false) {
+    if (autoGenerate && blocks && settings.autoGen === 1 && settings.pluginOn !== false) {
         for (const btn of root.querySelectorAll('.sl_img_btn')) {
             if (btn.textContent.includes('生成图片')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'), { automatic: true });
         }

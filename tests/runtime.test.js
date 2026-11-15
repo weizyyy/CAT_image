@@ -265,3 +265,20 @@ test('H3 mode cannot reuse another model prompt; edits within H3 still reuse unc
         assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
     } finally { scanner.stopPolling(); settings.modelType = savedMode; }
 });
+
+test('switching to H3 still restores historical images from another mode without generating them', async () => {
+    const { imgCacheSetById } = await import('../modules/cache.js');
+    const savedMode = settings.modelType; settings.modelType = 'zit'; settings.msgMap = {}; settings.msgMapTs = {};
+    let calls = 0; fetch = async () => response('Historical image caption ' + ++calls);
+    show('[img:历史图]'); scanner.startPolling();
+    try {
+        await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
+        const oldId = document.querySelector('.sl_img_btn').dataset.slid; imgCacheSetById(oldId, '/history.png');
+        ctx.chat.push({ mes: '新的回复，无图', is_user: false, swipe_id: 0 });
+        document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">新的回复，无图</div></div>');
+        document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+        settings.modelType = 'minimax_h3_image'; scanner.scanAllMsgs();
+        assert.equal(calls, 1); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
+        assert.equal(document.querySelector('.sl_img_block img').getAttribute('src'), '/history.png');
+    } finally { scanner.stopPolling(); settings.modelType = savedMode; }
+});

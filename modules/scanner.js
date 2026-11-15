@@ -41,13 +41,13 @@ export function messageRoot(id) {
     return Array.from(document.querySelectorAll('.mes')).find(n =>
         String(n.getAttribute('mesid') ?? n.getAttribute('data-mesid')) === String(id))?.querySelector('.mes_text');
 }
-function renderSnapshot(snapshot, enhanced) {
+function renderSnapshot(snapshot, enhanced, autoGenerate = true) {
     const ids = snapshot.slots?.map(s => s.id);
     if (snapshot.slots) enhanced = snapshot.slots.map((slot, index) => slot.enhanced
-        ? extractImgBlocksFromEnhanced(slot.enhanced, snapshot.key, index, ids)[0] : undefined);
+        ? extractImgBlocksFromEnhanced(slot.enhanced, snapshot.key, index, ids, snapshot.mode)[0] : undefined);
     const root = messageRoot(snapshot.messageId);
     if (!root) return false;
-    let mounted = renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source);
+    let mounted = renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source, autoGenerate);
     if (settings.feBridge === false) return mounted;
     const visit = (node, depth = 0) => {
         if (depth > 3) return;
@@ -55,7 +55,7 @@ function renderSnapshot(snapshot, enhanced) {
             try {
                 const doc = frame.contentDocument;
                 if (doc?.body) {
-                    mounted = renderEnhancedLite(jQuery(doc.body), enhanced, snapshot.key, snapshot.source) || mounted;
+                    mounted = renderEnhancedLite(jQuery(doc.body), enhanced, snapshot.key, snapshot.source, autoGenerate) || mounted;
                     visit(doc.body, depth + 1);
                 }
             } catch { /* Cross-origin frames cannot be modified. */ }
@@ -152,11 +152,22 @@ export function clearMsgCache(chid, mesid) {
 }
 export function scanAllMsgs() {
     if (!active || settings.pluginOn === false || generationBusy()) return;
+    const chat = getSTContext()?.chat || [];
+    let latest = chat.length - 1;
+    while (latest >= 0 && (chat[latest].is_user || chat[latest].is_system)) latest--;
     for (const el of document.querySelectorAll('.mes')) {
         const id = el.getAttribute('mesid') ?? el.getAttribute('data-mesid'), snapshot = readSnapshot(id);
         if (!snapshot) continue;
         const cached = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
         if (cached) renderSnapshot(prepareRevision(snapshot), cached.value);
+        else if (Number(id) !== latest) {
+            // Model selection changes new work, not the visibility of old images.
+            // Restore historical results from the other mode without auto-generating.
+            const otherMode = snapshot.mode === 'minimax_h3_image' ? 'zit' : 'minimax_h3_image';
+            const key = getMsgKey(snapshot.chatId, id, snapshot.source, snapshot.swipe, otherMode), record = readRecord(key, otherMode);
+            if (record?.source === snapshot.source && record.swipe === snapshot.swipe)
+                renderSnapshot({ ...snapshot, key, mode: record.mode || otherMode, slots: record.slots }, record.enhanced, false);
+        }
     }
 }
 export function checkLastMessage() {
