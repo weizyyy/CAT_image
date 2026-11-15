@@ -86,6 +86,7 @@ function visibleRecord(record) {
     } catch { return false; }
 }
 function submitRecord(record) {
+    if (record.cancelled) return;
     if (generationBusy() || settings.pluginOn === false) return;
     if (inflight.get(record.win)) return;
     if (record.callId !== latestCalls.get(record.win) && (holdUntil.get(record.win) || 0) > Date.now()) return;
@@ -114,6 +115,13 @@ function submitRecord(record) {
         },
         onError() {
             record.root.querySelectorAll('[role="status"]').forEach(n => { n.textContent = '🐱 分析失败，稍后重试'; });
+        },
+        onCancel() {
+            record.cancelled = true;
+            record.root.querySelectorAll('[role="status"]').forEach(n => {
+                n.textContent = '🐱 分析已取消，点击继续'; n.style.cursor = 'pointer';
+                n.onclick = () => { record.cancelled = false; scanCoordinator.jobs.delete(record.key); submitRecord(record); };
+            });
         }
     });
 }

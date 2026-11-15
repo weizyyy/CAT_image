@@ -157,7 +157,8 @@ export function composeFinalPrompt(prompt) {
     return prompt;
 }
 
-export async function generateImage(workflow, prompt) {
+export async function generateImage(workflow, prompt, { signal } = {}) {
+    signal?.throwIfAborted();
     // 最终组装（模型输出 / 画风预设 / 艺术家风格）——
     // 与面板"提示词"里显示的完全同源（v1.8.3）
     prompt = composeFinalPrompt(prompt);
@@ -166,6 +167,8 @@ export async function generateImage(workflow, prompt) {
     var clientId = 'sl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
     var raw = workflowRequest(workflow, prompt, clientId);
     var ctrl2 = new AbortController();
+    const cancel = () => ctrl2.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
     var timer2 = setTimeout(function() { ctrl2.abort(); }, (settings.cTimeout || 180) * 1000);
     var response, data;
     try {
@@ -178,17 +181,21 @@ export async function generateImage(workflow, prompt) {
         if (!response.ok) { var errorText = await response.text(); throw new Error(errorText.slice(0, 800)); }
         data = await response.json();
     } catch (e) {
-        clearTimeout(timer2);
+        signal?.throwIfAborted();
         throw new Error(e && e.name === 'AbortError' ? 'ComfyUI生成超时(' + ((settings.cTimeout || 180)) + 's)' : (e ? e.message : 'fetch失败'));
+    } finally {
+        clearTimeout(timer2); signal?.removeEventListener('abort', cancel);
     }
-    clearTimeout(timer2);
+    signal?.throwIfAborted();
     if (!data.data) throw new Error('无输出');
     var dataUrl = 'data:image/' + (data.format || 'png') + ';base64,' + data.data;
     try {
-        var path = await uploadImageToST(dataUrl);
+        var path = await uploadImageToST(dataUrl, signal);
+        signal?.throwIfAborted();
         slLog('图片已上传:', path);
         return { url: path };
     } catch (e) {
+        signal?.throwIfAborted();
         slLog('上传到 ST 失败，降级使用 base64:', e.message);
         return { url: dataUrl };
     }

@@ -6,6 +6,31 @@ import { locateMarkers, mountSlots, updateSlots, resetSlots } from '../modules/d
 import { ScanCoordinator } from '../modules/scan-coordinator.js';
 import { substituteWorkflow, workflowRequest, randomizeZeroSeeds } from '../modules/workflow-template.js';
 import { clampPosition } from '../modules/ui/viewport.js';
+import { reconcileSlots } from '../modules/slot-revisions.js';
+
+test('edited/inserted/deleted markers preserve separate unchanged occurrence identities', () => {
+    const source = '甲[img:相同]乙[img:相同]丙[img:相同]丁';
+    const previous = { source, slots: ['first', 'second', 'third'].map(id => ({ id, enhanced: id })) };
+    assert.deepEqual(reconcileSlots(source.replace('乙[img:相同]', '乙[img:改变]'), 'new', previous).map(s => s.id), ['first', 'new#1', 'third']);
+    assert.deepEqual(reconcileSlots(source.replace('甲[img:相同]', '甲'), 'new', previous).map(s => s.id), ['second', 'third']);
+    assert.deepEqual(reconcileSlots(source.replace('乙', '乙[img:新增]'), 'new', previous).map(s => s.id), ['first', 'new#1', 'second', 'third']);
+    assert.deepEqual(reconcileSlots(source.replace('甲', '新正文'), 'new', previous).map(s => s.id), ['first', 'second', 'third']);
+    const moved = { source: '[img:甲][img:乙][img:丙]', slots: ['a', 'b', 'c'].map(id => ({ id })) };
+    assert.deepEqual(reconcileSlots('[img:新甲][img:乙][img:新丙]', 'new', moved).map(s => s.id), ['new#0', 'b', 'new#2']);
+});
+
+test('cancel all aborts running analysis, skips queued work and blocks automatic resubmission', async () => {
+    let release, signal; const runs = [], commits = [], cancelled = [];
+    const c = new ScanCoordinator({ run: async (s, _current, abortSignal) => {
+        runs.push(s.key); signal = abortSignal; await new Promise(r => release = r); return { ok: true };
+    }, commit: s => commits.push(s.key), onCancel: s => cancelled.push(s.key) });
+    const snapshot = key => ({ owner: key, key, isCurrent: () => true });
+    c.submit(snapshot('running')); c.submit(snapshot('queued'));
+    assert.equal(c.cancelPending(), 2); assert.equal(signal.aborted, true);
+    c.submit(snapshot('queued')); release(); await new Promise(r => setTimeout(r, 0));
+    assert.deepEqual(runs, ['running']); assert.deepEqual(commits, []); assert.deepEqual(cancelled, ['running', 'queued']);
+    assert.equal(c.jobs.get('running').state, 'cancelled');
+});
 
 test('all occurrences, repeated scenes, multiline/fullwidth and nested brackets retain source offsets', () => {
     const source = '前文[img:同一场景|要点:甲]\n中间[img:同一场景|要点:乙]\n［IMG：夜景\n|道具:[红花]］尾声';

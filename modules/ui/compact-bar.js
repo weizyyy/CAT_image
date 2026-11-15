@@ -7,8 +7,8 @@ import { setHeadStatus } from './panel.js';
 import { toast, chkProf } from './utils.js';
 import { settings, saveSettings, getActiveMode, modeBadge } from '../settings.js';
 import { getCharacterName } from '../pipeline/profile.js';
-import { getScannerStatus } from '../scanner.js';
-import { getQueueLength } from '../queue.js';
+import { getScannerStatus, cancelPendingScans } from '../scanner.js';
+import { getQueueLength, clearQueue } from '../queue.js';
 import * as panel from './panel.js';  // 循环依赖：仅函数体内引用，运行时安全
 
 var _compactCleanup = null;
@@ -60,12 +60,16 @@ export function createCompactBar() {
   bar += '<div style="display:flex;align-items:center;gap:7px;font-size:11.5px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + CAT.green + ';box-shadow:0 0 0 3px ' + CAT.green + '22;"></span><span id="sl_comp_status" style="font-weight:700;color:' + CAT.text + ';">打盹中 zZ</span><span style="color:' + CAT.mute + ';">·</span><span id="sl_comp_queue_txt" style="color:' + CAT.sub + ';">🐟 排队 0</span><span style="color:' + CAT.mute + ';">·</span><span id="sl_comp_mode" style="color:' + CAT.sub + ';">⚡ 自动</span></div>';
   bar += '<div id="sl_comp_event" style="font-size:10px;color:' + CAT.mute + ';margin-top:3px;">🐾 小猫候命中…</div></div>';
   // 按钮区
-  bar += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px 12px;flex-shrink:0;height:26%;"><button id="sl_comp_gen" style="flex:1.35;font-size:12px;padding:0;height:36px;border:none;border-radius:13px;background:linear-gradient(135deg,' + CAT.accent + ',' + (CAT.accentHover || CAT.accent) + ');color:#fff;cursor:pointer;font-weight:800;box-shadow:' + CAT.btnShadow + ';">🐟 排图</button><button id="sl_comp_auto" style="flex:1;font-size:12px;padding:0;height:36px;border:1px solid ' + CAT.line + ';border-radius:13px;background:' + CAT.card + ';color:' + CAT.text + ';cursor:pointer;font-weight:700;">⚡ 自动</button></div></div>';
+  bar += '<div style="display:flex;align-items:center;gap:6px;padding:8px 12px 12px;flex-shrink:0;height:26%;"><button id="sl_comp_gen" style="flex:1;font-size:12px;padding:0;height:36px;border:none;border-radius:13px;background:linear-gradient(135deg,' + CAT.accent + ',' + (CAT.accentHover || CAT.accent) + ');color:#fff;cursor:pointer;font-weight:800;box-shadow:' + CAT.btnShadow + ';">🐟 排图</button><button id="sl_comp_cancel" title="取消所有排图和分析；已交给 ComfyUI 的计算可能继续" aria-label="取消所有排图" style="flex:1.45;font-size:11px;padding:0;height:36px;border:1px solid ' + CAT.line + ';border-radius:13px;background:' + CAT.card + ';color:' + CAT.text + ';cursor:pointer;font-weight:700;">⏹ 取消全部</button><button id="sl_comp_auto" style="flex:1;font-size:12px;padding:0;height:36px;border:1px solid ' + CAT.line + ';border-radius:13px;background:' + CAT.card + ';color:' + CAT.text + ';cursor:pointer;font-weight:700;">⚡ 自动</button></div></div>';
   _compactEl = jQuery(bar).appendTo('body');
   installCompactBehavior();
   jQuery('#sl_comp_header').on('click', function (e) { var was = _compDragMoved; _compDragMoved = false; if (jQuery(e.target).is('button') || was) return; panel.togglePanel(); });
   jQuery('#sl_comp_panel_btn').on('click', function (e) { e.stopPropagation(); panel.togglePanel(); });
   jQuery('#sl_comp_gen').on('click', function (e) { e.stopPropagation(); triggerGenAll(); });
+  jQuery('#sl_comp_cancel').on('click', function (e) {
+    e.stopPropagation(); const count = cancelPendingScans() + clearQueue();
+    refreshCompactBar(); toast('info', count ? '已取消全部排图，可点击图位或排图按钮继续' : '当前没有待取消的排图');
+  });
   jQuery('#sl_comp_auto').on('click', function (e) { e.stopPropagation(); settings.autoGen = settings.autoGen === 1 ? 0 : 1; saveSettings(); refreshCompactBar(); });
   _compactTimer = setInterval(refreshCompactBar, 3000); refreshCompactBar();
 }

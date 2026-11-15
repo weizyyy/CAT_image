@@ -486,7 +486,7 @@ export function bindArchiveEvents(b) {
         toast('success', cn + ' · ' + (PORTRAIT_VIEW_CN[view] || view) + ' 立绘生成完毕');
       }
       btn.prop('disabled', false).text(oldTxt || '生成立绘');
-    }, function () { toast('error', '立绘生成失败'); btn.prop('disabled', false).text(oldTxt || '生成立绘'); });
+    }, function (error) { if (error?.name !== 'AbortError') toast('error', '立绘生成失败'); btn.prop('disabled', false).text(oldTxt || '生成立绘'); });
   });
   b.off('click', '.sl_edit_btn').on('click', '.sl_edit_btn', function () { b.find('.sl_edit_box[data-char="' + jQuery(this).data('char') + '"]').toggle(); });
   b.off('click', '.sl_dyn_edit_btn').on('click', '.sl_dyn_edit_btn', function () { b.find('.sl_dyn_edit_box[data-char="' + jQuery(this).data('char') + '"]').toggle(); });

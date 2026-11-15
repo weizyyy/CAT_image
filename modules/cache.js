@@ -55,7 +55,7 @@ export function cleanOldCache() {
 }
 
 // 上传图片到 ST 本地存储
-export async function uploadImageToST(dataUrl) {
+export async function uploadImageToST(dataUrl, signal) {
     var match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
     if (!match) throw new Error('无效的 Data URL');
     var format = match[1], raw = match[2];
@@ -63,7 +63,7 @@ export async function uploadImageToST(dataUrl) {
     var response = await fetch('/api/images/upload', {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, getSTHeaders()),
-        body: JSON.stringify({ image: raw, format: format, filename: filename })
+        body: JSON.stringify({ image: raw, format: format, filename: filename }), signal
     });
     if (!response.ok) { var text = await response.text(); throw new Error(text.slice(0, 200)); }
     var data = await response.json();

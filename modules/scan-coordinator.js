@@ -1,8 +1,8 @@
 // One serialized pipeline for chat and frontend sources. A running revision can
 // never overwrite a newer revision. Failed revisions have bounded retries.
 export class ScanCoordinator {
-    constructor({ run, commit, onError = () => {} }) {
-        Object.assign(this, { run, commit, onError });
+    constructor({ run, commit, onError = () => {}, onCancel = () => {} }) {
+        Object.assign(this, { run, commit, onError, onCancel });
         this.jobs = new Map();
         this.running = false;
     }
@@ -35,12 +35,12 @@ export class ScanCoordinator {
                 job.state = 'running'; job.attempts++;
                 try {
                     const result = await this.run(job.snapshot, current, job.controller.signal);
-                    if (!current()) { job.state = 'stale'; continue; }
+                    if (!current()) { job.state = job.cancelled ? 'cancelled' : 'stale'; continue; }
                     if (!result?.ok) throw new Error('分析未完成，可在下一次检查时重试');
                     await this.commit(job.snapshot, result);
                     job.state = 'done';
                 } catch (error) {
-                    job.state = current() ? 'failed' : 'stale';
+                    job.state = current() ? 'failed' : job.cancelled ? 'cancelled' : 'stale';
                     job.retryAt = Date.now() + 10000 * job.attempts;
                     if (current()) this.onError(error, job.snapshot);
                 }
@@ -55,5 +55,17 @@ export class ScanCoordinator {
     clear() {
         for (const job of this.jobs.values()) { job.cancelled = true; job.controller?.abort(); }
         this.jobs.clear();
+    }
+    cancelPending(snapshots = []) {
+        for (const snapshot of snapshots) if (!this.jobs.has(snapshot.key))
+            this.jobs.set(snapshot.key, { snapshot, attempts: 0, state: 'queued' });
+        let count = 0;
+        for (const job of this.jobs.values()) {
+            if (!['running', 'queued', 'failed'].includes(job.state)) continue;
+            job.cancelled = true; job.state = 'cancelled'; job.controller?.abort(); count++;
+            this.onCancel(job.snapshot);
+        }
+        // Keep these records: polling must not restart work the user cancelled.
+        return count;
     }
 }

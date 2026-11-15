@@ -1,7 +1,7 @@
 // ── SillyImage Lab 生图排队 ──
 import { slLog } from './log.js';
 import { settings, COLORS, getSTContext, getActiveMode, isEnglishMode, escapeHtml } from './settings.js';
-import { imgCacheSet, imgCacheSetById } from './cache.js';
+import { imgCacheGetById, imgCacheSetById } from './cache.js';
 import { generateImage } from './comfyui.js';
 import { cleanAnimePrompt } from './text-utils.js';
 import { resolveFacePrompt, getCharacterName, getChatId } from './pipeline/profile.js';
@@ -18,14 +18,39 @@ function _genOwner() {
 var imageQueue = [];
 var queueRunning = false;
 const pendingBlocks = new Map();
+const cancelledAutoBlocks = new Set();
+let activeTask;
+
+function liveButton(task) {
+    if (!task.btn || !task.blockId) return task.btn;
+    const live = Array.from(task.btn[0]?.ownerDocument.querySelectorAll('.sl_img_btn') || []).find(n => n.dataset.slid === task.blockId);
+    if (live) task.btn = jQuery(live);
+    return task.btn;
+}
+function resetButton(task) {
+    const btn = liveButton(task);
+    if (btn) btn.text(imgCacheGetById(task.blockId) ? '↻ 重新生成' : '✦ 生成图片')
+        .css({ background: COLORS.card, color: COLORS.text });
+}
+function cancelTask(task) {
+    if (task.cancelled) return;
+    task.cancelled = true;
+    if (task.blockId) cancelledAutoBlocks.add(task.blockId);
+    task.controller?.abort();
+    resetButton(task);
+    if (task.blockId) pendingBlocks.delete(task.blockId);
+    try { task.custom?.onFail?.(new DOMException('已取消排图', 'AbortError')); } catch (e) { slLog('取消回调失败: ' + e.message); }
+}
 
 async function processImageQueue() {
     if (queueRunning || !imageQueue.length) return;
     queueRunning = true;
     var task = imageQueue.shift();
+    activeTask = task; task.controller = new AbortController();
+    liveButton(task);
     if (!task.custom && (!task.btn[0]?.isConnected || settings.pluginOn === false)) {
         pendingBlocks.delete(task.blockId);
-        queueRunning = false;
+        queueRunning = false; activeTask = null;
         return processImageQueue();
     }
     slLog('排队处理:', task.id, '剩余:', imageQueue.length);
@@ -34,7 +59,8 @@ async function processImageQueue() {
         var prompt = task.prompt;
         // Anime 模式强制清理中文（删空则保留原文，防空提示词）
         if (isEnglishMode()) { var _clean = cleanAnimePrompt(prompt); if (_clean) prompt = _clean; }
-        var result = await generateImage(workflow, prompt);
+        var result = await generateImage(workflow, prompt, { signal: task.controller.signal });
+        if (task.cancelled) return;
         // v1.21 图库：每张产出的图都记一笔（独立账本，不受 msgMap 50 条上限影响）
         try {
             galleryAdd(result.url, {
@@ -49,10 +75,7 @@ async function processImageQueue() {
         if (_slid) imgCacheSetById(_slid, result.url);
         // A message may be redrawn during generation. Update the live button for
         // this exact block ID, never another image with the same prompt.
-        if (!task.custom && task.btn[0]?.ownerDocument) {
-            const live = Array.from(task.btn[0].ownerDocument.querySelectorAll('.sl_img_btn')).find(n => n.dataset.slid === task.blockId);
-            if (live) task.btn = jQuery(live);
-        }
+        liveButton(task);
         if (task.custom) {
             // [Fix] 通用任务（如生成立绘）：由调用方回调处理结果
             task.custom.onSuccess(result);
@@ -73,6 +96,7 @@ async function processImageQueue() {
             slLog('排队完成:', task.id);
         }
     } catch (e) {
+        if (task.cancelled) return;
         if (task.custom) {
             if (task.custom.onFail) task.custom.onFail(e);
             slLog('排队失败(任务):', task.id, e.message);
@@ -80,21 +104,25 @@ async function processImageQueue() {
             task.btn.text('\u2715 \u91cd\u8bd5').css({ background: COLORS.red, color: '#fff' });
             slLog('排队失败:', task.id, e.message);
         }
+    } finally {
+        if (pendingBlocks.get(task.blockId) === task) pendingBlocks.delete(task.blockId);
+        queueRunning = false; activeTask = null;
+        void processImageQueue();
     }
-    pendingBlocks.delete(task.blockId);
-    queueRunning = false;
-    processImageQueue();
 }
 
-export function enqueueGen(btn, prompt) {
+export function enqueueGen(btn, prompt, { automatic = false } = {}) {
     const blockId = btn.attr('data-slid');
-    if (blockId && pendingBlocks.has(blockId)) { btn.text('排队中\u2026'); return; }
-    if (blockId) pendingBlocks.set(blockId, true);
+    if (automatic && blockId && cancelledAutoBlocks.has(blockId)) return;
+    if (blockId && pendingBlocks.has(blockId)) { pendingBlocks.get(blockId).btn = btn; btn.text('排队中\u2026'); return; }
+    if (blockId) cancelledAutoBlocks.delete(blockId);
     var id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
     btn.text('排队中\u2026').css({ background: COLORS.orange, color: '#fff' }).off('click');
     var _own = _genOwner(), _scene = '';
     try { _scene = String(btn.closest('.sl_img_block').find('div').first().text() || '').replace(/^🖼️\s*/, '').slice(0, 60); } catch (eS) {}
-    imageQueue.push({ id: id, btn: btn, blockId, prompt: prompt, workflow: settings.cWf, scene: _scene, charName: _own.charName, chatKey: _own.chatKey });
+    const task = { id: id, btn: btn, blockId, prompt: prompt, workflow: settings.cWf, scene: _scene, charName: _own.charName, chatKey: _own.chatKey };
+    if (blockId) pendingBlocks.set(blockId, task);
+    imageQueue.push(task);
     slLog('入队:', id, '队列长度:', imageQueue.length);
     processImageQueue();
 }
@@ -111,12 +139,13 @@ export function getQueueLength() {
     return imageQueue.length;
 }
 
+export function getQueueStatus() { return { queued: imageQueue.length, running: !!activeTask && !activeTask.cancelled }; }
+
 export function clearQueue() {
-    for (const task of imageQueue) {
-        pendingBlocks.delete(task.blockId);
-        if (task.btn) task.btn.text('✦ 生成图片');
-        if (task.custom?.onFail) task.custom.onFail(new Error('队列已清空'));
-    }
+    const tasks = imageQueue;
     imageQueue = [];
-    slLog('排队已清空');
+    if (activeTask && !activeTask.cancelled) tasks.unshift(activeTask);
+    for (const task of tasks) cancelTask(task);
+    slLog('已取消全部排图: ' + tasks.length);
+    return tasks.length;
 }

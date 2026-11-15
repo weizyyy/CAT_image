@@ -139,3 +139,63 @@ test('failed slots never borrow another prompt; successful slots are reused on r
     await runRosterPipeline(source, 'partial', { results });
     assert.equal(calls, 5); assert.equal(results.size, 1);
 });
+
+test('editing one marker retains other prompts, images and IDs, including after reload and v2 migration', async () => {
+    const { imgCacheSetById } = await import('../modules/cache.js');
+    for (const legacy of [false, true]) {
+        settings.msgMap = {}; settings.msgMapTs = {}; let calls = 0;
+        fetch = async () => response('编辑回归提示词' + ++calls);
+        const source = '前[img:相同]中[img:相同]后[img:尾图]';
+        show(source); scanner.startPolling();
+        try {
+            await scanner.runAuxImageScan(jQuery('.mes_text'));
+            await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 3 && !scanner.scanCoordinator.running);
+            const original = Array.from(document.querySelectorAll('.sl_img_btn'), b => ({ id: b.dataset.slid, prompt: b.dataset.prompt }));
+            imgCacheSetById(original[0].id, '/first.png'); imgCacheSetById(original[2].id, '/third.png');
+            if (legacy) {
+                const key = scanner.readSnapshot(0).key, record = JSON.parse(settings.msgMap[key]);
+                settings.msgMap[key] = JSON.stringify({ version: 2, source, swipe: 0, enhanced: record.enhanced });
+            }
+            scanner.stopPolling(); scanner.startPolling(); // No in-memory revision map survives.
+            ctx.chat[0].mes = source.replace('中[img:相同]', '中[img:新图]'); document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+            await scanner.runAuxImageScan(jQuery('.mes_text'));
+            await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 3 && !scanner.scanCoordinator.running);
+            const updated = Array.from(document.querySelectorAll('.sl_img_btn'));
+            assert.equal(calls, 4); assert.equal(updated[0].dataset.slid, original[0].id); assert.equal(updated[2].dataset.slid, original[2].id);
+            assert.equal(updated[0].dataset.prompt, original[0].prompt); assert.equal(updated[2].dataset.prompt, original[2].prompt);
+            assert.notEqual(updated[1].dataset.slid, original[1].id);
+            assert.deepEqual(Array.from(document.querySelectorAll('.sl_img_block img'), i => i.getAttribute('src')), ['/first.png', '/third.png']);
+            ctx.chat[0].mes += '仅改正文'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+            await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
+            assert.equal(calls, 4);
+        } finally { scanner.stopPolling(); }
+    }
+});
+
+test('cancel image queue aborts active request, drops waiting/portrait tasks and requires explicit resume', async () => {
+    const { enqueueGen, enqueueTask, clearQueue, getQueueStatus } = await import('../modules/queue.js');
+    const { renderEnhancedLite, setEnqueueGen } = await import('../modules/render.js');
+    const { imgCacheGetById } = await import('../modules/cache.js');
+    show('[img:甲][img:乙]'); settings.autoGen = 1; setEnqueueGen(enqueueGen);
+    let requests = 0, release, abortSignal, portraitError;
+    fetch = async (url, options) => {
+        if (String(url).endsWith('/generate')) {
+            requests++; abortSignal = options.signal;
+            return new Promise(resolve => release = () => resolve({ ok: true, json: async () => ({ data: 'AA==' }) }));
+        }
+        assert.fail('a cancelled result must not be uploaded');
+    };
+    const blocks = '[image:甲]【提示词】甲画面【/提示词】[image:乙]【提示词】乙画面【/提示词】';
+    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes);
+    enqueueTask('portrait-cancel', '立绘', () => assert.fail('cancelled portrait succeeded'), error => portraitError = error);
+    assert.deepEqual(getQueueStatus(), { queued: 2, running: true });
+    assert.equal(clearQueue(), 3); assert.equal(abortSignal.aborted, true); assert.equal(portraitError.name, 'AbortError');
+    // Simulate a server ignoring the disconnect and returning late.
+    release(); await waitUntil(() => !getQueueStatus().running);
+    await new Promise(r => setTimeout(r, 0));
+    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes);
+    assert.equal(requests, 1); assert.equal(imgCacheGetById('cancel-image-test#0'), undefined);
+    assert.equal(document.querySelectorAll('.sl_img_block img').length, 0);
+    enqueueGen(jQuery('.sl_img_btn').first(), '手动继续'); assert.equal(requests, 2);
+    clearQueue(); release(); await new Promise(r => setTimeout(r, 0)); settings.autoGen = 0;
+});

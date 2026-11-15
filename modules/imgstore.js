@@ -76,12 +76,13 @@ export function imgStoreInit() {
         return migrate.then(function () {
             return new Promise(function (res) {
                 try {
-                    var out = {}, n = 0;
+                    var out = {}, timestamps = {}, n = 0;
                     var req = _reader(db).openCursor();
                     req.onsuccess = function () {
                         var c = req.result;
-                        if (!c) return res({ ok: true, loaded: n, data: out });
+                        if (!c) return res({ ok: true, loaded: n, data: out, timestamps });
                         out[c.key] = (c.value && c.value.text) || '';
+                        timestamps[c.key] = c.value?.ts || 0;
                         n++;
                         c.continue();
                     };
@@ -91,7 +92,7 @@ export function imgStoreInit() {
         }).then(function (r) {
             settings.msgMap = Object.assign({}, settings.msgMap || {}, r.data || {});
             settings.msgMapTs = settings.msgMapTs || {};
-            for (var k in (r.data || {})) if (!settings.msgMapTs[k]) settings.msgMapTs[k] = Date.now();
+            for (var k in (r.data || {})) settings.msgMapTs[k] = r.timestamps?.[k] || settings.msgMapTs[k] || 0;
             _ready = true;
             if (legacyKeys.length) slLog('图片仓迁入旧缓存 ' + legacyKeys.length + ' 条');
             slLog('图片仓就绪：历史图缓存 ' + (r.loaded || 0) + ' 条已装回内存（不再受 50 条上限约束）');

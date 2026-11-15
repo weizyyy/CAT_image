@@ -52,7 +52,7 @@ bindImageButtonsGlobal();
 // 排队引用由 queue.js / index.js 提供，这里先声明
 var _enqueueGen = null;
 export function setEnqueueGen(fn) { _enqueueGen = fn; }
-function enqueueGen(btn, prompt) { if (_enqueueGen) _enqueueGen(btn, prompt); else { slErr('enqueueGen 未初始化'); } }
+function enqueueGen(btn, prompt, options) { if (_enqueueGen) _enqueueGen(btn, prompt, options); else { slErr('enqueueGen 未初始化'); } }
 
 // ── 恢复图片块（编辑后） ──
 var _getChatId, _getSTContext, _restoringBlocks = false; // 从外部注入的函数
@@ -66,7 +66,7 @@ export function restoreImageBlocks() {
 // ══════════════════════════════
 // ── v2.4 轻量渲染（酒馆AI模式）：只替换 [img:…] 占位符为图卡，正文/状态栏原文 HTML 全部保留 ──
 // 修复：旧 renderEnhanced 全量重建（escape+<br>）→ 文字挤成一坨、原文 HTML 结构（状态栏等）丢失
-export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex = 0) {
+export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex = 0, blockIds) {
     var blocks = [];
     if (!enhancedText) return blocks;
     var re = /\[image:\s*([\s\S]*?)\]/g;
@@ -81,7 +81,7 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
         var fullPrompt = resolveFacePrompt(promptContent || scene);
         if (isEnglishMode()) { var _c = cleanAnimePrompt(fullPrompt); if (_c) fullPrompt = _c; }
         // [Fix] 旧缓存 key 兼容（644d40c 前缓存 key=scene+', '+prompt），否则刷新后需重新生成
-        var bid = blockKey ? blockKey + '#' + blockIdx : '';
+        var bid = blockIds?.[blockIdx] || (blockKey ? blockKey + '#' + blockIdx : '');
         blockIdx++;
         blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, (bid ? imgCacheGetById(bid) : imgCacheGet(fullPrompt)), bid) });
     }
@@ -98,7 +98,7 @@ export function renderEnhancedLite(element, enhancedText, blockKey, sourceText) 
     if (blocks) updateSlots(root, blockKey, blocks);
     if (blocks && settings.autoGen === 1 && settings.pluginOn !== false) {
         for (const btn of root.querySelectorAll('.sl_img_btn')) {
-            if (btn.textContent.includes('生成图片')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'));
+            if (btn.textContent.includes('生成图片')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'), { automatic: true });
         }
     }
     return Array.from(root.querySelectorAll('[data-sl-slot]')).some(n => n.dataset.slSlot.startsWith(blockKey + '#'));
