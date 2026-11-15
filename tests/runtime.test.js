@@ -124,3 +124,18 @@ test('ComfyUI request forwards the exact template except prompt and zero seed, w
     assert.ok(sent.includes('18446744073709551615')); assert.ok(sent.includes('keep %negative_prompt%'));
     assert.ok(wf.includes('"noise_seed":0'));
 });
+
+test('failed slots never borrow another prompt; successful slots are reused on retry', async () => {
+    const results = new Map(); let calls = 0;
+    fetch = async (_url, options) => {
+        calls++;
+        const user = JSON.parse(options.body).messages.find(m => m.role === 'user').content;
+        return response(user.includes('失败场景') ? '（无）' : '成功场景独立提示词');
+    };
+    const source = '[img:成功场景][img:失败场景]';
+    const first = await runRosterPipeline(source, 'partial', { results });
+    assert.equal(first.ok, false); assert.equal(first.partial, true); assert.equal(results.size, 1);
+    assert.ok(first.enhanced.includes('[img:失败场景]')); assert.equal(calls, 3);
+    await runRosterPipeline(source, 'partial', { results });
+    assert.equal(calls, 5); assert.equal(results.size, 1);
+});

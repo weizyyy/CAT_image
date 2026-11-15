@@ -195,92 +195,6 @@ function buildPurgeMessages() {
 // ── v1.27.0 截断续写（帧内）──
 // 与"整轮重发"的区别：重发要再烧一次完整预算（含思考），而思考在第一轮已经做完了。
 // 续写一律**关思考** —— 规划已完成，续写阶段的 reasoning 是纯浪费，还会再挤占一次预算。
-var CONTINUE_MAX = 2;
-
-var CONTINUE_NOTE = '【系统续写】你上一轮被**输出长度上限截断**了（finish=length）。\n'
-    + '从断点接着写：只补第 %FROM% 到第 %TO% 条提示词（共需 %TO% 条）。\n'
-    + '· 不要重复 ---PROFILE--- 段（已存档，勿重发）\n'
-    + '· 不要重复已经给出的条目\n'
-    + '· 不要重新开头、不写前言、不解释为什么被截断\n'
-    + '· 直接输出条目本身，一行一条';
-
-// 把输出裁到前 n 条（截断时最后一条可能是半截，必须丢掉重写，不能当成品）
-function _trimTo(out, n) {
-    var imgs = parseRosterImages(out) || [];
-    if (imgs.length <= n) return String(out || '');
-    var keep = imgs.slice(0, n);
-    var oldS = String(out || '');
-    var proM = oldS.match(/---\s*PROFILE\s*---[\s\S]*?(?:---\s*END\s*---|(?=---\s*IMAGES\s*---)|$)/);
-    var profileChunk = (proM ? proM[0] : '---PROFILE---\n{}\n---END---').trim();
-    if (!keep.length) return profileChunk;
-    return profileChunk + '\n\n---IMAGES---\n'
-        + keep.map(function (p, k) { return (k + 1) + '. ' + p; }).join('\n')
-        + '\n---END---';
-}
-
-// 只在长度几乎相等（≥90%）时才用包含关系判重。
-// 阈值放宽会把"截断的半截"和"完整版"判成同一条 —— 半截吃掉完整版，等于白续一次。
-// 半截已经在 _trimTo 里被丢掉，所以这里只需要处理"续写把已给出的完整条目又写一遍"。
-function _isDup(a, b) {
-    var x = String(a || '').trim(), y = String(b || '').trim();
-    if (!x || !y) return true;
-    if (x === y) return true;
-    var lo = Math.min(x.length, y.length), hi = Math.max(x.length, y.length);
-    if (lo / hi <= 0.9) return false;
-    return x.indexOf(y) >= 0 || y.indexOf(x) >= 0;
-}
-
-// 续写结果合并：保留原 PROFILE 段，把新增条目并进 ---IMAGES---
-function _mergePartial(oldOut, newPart) {
-    var oldS = String(oldOut || '');
-    var newS = String(newPart || '');
-    if (!newS.trim()) return oldS;
-
-    var proM = oldS.match(/---\s*PROFILE\s*---[\s\S]*?(?:---\s*END\s*---|(?=---\s*IMAGES\s*---)|$)/);
-    var profileChunk = (proM ? proM[0] : '---PROFILE---\n{}\n---END---').trim();
-
-    var oldImgs = parseRosterImages(oldS) || [];
-
-    // 续写可能自带 ---IMAGES--- 标记（模型习惯），也可能只给裸条目
-    var newImgs = parseRosterImages(newS) || [];
-    if (!newImgs.length) {
-        newImgs = newS.split(/\n/)
-            .map(function (l) { return l.replace(/^(?:\d+[.、)]|[-•·])\s*/, '').trim(); })
-            .filter(function (l) { return l && l.length > 20 && !/^---/.test(l) && !/^【/.test(l); });
-    }
-
-    var merged = oldImgs.slice();
-    for (var i = 0; i < newImgs.length; i++) {
-        var dup = false;
-        for (var j = 0; j < merged.length; j++) {
-            if (_isDup(merged[j], newImgs[i])) { dup = true; break; }
-        }
-        if (!dup) merged.push(newImgs[i]);
-    }
-
-    // 原有 CHECK 段原样保留（有就带上）
-    var ckM = oldS.match(/---\s*CHECK\s*---[\s\S]*$/);
-    var ck = ckM ? '\n\n' + ckM[0].trim() : '';
-
-    return profileChunk
-        + '\n\n---IMAGES---\n'
-        + merged.map(function (p, k) { return (k + 1) + '. ' + p; }).join('\n')
-        + '\n---END---'
-        + ck;
-}
-
-async function _continueOutput(baseMsgs, partial, fromN, toN, callApi = auxApiCallRaw) {
-    var note = CONTINUE_NOTE.replace(/%FROM%/g, String(fromN)).replace(/%TO%/g, String(toN));
-    return await callApi(
-        baseMsgs.concat([
-            { role: 'assistant', content: String(partial || '') },
-            { role: 'user', content: note }
-        ]),
-        null, 16384, 0.25, undefined,
-        'off'   // ★ 续写一律关思考
-    );
-}
-
 // ── 用户消息：人物表 + 占位符（不发送正文——导演模式插件AI 只做"档案+酒馆AI要点 → 提示词"的编辑） ──
 function buildRosterUserContent(placeholders, wardrobeInfo) {
     var lines = [];
@@ -696,35 +610,6 @@ async function runSinglePipeline(bodyText, mesId, options) {
         slLog('首调: finish=' + _res.finish + ', content=' + _res.content.length + ' 字, reasoning=' + _res.reasoningLen + ' 字'
             + ', system 分层=' + sysMsgs.length + ' 条');
 
-        // 帧内续写：只在「被长度上限砍断」时触发。重发整轮要再烧一次完整预算（含 thinking），
-        // 而思考在第一轮已经完成 —— 续写只补正文，思考一律关掉。
-        var _cont = 0;
-        while (_res.truncated && _cont < CONTINUE_MAX) {
-            var _got = (parseRosterImages(_res.content, 1) || []).length;
-            if (_got >= expectN) break;
-            // 截断时最后一条可能是半截 → 丢掉它，从它的位置重写（半截不能当成品）
-            var _safe = Math.max(0, _got - 1);
-            slErr('⚠️ 输出被截断(finish=length, reasoning=' + _res.reasoningLen + ' 字) → 帧内续写 #'
-                + (_cont + 1) + '：已有 ' + _got + ' 条（保留 ' + _safe + ' 条），需 ' + expectN + ' 条');
-            var _trimmed = _trimTo(_res.content, _safe);
-            var _c = await _continueOutput(baseMsgs, _trimmed, _safe + 1, expectN, callApi);
-            if (!_c || !String(_c.content || '').trim()) {
-                slErr('⛔ 续写返回空 → 停在 ' + _safe + '/' + expectN + ' 条');
-                _res = { content: _trimmed, finish: _res.finish, reasoningLen: _res.reasoningLen, truncated: true };
-                break;
-            }
-            _res = {
-                content: _mergePartial(_trimmed, _c.content),
-                finish: _c.finish,
-                reasoningLen: _c.reasoningLen,
-                truncated: _c.truncated
-            };
-            _cont++;
-        }
-        if (_cont) {
-            slLog('续写结束: ' + _cont + ' 次 → ' + (parseRosterImages(_res.content, 1) || []).length + '/' + expectN
-                + ' 条' + (_res.truncated ? '（仍被截断）' : ''));
-        }
         var output = _res.content;
         var _meta = { finish: _res.finish, truncated: _res.truncated, reasoningLen: _res.reasoningLen };
         // v1.13.1：失败重试（兜底指令只在重试时下发 —— system prompt 里不留任何"可以省略/可以软化"的退路）
@@ -766,9 +651,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
                         + '请保留你上一轮的 ---IMAGES--- 内容，补出 ---PROFILE--- 段（{"persons":{…}}；每人必须带 anchor，zit 模式另带 anchor_zh），'
                         + '然后重新完整输出 ---PROFILE--- 与 ---IMAGES--- 两段。';
                 } else if (_fail === 'truncated') {
-                    _retryNote = '【系统重试】你上一轮**被输出长度上限截断**（finish=length），只写完 ' + _gotN + ' 条。\n'
-                        + '请保留已给出的内容，从第 ' + (_gotN + 1) + ' 条接着写，' + _need + '。\n'
-                        + '不要重复 ---PROFILE--- 段，不要重复已经给出的条目，不要重新开头。';
+                    _retryNote = '【系统重试】上一条回复被长度限制截断。请重新完整输出本张图的 ---PROFILE--- 和 ---IMAGES---，只写本张图的一条完整提示词，不要接着写第2条。';
                 } else {   // format
                     _retryNote = '【系统重试】你上一轮的内容方向是对的，但**没有按格式输出**（缺少 ---PROFILE--- / ---IMAGES--- 的分段标记）。\n'
                         + '请保留你上一轮的画面内容，**改成规定的两段式格式重新输出**：---PROFILE--- 段 + ---IMAGES--- 段'
@@ -816,14 +699,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
                 } catch (eLN2) { /* 复检失败不影响主流程 */ }
             }
             if (_fail2) {
-                // [Fix v1.13.3] 重试也失败时**不要 0 图**：取两次里条数多的那次继续，
-                // 缺的那几条交给 fillPlaceholders 的「锚点+场景」兜底（脸是对的，只是描述薄）。
-                // 0 图对用户来说是最差结果 —— 比"描述薄一点"糟糕得多。
-                var _n1 = 0, _n2 = 0;
-                try { _n1 = _beforeRetry ? (parseRosterImages(_beforeRetry, 1) || []).length : 0; } catch (eN1) {}
-                try { _n2 = (parseRosterImages(output, 1) || []).length; } catch (eN2) {}
-                if (_n1 >= _n2 && _n1 > 0) { output = _beforeRetry; _n2 = _n1; }
-                slErr('⚠️ 重试后仍不合格(' + _fail2 + ') → 用已拿到的 ' + _n2 + '/' + expectN + ' 条继续；缺失的走【锚点+场景】兜底（本轮不是 0 图）');
+                throw new Error('本图提示词仍不合格: ' + _fail2);
             } else {
                 slLog('重试成功: ' + output.length + ' 字, ' + (parseRosterImages(output, 1) || []).length + ' 条');
             }

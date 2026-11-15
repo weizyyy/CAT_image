@@ -17,7 +17,7 @@ Krea 2 是通用基础模型，靠**一段连贯的英文自然语言**理解画
   改写成日常英文：`a single young woman` / `a waist-up shot` / `downturned eyes` / `single-fold eyelids`
 - ⛔ 禁止权重语法 `(word:1.2)`、禁止 `score_*`
 - ⛔ 禁止画质词 `masterpiece` `best quality` `8k` `ultra detailed` `highly detailed`
-  —— 插件会在提示词前统一加质量前缀，正文里再写一遍只是挤占真正描述画面的篇幅
+  —— 插件会在提示词前按已选预设统一拼接画风，正文里再写一遍只是挤占真正描述画面的篇幅
 - ⛔ 禁止摄影数值：`f/1.8` `ISO 400` `5600K` `50mm` `85mm`
   改写成看得见的结果：`a shallow depth of field` / `warm evening light`
   （`macro lens` `35mm film grain` `shallow depth of field` 这类**语言化的镜头 / 质感词**可以用）
