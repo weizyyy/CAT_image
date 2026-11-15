@@ -218,7 +218,8 @@ test('H3 uses its own English overlay, preserves quoted lettering end to end, an
         const { getPrompt } = await import('../prompts/loader.js');
         assert.ok(system.includes(getPrompt('pipeline/minimax-h3-image-overlay.txt').trim()));
         assert.equal(system.includes('【模式：Krea 2'), false);
-        assert.ok(request.messages.at(-1).content.includes('slightly taller-than-wide'));
+        assert.ok(system.includes('slightly taller-than-wide'));
+        assert.equal(request.messages.at(-1).content.includes('slightly taller-than-wide'), false);
         const block = extractImgBlocksFromEnhanced(result.enhanced, 'h3')[0];
         assert.ok(block.prompt.includes('"Tester的茶铺"'));
         const cleaned = cleanPromptForMode(block.prompt, settings.modelType);
@@ -282,4 +283,50 @@ test('switching to H3 still restores historical images from another mode without
         assert.equal(calls, 1); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
         assert.equal(document.querySelector('.sl_img_block img').getAttribute('src'), '/history.png');
     } finally { scanner.stopPolling(); settings.modelType = savedMode; }
+});
+
+test('assembled requests keep shared policies, model overlays and per-call records in their own layers', async () => {
+    const { MODES } = await import('../modules/settings.js');
+    const { getPrompt } = await import('../prompts/loader.js');
+    const { upsertPerson, setEnglishAnchor } = await import('../modules/roster.js');
+    const { upsertEntry } = await import('../modules/wardrobe.js');
+    const saved = { mode: settings.modelType, layered: settings.slPurgeLayered, roster: settings.roster, wardrobe: settings.wardrobe };
+    const overlayPaths = { zit: 'zit', anima: 'anima', anime: 'anime', anime_tag: 'anime-tag', krea2: 'krea2', minimax_h3_image: 'minimax-h3-image' };
+    const anchor = 'race:LayerTestOrigin | age:forty-two | nose:LayerTestNose | skin_tone:LayerTestTone';
+    const detail = 'LayerTestBlue cotton jacket, LayerTestRound collar';
+    const source = '[img:递出包裹|人物:LayerActor（层次测试）|造型:服装=LayerOutfit|要点:腰部以上，左手托住包裹]';
+    let request;
+    try {
+        settings.roster = {}; settings.wardrobe = {}; settings.modelType = 'minimax_h3_image';
+        upsertPerson('LayerActor', '层次测试', '本轮档案原文', 'anchor');
+        setEnglishAnchor('LayerActor', '层次测试', anchor);
+        upsertEntry('服装', 'LayerOutfit', detail, 'expanded');
+        fetch = async (_url, options) => { request = JSON.parse(options.body); return response('A waist-up view shows an adult supporting a parcel with the left hand.'); };
+        for (const mode of MODES) for (const layered of [true, false]) {
+            settings.modelType = mode.id; settings.slPurgeLayered = layered;
+            const result = await runRosterPipeline(source, 'layer-audit');
+            assert.equal(result.ok, true, mode.id);
+            const systems = request.messages.filter(m => m.role === 'system'), system = systems.map(m => m.content).join('\n\n');
+            const user = request.messages.at(-1).content;
+            const overlay = getPrompt('pipeline/' + overlayPaths[mode.id] + '-overlay.txt').trim();
+            const wardrobe = getPrompt('wardrobe-expand.txt').trim();
+            assert.equal(system.split(overlay).length - 1, 1, 'one selected overlay: ' + mode.id);
+            assert.ok(system.indexOf('## 造型库具象化') < system.indexOf(wardrobe));
+            assert.ok(system.indexOf(wardrobe) < system.indexOf(overlay));
+            assert.equal(system.includes(getPrompt('static-profile/system.txt').trim()), false, 'card scanning is a separate request');
+            assert.equal(system.includes(getPrompt('main-llm-instruction.txt').trim()), false, 'main-model instructions are a separate stage');
+            if (layered) assert.ok(systems.some(m => m.content === overlay)); else assert.equal(systems.length, 1);
+            assert.ok(user.includes('【人物档案】') && user.includes(anchor));
+            assert.ok(user.includes('【造型库】') && user.includes(detail));
+            assert.equal(system.includes(anchor) || system.includes(detail), false, 'records belong to the user payload');
+            assert.equal(user.includes('只用光学与肤质词') || user.includes('重写四条 portrait'), false);
+            if (mode.id === 'minimax_h3_image') {
+                assert.doesNotMatch(overlay, /【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/);
+                assert.equal(user.includes('【MiniMax-H3-Image】') || user.includes('标签区'), false);
+            }
+        }
+    } finally {
+        settings.modelType = saved.mode; settings.slPurgeLayered = saved.layered;
+        settings.roster = saved.roster; settings.wardrobe = saved.wardrobe;
+    }
 });

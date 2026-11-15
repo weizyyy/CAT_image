@@ -543,33 +543,10 @@ export function rosterDataTextFor(nameList) {
                         nmLines.push('   ✅ 已解析锚点' + (_m === 'zit' ? '（中文呈现 · 逐字复用）' : '（英文权威锚点 · 英文模式共用 · 逐字复用）')
                             + '（**逐字写进提示词，禁止改写、禁止同义替换**）：' + _atom);
                         nmLines.push('   ⚠️ 原始锚点（主模型原文，**只用于对照是否缺维度，不要照抄**）：' + (e.base || e.appearance || '').slice(0, 200));
-                        // v1.15.0：锚点里缺【美学基调 aura】→ 点名要回来（老档案都是 v1.14 前建的，全都没有）
-                        // 没有 aura 的后果：皮相只能按模型先验补 = 画出来是"真实路人脸"（丑的根源）
+                        // Only report missing data; shared system rules define how to fill it.
                         if (!/(^|\|\s*)(aura|气质)\s*[:：]/i.test(String(_atom))) {
-                            if (_m === 'minimax_h3_image') {
-                                nmLines.push('   ⭐ 这位的锚点还缺 aura：本轮按种子补美学方向，例如 cool and restrained / warm and inviting；'
-                                    + '不写肤色、肤质、气色、场景光线或五官改造词。保留旧 anchor 全部已有值，追加 aura 后回传完整 anchor；'
-                                    + '提示词在人物身份句中自然复用该方向，不为补调性重写脸。');
-                            } else nmLines.push('   ⭐ 这位的锚点里还缺【美学基调 aura】（v1.15 新增 · 必须是锚点第一个维度）—— 本轮请按种子补上：'
-                                + '取「她美在哪 / 皮相往哪个方向」，**只用光学与肤质词**（如 aura:natural supple skin, healthy complexion, soft even skin），'
-                                + '⛔ 严禁 refined features / delicate features / 骨相精致 这类骨相词（会让五官偏移），'
-                                + '并以「**旧文原样 + aura:…**」的形式回传 anchor，**其余维度一个字不许改**。'
-                                + '没有 aura = 皮相交给模型先验 = 画出来是真实路人脸。');
+                            nmLines.push('   ⚠️ 待补维度：aura。');
                         }
-                        // v1.15.1：立绘还是旧版（含丑化词）→ 点名要求重写（立绘是缓存，改 prompt 不会自动更新）
-                        (function () {
-                            try {
-                                if (_m === 'minimax_h3_image') return; // Existing portraits are frozen reference prompts.
-                                var _pp = e.portraitPrompts;
-                                if (!_pp) return;
-                                var _t = String(_pp.front || '') + String(_pp.left || '') + String(_pp.right || '') + String(_pp.back || '');
-                                if (!_t) return;
-                                if (/粗糙|毛孔|晒斑|晒伤|干裂|起皮|血丝|痘印|指甲剪到肉里/.test(_t)) {
-                                    nmLines.push('   ⭐ 这位的【立绘】还是旧版（含「粗糙/毛孔/晒斑」这类丑化词）—— 本轮请按 v1.15.1 重写四条 portrait '
-                                        + '并通过 ---PROFILE--- 回传：皮相改用 aura 承载（通透/光泽/血色），骨相逐字复用锚点、⛔ 不许升档。');
-                                }
-                            } catch (e3) {}
-                        })();
                         // zit 模式下若英文权威锚点还缺着：顺手让它补一份（英文锚点各英文模式共用，缺了英文模式画不了立绘）
                         if (_m === 'zit' && !getEnglishAnchor(e)) {
                             nmLines.push('   ⭐ 另：这位还缺【英文权威锚点】—— 本轮请一并回传 anchor（英文，维度名与值全英文）字段；它与中文呈现表达同一件事，所有英文模式共用。');

@@ -38,6 +38,18 @@ await (await import('/scripts/extensions/third-party/CAT_image/modules/diagnosti
 
 ## 开发者自动验证
 
+画师请求按下列职责组装；加载器缓存某个文件不等于把它加入每轮请求：
+
+| 内容 | 来源与位置 |
+|---|---|
+| 共享作业、人物一致性、档案、事实、立绘与输出协议 | `roster/system.txt`，system 前部；作业纪律单独分层 |
+| 原子词表与造型库结构/回传规则 | `atomic-vocab.txt`、`wardrobe-vocab.txt`、`wardrobe-expand.txt`，共享规则之后 |
+| 当前模型的语言与画面表达规则 | 仅所选 `pipeline/*-overlay.txt`，词表之后 |
+| 当前档案、造型、种子、事实和占位符实例 | user 消息 |
+| 角色卡扫描指令、主模型占位符指令、剧情总结 | 各自独立阶段，不加入本次画师 system |
+
+`runtime.test.js` 捕获实际组装的 HTTP 请求，覆盖 6 种模型 × 分层/合并两种发送方式，检查顺序、单一所选 overlay、共享规则保留、实例资料只进入 user 消息，以及 H3 overlay 不含档案/造型库存档协议。应用内 fixture 同样检查这些位置，不依赖真实聊天数据。
+
 ```sh
 npm ci
 npm run check

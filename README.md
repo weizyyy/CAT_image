@@ -1,6 +1,13 @@
-# 🐱 CATimage v1.30.1 — 小猫的生图插件
+# 🐱 CATimage v1.30.2 — 小猫的生图插件
 
 **SillyTavern 1.18+ / Tauritavern 第三方扩展 · 文生图人物一致性方案**
+
+## v1.30.2 提示词分层校正
+
+- H3 overlay 只负责该模型的英文画面表达、空间与接触、肤质、光照和构图，不再重复定义人物档案、造型库存档或立绘协议。
+- 人物建档、固定锚点、种子、aura、事实、景别裁剪和立绘规则归 `prompts/roster/system.txt`；造型结构与回传规则归 `prompts/wardrobe-expand.txt`，维度词表归 `prompts/wardrobe-vocab.txt`。
+- 本轮档案、造型与占位符实例由 user 消息提供；所选模型 overlay 在共享规则和词表之后加入。另行扫描角色卡使用 `prompts/static-profile/system.txt`，不混入每张图的画师请求。
+- 修正共享规则残留的 aura/肤质归属、强制标签和权重写法、立绘表情及覆盖旧立绘的矛盾说明；增加六种模型与两种 system 发送方式的组装验证。
 
 ## v1.30.1 H3 提示词完善
 

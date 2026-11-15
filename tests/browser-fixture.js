@@ -131,7 +131,14 @@ export async function runBrowserFixture() {
             document.querySelector('#sl_krea2_style_card').style.display === 'none' });
         settings.autoGen = 1;
         settings.cWf = '{"native":{"inputs":{"text":"%prompt%"}},"canvas":{"inputs":{"width":1152,"height":1280}}}';
-        ctx.chat[0].mes = '[img:H3-FIXTURE|要点:招牌文字Fixture的茶铺，手托杯子]'; root.textContent = ctx.chat[0].mes;
+        const { upsertPerson, setEnglishAnchor } = await import('../modules/roster.js');
+        const { upsertEntry } = await import('../modules/wardrobe.js');
+        const fixtureAnchor = 'race:FixtureOrigin | age:forty-two | nose:FixtureNose';
+        const fixtureOutfit = 'FixtureBlue cotton jacket, FixtureRound collar';
+        upsertPerson('FixtureActor', '层次测试', '本轮档案原文', 'anchor');
+        setEnglishAnchor('FixtureActor', '层次测试', fixtureAnchor);
+        upsertEntry('服装', 'FixtureOutfit', fixtureOutfit, 'expanded');
+        ctx.chat[0].mes = '[img:H3-FIXTURE|人物:FixtureActor（层次测试）|造型:服装=FixtureOutfit|要点:招牌文字Fixture的茶铺，手托杯子]'; root.textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery(root));
         await wait(() => !!root.querySelector('.sl_img_block img') && !scanner.scanCoordinator.running);
         const h3System = lastAnalysis.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
@@ -140,6 +147,14 @@ export async function runBrowserFixture() {
             !h3System.includes('【模式：Krea 2') && root.querySelector('.sl_img_btn').dataset.prompt.includes('"Fixture的茶铺"') });
         checks.push({ name: 'webview-h3-plain-caption-to-comfy-with-unchanged-canvas', ok: lastWorkflow.native.inputs.text.includes('"Fixture的茶铺"') &&
             lastWorkflow.canvas.inputs.width === 1152 && lastWorkflow.canvas.inputs.height === 1280 && !lastWorkflow.native.inputs.text.includes('expanded_caption') });
+        const h3Overlay = getPrompt('pipeline/minimax-h3-image-overlay.txt').trim();
+        const wardrobeRules = getPrompt('wardrobe-expand.txt').trim();
+        const h3User = lastAnalysis.messages.at(-1).content;
+        checks.push({ name: 'webview-shared-rules-overlay-and-records-stay-in-their-layers', ok:
+            lastAnalysis.messages.some(m => m.role === 'system' && m.content === h3Overlay) &&
+            h3System.indexOf('## 造型库具象化') < h3System.indexOf(wardrobeRules) && h3System.indexOf(wardrobeRules) < h3System.indexOf(h3Overlay) &&
+            !/【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/.test(h3Overlay) &&
+            h3User.includes(fixtureAnchor) && h3User.includes(fixtureOutfit) && !h3System.includes(fixtureAnchor) && !h3System.includes(fixtureOutfit) });
         return { ok: checks.every(c => c.ok), checks, mockedAnalysisRequests: calls, mockedImageRequests: generations, externalRequests: 0 };
     } finally { scanner.stopPolling(); bridge.stopFrontendBridge(); }
 }
