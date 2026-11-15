@@ -23,6 +23,7 @@ try {
         if (!jquery) throw new Error('Host jQuery script not found');
         frame.srcdoc = '<script src="' + jquery.src + '"></script>'; document.body.appendChild(frame);
     });
+    await page.waitForFunction(() => !!document.querySelector('iframe[name="cat_test_fixture"]')?.contentWindow?.jQuery);
     const fixtureFrame = page.frame({ name: 'cat_test_fixture' });
     await fixtureFrame.waitForFunction(() => !!window.jQuery);
     const fixture = await fixtureFrame.evaluate(async () => (await import('/scripts/extensions/third-party/CAT_image/tests/browser-fixture.js')).runBrowserFixture());
