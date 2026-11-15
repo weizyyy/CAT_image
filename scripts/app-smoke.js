@@ -16,6 +16,18 @@ try {
     report.version = result.version;
     report.checks.push(...result.checks);
     if (result.version !== 'v1.29.0') throw new Error('Expected v1.29.0');
+    await page.evaluate(() => {
+        const frame = document.createElement('iframe'); frame.name = 'cat_test_fixture';
+        frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-100px;top:-100px;';
+        const jquery = Array.from(document.scripts).find(s => /jquery-[\d.]+\.min\.js/.test(s.src));
+        if (!jquery) throw new Error('Host jQuery script not found');
+        frame.srcdoc = '<script src="' + jquery.src + '"></script>'; document.body.appendChild(frame);
+    });
+    const fixtureFrame = page.frame({ name: 'cat_test_fixture' });
+    await fixtureFrame.waitForFunction(() => !!window.jQuery);
+    const fixture = await fixtureFrame.evaluate(async () => (await import('/scripts/extensions/third-party/CAT_image/tests/browser-fixture.js')).runBrowserFixture());
+    report.checks.push(...fixture.checks); report.mockedAnalysisRequests = fixture.mockedAnalysisRequests;
+    await page.evaluate(() => document.querySelector('iframe[name="cat_test_fixture"]')?.remove());
     const rect = () => page.evaluate(() => {
         const el = document.querySelector('#sl_compact'), r = el.getBoundingClientRect(), v = visualViewport;
         return { x: r.x, y: r.y, width: r.width, height: r.height, vw: v.width, vh: v.height, collapsed: el.classList.contains('sl_compact_logo'),
@@ -44,6 +56,7 @@ try {
 } finally {
     if (cdp) { await cdp.send('Emulation.clearDeviceMetricsOverride'); await cdp.detach(); }
     if (page && savedPosition !== undefined) await page.evaluate(async saved => {
+        document.querySelector('iframe[name="cat_test_fixture"]')?.remove();
         if (saved == null) localStorage.removeItem('sl_compact_pos'); else localStorage.setItem('sl_compact_pos', saved);
         const compact = await import('/scripts/extensions/third-party/CAT_image/modules/ui/compact-bar.js'); compact.rebuildCompactBar();
     }, savedPosition);
