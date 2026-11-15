@@ -161,7 +161,7 @@ function installCompactBehavior() {
     const clickLogo = e => { if (collapsed && !_compDragMoved) { e.stopImmediatePropagation(); setCollapsed(false); scheduleCollapse(); } };
     header.setAttribute('tabindex', '0'); header.setAttribute('role', 'button'); header.setAttribute('aria-label', '打开小猫生图面板（可拖动）');
     const style = document.createElement('style');
-    style.textContent = '#sl_compact.sl_compact_logo{border-radius:50%!important;overflow:hidden!important}#sl_compact.sl_compact_logo>div:not(#sl_comp_header){display:none!important}#sl_compact.sl_compact_logo #sl_comp_header{border:0!important;padding:0!important;height:100%!important;justify-content:center!important}#sl_compact.sl_compact_logo #sl_comp_header> :not(#sl_cat_icon){display:none!important}#sl_compact #sl_comp_header:focus-visible{outline:2px solid currentColor;outline-offset:-3px}';
+    style.textContent = '#sl_compact,#sl_compact *{box-sizing:border-box}#sl_compact.sl_compact_logo{border-radius:50%!important;overflow:hidden!important}#sl_compact.sl_compact_logo>div:not(#sl_comp_header){display:none!important}#sl_compact.sl_compact_logo #sl_comp_header{border:0!important;padding:0!important;height:100%!important;justify-content:center!important}#sl_compact.sl_compact_logo #sl_comp_header> :not(#sl_cat_icon){display:none!important}#sl_compact #sl_comp_header:focus-visible{outline:2px solid currentColor;outline-offset:-3px}';
     document.head.appendChild(style);
     const listeners = [[el,'pointerenter',enter],[el,'pointerleave',leave],[el,'focusin',focus],[el,'focusout',blur],
         [header,'pointerdown',down],[header,'pointermove',move],[header,'pointerup',up],[header,'pointercancel',up],
