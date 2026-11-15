@@ -267,7 +267,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
             var ph = placeholders[i];
             lines.push((i + 1) + '. 场景：' + ph.scene);
             // v1.14.2：地点是**硬约束** —— 插件不给世界观，地点只能靠主模型这段字
-            if (ph.place) lines.push('   地点（**硬约束，必须体现**）：' + ph.place + ' —— 提示词里要写出这个地点的地域感：墙/地面材质、家具形制、光线来源、温感（干湿冷暖）。⛔ 不许替换成通用「室内/房间」或纯色背景');
+            if (ph.place) lines.push('   地点（**硬约束，必须体现**）：' + ph.place + ' —— 用本帧取景内可见的建筑、材质、陈设或光源线索体现地点，保留指定空间关系；不强求每类线索全部入镜，不添加不可见的温感，不为展示背景拉远主体。⛔ 不许替换成通用「室内/房间」或纯色背景');
             if (ph.personSegments && ph.personSegments.length) {
                 var ps = [];
                 for (var j = 0; j < ph.personSegments.length; j++) ps.push(ph.personSegments[j].name + (ph.personSegments[j].identity ? '（' + ph.personSegments[j].identity + '）' : ''));

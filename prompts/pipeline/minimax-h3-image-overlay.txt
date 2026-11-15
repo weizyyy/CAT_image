@@ -13,13 +13,13 @@
 
 ## 二、段落中的信息顺序
 
-1. **先定这一帧**：景别、一个机位、主体正在做什么，必要时带出主要光源方向。
+1. **先定这一帧**：主体、景别、一个机位、明确的取景边界与主体占幅、主体正在做什么；背景只先带出必要的位置关系。
 2. **描述主体**：明确的人数、年龄、外观与当前可见衣着；用具体词组保持各主体的区别。
 3. **展开动作与接触**：身体朝向、视线、重心、哪只手接触什么、物件由哪里支撑。
 4. **补充看得见的细节**：表情、衣料状态、必要的面部或手部细节；远景不塞微观皮肤描写。
 5. **收束环境与质感**：前后景层次、具体地点、材质、明暗与色调，使整段描述落在同一幅画面中。
 
-不要把几十个五官形容词挤在第一句，再到结尾才交代主体正在做什么；也不要为了精简动作，漏掉本来必须呈现的外观信息。
+不要把几十个五官形容词挤在第一句，再到结尾才交代主体正在做什么；也不要为了精简动作，漏掉本来必须呈现的外观信息。主体先于建筑陈设展开，次要环境不与人物争夺同等篇幅。
 
 ## 三、先统一空间，再描述姿态
 
@@ -44,28 +44,45 @@
 
 ## 五、皮肤与面部表现
 
+- 明确年龄不仅是数字，也要在相容的外观中可见。已指定十八至二十多岁的年轻成人时，可用一次 `a youthful adult face` 配合原有脸型、平顺眼周和柔和面颊转折；不靠幼态大眼、儿童比例或浓重磨皮表达年轻。其他年龄仍按原年龄呈现，不给所有人物统一减龄。
+- 沉着、自信、威严或职业身份用视线、表情与姿态表达；不能顺手译成 `mature-looking`、`weathered`、深眼窝、硬刻颧骨、重法令纹或厚重妆容。低机位也不等于夸大下颌和眼下阴影。明确已有的骨相、皱纹或特殊标记照常保留。
 - 皮肤表现克制：给定的肤色、肤质与明确标记各自然表达一次，不反复叠加同义的“真实皮肤”句。
+- 给定细腻平滑肤质时，正向写成 `fine, smooth skin with soft, even tonal transitions`；肤色与结构保持清楚，面颊、额头和四肢用连续柔和的明暗塑形，不把清晰度写成颗粒或每一寸皮肤的微观细节。
 - 不主动追加 `visible pores`、`micro-imperfections`、`peach fuzz`、`hyper-detailed skin`、`gritty texture`、强锐化或皮肤散射效果。明确要求的伤疤、年龄纹理、粗糙或特殊肤质仍须呈现。
 - 不用 `perfect face`、`refined features`、`delicate features` 把具体脸型和眼鼻唇改成标准美；也不为了修饰肤质把成熟人物画年轻、抹掉明确标记。
 - 不用 `glass skin`、`glowing skin`、`luminous`、油亮高光或极端锐化表达清晰度。皮肤光泽、汗、湿润和红晕以本帧明确要求为准，不因“写实”自动增加。
 - 真人画面用相容的表面质感与明暗过渡表达皮肤；动漫、水彩和绘画则遵守色块、轮廓和笔触，不额外加入摄影毛孔。
 - 远景中的脸不写成微距皮肤特写；背景空镜不附加人体、皮肤或手指约束。
 
-## 六、光照与媒介
+## 六、衣料、薄袜与表面尺度
+
+- 区分“衣物结构可辨”与“每根纤维放大”。颜色、剪裁、边饰、接缝和实际褶皱负责识别衣物；正常人物景别下，织物表面应连续、均匀，不主动增加砂砾、粗纤维、胶片颗粒、磨损或全画面微纹理。
+- 薄丝袜保留给定颜色、厚度与长短；如 `sheer black 20-denier stockings`，再用一次 `an even, close-fitting translucent layer, with the skin tone softly visible beneath and smooth shading along the legs` 说明观感。边口、接缝按实际可见位置呈现，腿部主体是均匀半透明薄层，不把薄袜写成大网眼、可数的织线、斑驳皮肤或粗糙毛面。
+- 不为修饰薄袜改成不透明裤袜、裸腿、乳胶或强镜面高光；明确给出的渔网、粗针织、破损和花纹仍按要求表达。近距离确需织纹时也只在对应局部描述，不能铺满整条腿或皮肤。
+- 丝绒可用 `a soft, dense velvet surface with broad, subdued directional highlights`，靠绒面方向与衣褶表现明暗；羊毛或棉料用均匀哑光表面与结构性褶皱。蕾丝的花纹局限在蕾丝部位，不蔓延到裸露皮肤或其他布料。
+- 材质短语按本帧可见物体选择，不把本节串成通用词包，也不让每件衣物都带一长串表面形容词。
+
+## 七、光照与媒介
 
 - 光照写成看得见的结果：从哪侧来、哪些表面更亮、阴影落向哪里、背景清楚还是虚化。不要用焦距、光圈、ISO 或色温数值替代画面关系。
 - 未指定光线时可用有方向的柔和照明帮助五官与手部易读；已有烛光、深夜、逆光、硬光或特殊色光时照其表达，不能一律改成明亮影棚。
+- 地面法阵、屏幕或水面从下方照明时，说明其在下颌、手或衣料上的局部补光。没有明确强光要求时，使用柔和反光和连续明暗，不自行增加刺眼轮廓、硬刻面部阴影或强化毛孔与织纹的掠射效果；保留给定光源方向和色彩。
 - 明确给出的摄影、动漫、油画、水彩等媒介优先；没有具体媒介时保持中性描述，不自行叠加相互冲突的摄影、油画、动漫和 3D 词。
 - 材质对应具体物体：棉布的褶皱、木桌的纹理、陶器的表面各有归属，不把“细节丰富”当成所有表面的同一层噪点。
 
-## 七、构图与文字
+## 八、构图与文字
 
 - 未指定方向时采用 `near-square, slightly taller-than-wide composition`，宽略小于高，主体紧凑、关键接触点留有空间。
+- 以人物或互动为主题且未指定远景、环境主导或大留白时，默认人物主导取景：`the subject fills most of the frame, with tight margins around the visible figure`。多人则由互动中的人物整体占据主要画幅，不把每个人单独放大到挤掉其他人。
+- 不只报 `medium close shot` 等术语，要写清裁切：例如 `framed from the head to just below the chest`、`waist-up` 或 `framed from the head to the knees`。构图需要的脸、手和接触点完整可读，头顶与身体两侧不留无目的的大块空间。
+- 先满足明确必须看见的动作与部位，再选能容纳它们的最紧凑景别。中近景不因补写鞋、地面、下半身衣物而无意扩成全身远景；若要点确实要求腿部或地面互动，则只扩到能交代这些关系的边界，不同时保留互相冲突的胸像和全身要求。
+- 仰视控制观察方向，不要求把相机拉远；伸向前景的手清楚、比例自然，仍为脸和躯干留足画幅，不能让前景手单独吞掉主体。明确要求广角夸张时才采用相应透视。
+- 左侧留窗、远处塔楼等环境要点可以是主体旁的窄带背景与较小轮廓；保留指定左右关系和可辨线索，不为展示整栋建筑缩小人物。不主动补入一串讲台、墙面纹章、地砖、家具或不可见的空气感受。
 - 明确给定的方向、景别与取景优先。不写数字比例或尺寸建议，不因增加背景而扩成宽幅全景。
 - 需要实际画出的文字用英文双引号标出原文，说明承载表面与位置；中文文字保持原文，不翻译、不拆字、不换顺序。
 - 没有文字要求时，不自加招牌、字幕、标题、标志或水印。只有明确要求海报、卡面、图表、设计板等成品时才组织信息层级；普通插图不改成多视图或资料卡。
 
-## 八、画面示例
+## 九、画面示例
 
 以下只示范英文组织、接触与光照，不能当成每张图都要套用的人物或道具模板。
 
@@ -77,11 +94,16 @@ A waist-up photograph in a compact, slightly taller-than-wide frame shows a fort
 
 A waist-up painted illustration shows a short-haired adult in a cream jacket on screen-left and a silver-haired adult in a green coat on screen-right. The person on the left holds a small closed parcel with both palms beneath its base. The person on the right places a right palm against the parcel's near side while the left arm rests beside the coat. Their forearms remain distinct on either side of the parcel, and both look at the same contact point. Broad areas of muted color and restrained brushwork continue across faces, hands and clothing, with a quiet interior behind them.
 
-## 九、静默检查画面表达
+**人物主导、低机位与薄织物**
+
+A tight head-to-knee view looks slightly upward at a twenty-one-year-old woman reaching her right hand toward the viewer, with the visible figure filling most of the frame and only a narrow band of a window behind her on screen-left. Her youthful adult face has a rounded jaw, brown almond-shaped eyes and fine, smooth olive skin with soft, even tonal transitions. Her quiet confidence appears in her steady gaze and relaxed mouth. Her right palm faces upward, fingers gently curved, with the wrist following the forearm naturally. She wears a charcoal velvet jacket with a soft, dense surface and broad, subdued highlights, a burgundy skirt and sheer black 20-denier stockings. The stockings form an even, close-fitting translucent layer over her legs, the skin tone softly visible beneath with smooth shading along their contours. Soft window light shapes her cheek and sleeve while the background remains secondary.
+
+## 十、静默检查画面表达
 
 1. 英文是完整句子，还是标签、提纲或质量词串？
 2. 是否只有一个瞬间、一个视点，身体可见面、视线和动作方向是否一致？
 3. 每条关键手臂属于谁，接触哪里，由哪里支撑，前后遮挡是否明确？
 4. 有没有为了减少畸形而删掉指定人物、动作或必须入镜的手？
-5. 是否额外堆了皮肤纹理、强反射、锐化或与媒介冲突的词？
-6. 景别、环境、光源、人数与需要渲染的文字是否仍符合给定画面？
+5. 指定年龄是否通过相容的面部表现呈现？是否把自信与稳重误写成成熟老相，或改掉了明确年龄与骨相？
+6. 平滑皮肤、薄袜与绒面的明暗是否连续、材质归属明确？是否额外堆了微纹理、颗粒、强反射、锐化或与媒介冲突的词？
+7. 取景边界、人物占幅与必需部位是否相容，环境是否抢走主体空间？景别、光源、人数与需要渲染的文字是否仍符合给定画面？
