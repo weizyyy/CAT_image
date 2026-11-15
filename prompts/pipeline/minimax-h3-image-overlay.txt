@@ -6,10 +6,11 @@
 
 以下是生成英文时要实际完成的选择，不是只供参考的风格建议。按本帧内容选用，不把条件或规则本身写给生图模型：
 
-- **人物主题**：首句同时交代人物主导占幅、一个机位和裁切边界。例如 `A tight low-angle view, framed from the head to the knees, shows ... filling most of the frame, with only a narrow strip of ... behind her on screen-left.` 不只写“中近景”，不将背景先展开成半幅建筑。明确环境主导、留白或远景时按原要求。
-- **指定年轻成人**：在首次介绍人物时就把数字年龄与年轻成人外观一起表达，例如十八岁写成 `a youthful eighteen-year-old adult woman`；也可在面部句写一次 `a youthful adult face`，两者选一，不反复强调。结合原有脸型与肤质，不添加另一套五官。沉着与权威落在表情、视线和姿态上。其他年龄按实际值表达，不套用十八岁。
+- **人物主题**：首句同时交代人物主导占幅、一个机位和裁切边界。例如 `A tight low-angle, waist-up view shows ... with her face and upper body prominent in the foreground, filling most of the image width, and only a narrow strip of ... behind her on screen-left.` 占幅同时考虑横向宽度，不能用“全身很高但很窄”冒充人物主导。明确环境主导、留白或远景时按原要求。
+- **指定年轻成人**：不能只保留数字年龄就算完成年轻外观。成稿除数字外还要有一次正向年轻成人外观表达，例如十八岁写成 `a youthful eighteen-year-old adult woman`，或在面部句写一次 `a youthful adult face`；两者选一，不反复强调。这是年龄的可见表现，不是改写脸型或五官。沉着与权威落在表情、视线和姿态上。其他年龄按实际值表达，不套用十八岁。
 - **细腻皮肤与薄织物**：已有平滑肤质时写一次连续柔和明暗；出现薄丝袜时写清均匀半透明贴合与平滑腿部明暗，出现丝绒时写清柔和绒面与宽缓高光。只报材质名而没有对应的表面观感，不算完成这一步。
 - **裁切一致**：确定头到膝盖后，不在末句又展示短靴周围地面；确定胸像后，不再补整条腿。画外地面法阵、低处灯具也能照亮画内主体，光源无需完整入镜。确实必须入镜的地面互动优先确定可见边界，再在该边界内让人物占足画幅。
+- **已有中近景**：光线照到双腿、出现鞋袜材质，不等于必须展示完整双腿与鞋。需要兼顾腿部时，尽量紧凑地裁到大腿或膝部，只描述画内的一段；脸与上身在前景清楚突出。没有明确要求脚部或完整地面互动时，成稿不写可见短靴、双脚和脚边地面，来自画外的法阵光仍可保留。
 
 ## 一、语言与句子组织
 
@@ -85,7 +86,7 @@
 - 以人物或互动为主题且未指定远景、环境主导或大留白时，默认人物主导取景：`the subject fills most of the frame, with tight margins around the visible figure`。多人则由互动中的人物整体占据主要画幅，不把每个人单独放大到挤掉其他人。
 - 不只报 `medium close shot` 等术语，要写清裁切：例如 `framed from the head to just below the chest`、`waist-up` 或 `framed from the head to the knees`。构图需要的脸、手和接触点完整可读，头顶与身体两侧不留无目的的大块空间。
 - 景别名称要与裁切相符：头到膝盖可写 `a tight three-quarter view`，不能又称胸像式 `medium close-up`。选定裁切后，画外衣物、脚和光源不另行补成可见内容；可以交代来自画外的光。
-- 先满足明确必须看见的动作与部位，再选能容纳它们的最紧凑景别。中近景不因补写鞋、地面、下半身衣物而无意扩成全身远景；若要点确实要求腿部或地面互动，则只扩到能交代这些关系的边界，不同时保留互相冲突的胸像和全身要求。
+- 先满足明确必须看见的动作与部位，再选能容纳它们的最紧凑景别。提到身体部位不等于展示该部位的全长；已有中近景而又描述腿部受光时，可以只呈现下边缘入镜的局部腿部。只有明确要求完整双腿、鞋脚或完整地面互动才扩大相应边界，不同时保留互相冲突的胸像和全身要求。
 - 仰视控制观察方向，不要求把相机拉远；伸向前景的手清楚、比例自然，仍为脸和躯干留足画幅，不能让前景手单独吞掉主体。明确要求广角夸张时才采用相应透视。
 - 左侧留窗、远处塔楼等环境要点可以是主体旁的窄带背景与较小轮廓；保留指定左右关系和可辨线索，不为展示整栋建筑缩小人物。不主动补入一串讲台、墙面纹章、地砖、家具或不可见的空气感受。
 - 明确给定的方向、景别与取景优先。不写数字比例或尺寸建议，不因增加背景而扩成宽幅全景。
@@ -106,7 +107,7 @@ A waist-up painted illustration shows a short-haired adult in a cream jacket on 
 
 **人物主导、低机位与薄织物**
 
-A tight head-to-knee view looks slightly upward at a twenty-one-year-old woman reaching her right hand toward the viewer, with the visible figure filling most of the frame and only a narrow band of a window behind her on screen-left. Her youthful adult face has a rounded jaw, brown almond-shaped eyes and fine, smooth olive skin with soft, even tonal transitions. Her quiet confidence appears in her steady gaze and relaxed mouth. Her right palm faces upward, fingers gently curved, with the wrist following the forearm naturally. She wears a charcoal velvet jacket with a soft, dense surface and broad, subdued highlights, a burgundy skirt and sheer black 20-denier stockings. The stockings form an even, close-fitting translucent layer over her legs, the skin tone softly visible beneath with smooth shading along their contours. Soft window light shapes her cheek and sleeve while the background remains secondary.
+A tight low-angle view is cropped from the head to just above the knees, with a twenty-one-year-old woman's face and upper body prominent in the foreground, filling most of the image width. Only a narrow band of a window appears behind her on screen-left. Her youthful adult face has a rounded jaw, brown almond-shaped eyes and fine, smooth olive skin with soft, even tonal transitions. Her quiet confidence appears in her steady gaze and relaxed mouth. Her right palm reaches toward the viewer, fingers gently curved, with the wrist following the forearm naturally. She wears a charcoal velvet jacket with a soft, dense surface and broad, subdued highlights, a burgundy skirt and sheer black 20-denier stockings. The visible upper sections of the stockings form an even, close-fitting translucent layer, the skin tone softly visible beneath with smooth shading. Soft window light shapes her cheek and sleeve, and reflected light from below gently illuminates her jaw and the visible thighs. Her feet and the light source lie beyond the lower edge of this close framing.
 
 ## 十、静默检查画面表达
 

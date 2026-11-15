@@ -243,7 +243,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
         lines.push(wardrobeInfo.text);
         lines.push('· ✅ 已解析：入镜特征逐字复用，未入镜结构留在库中，不为展示整套造型改变景别');
         lines.push('· ⚠️ 待具象化：按 wardrobe-vocab.txt 的维度逐项取词，写进提示词，并通过 ---WARDROBE--- 回传');
-        lines.push('· 造型保存固定结构，临时穿着状态取本轮要点；按当前模型规则组织入镜特征，不改写库内 detail');
+        lines.push('· 造型保存固定结构，临时穿着状态取本轮要点；先按景别裁切，再按当前模型规则组织入镜特征。画外鞋脚等不进入本图提示词，不为展示整套造型拉远镜头，也不改写库内 detail');
         lines.push('· 禁止把造型详情写进氛围段；禁止把「怎么穿」写进 ---WARDROBE--- 回传');
         lines.push('');
     }
