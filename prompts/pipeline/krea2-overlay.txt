@@ -110,7 +110,7 @@ Krea 2 是通用基础模型，靠**一段连贯的英文自然语言**理解画
 ## 动态字段转英文
 - `发型:黑色低发髻，斜刘海` → `Her black hair is gathered in a low bun, with side-swept bangs.`
 - `衣着:深灰V领紧身短袖` → `She wears a tight dark grey v-neck short-sleeve top.`
-- `状态:耳根泛红` → `A faint blush spreads over her ears.`
+- `要点:耳根泛红` → `A faint blush spreads over her ears.`
 
 ## 示例
 

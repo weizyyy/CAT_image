@@ -5,7 +5,7 @@ import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { loadPrompts, getPrompt } from './prompts/loader.js';
 
 import { slLog, slErr, slLogDump, getLogCount } from './modules/log.js';
-import { initSettings, settings, getDefaults, COLORS, getSTContext, getSTHeaders, escapeHtml, saveSettings, strHash } from './modules/settings.js';
+import { initSettings, settings, removeRetiredSettings, getDefaults, COLORS, getSTContext, getSTHeaders, escapeHtml, saveSettings, strHash } from './modules/settings.js';
 import { buildUI } from './modules/ui.js';
 import { setEnqueueGen, restoreImageBlocks } from './modules/render.js';
 import { enqueueGen } from './modules/queue.js';
@@ -13,12 +13,11 @@ import { imgStoreInit } from './modules/imgstore.js';
 import { startPolling, stopPolling, getScannerStatus, hasCastCache } from './modules/scanner.js';
 import { refreshCoopCards } from './modules/sync-cards.js';
 import { cleanLegacyAnchors } from './modules/roster.js';
-import { imgCacheClear } from './modules/cache.js';
 import { initFrontendBridge } from './modules/frontend-bridge.js';
 
 // ── 版本 ──
-window.SILLYLAB_VERSION = 'v1.28.0';
-slLog('LOADED v1.28.0');
+window.SILLYLAB_VERSION = 'v1.29.0';
+slLog('LOADED v1.29.0');
 
 // ── 初始化设置 ──
 initSettings(getContext, extension_settings);
@@ -37,6 +36,8 @@ try {
     Object.assign(settings, getDefaults());
     slLog('设置加载失败，使用默认值: ' + e.message);
 }
+
+removeRetiredSettings();
 
 // ── v1.22：图片缓存仓（IndexedDB）──
 // 历史图缓存不再随设置进 localStorage（那里只够放 50 条、还是全库共享）。
@@ -74,24 +75,6 @@ try {
     localStorage.removeItem('slimg_v2_deployed');
     localStorage.removeItem('sillab_clean_v102');
 } catch (e) {}
-
-if (!localStorage.getItem('sillab_clean_v210')) {
-    try {
-        imgCacheClear();  // [C2] 同步清内存缓存，否则下次 imgCacheSet 会把旧值写回
-        if (typeof extension_settings !== 'undefined') { delete extension_settings.sillab; }
-        Object.assign(settings, getDefaults());
-        try { saveSettings(); } catch (e) {}
-        slLog('🧹 v1.0 全新部署喵~ 缓存清空啦 ✨🧹');
-    } catch (e) { slLog('清缓存跳过: ' + e.message); }
-    localStorage.setItem('sillab_clean_v210', '1');
-}
-
-// ── 图块精确缓存上线：一次性清理旧"提示词→图"缓存（旧键内容会互相覆盖，且与块标识不兼容） ──
-if (!localStorage.getItem('sillab_slid_cache_v1')) {
-    try { imgCacheClear(); } catch (e2) {}
-    localStorage.setItem('sillab_slid_cache_v1', '1');
-    slLog('🧹 图块精确缓存上线：旧图片缓存已清理（旧消息图片需重新生成一次，新图按块标识精确记录）');
-}
 
 // ── v2.0 锚点库改版：一次性清掉【旧版本残留】的分模式锚点 ──
 // 旧版：四种模式各存一份锚点（roster[卡][聊天][人物].atoms.<模式>）。anima 那份因为 PROFILE 示例

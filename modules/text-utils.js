@@ -1,3 +1,4 @@
+import { tokenizePlaceholders } from './placeholders.js';
 // ── SillyImage Lab 文本处理工具 ──
 
 // 清洗 AI 模型输出的 XML/思考标签
@@ -269,37 +270,11 @@ export function parseFactSegment(text) {
 }
 
 // ══════════════════════════════
-// ── v1.9.0 状态段解析（时效性状态：半永久 / 跨轮暂时）──
-// 语法：状态:+晒黑；+左颈吻痕；-淤青
-//   +key = 激活（库里命中 → 复用 detail；未命中 → 辅助AI 具象化建档）
-//   -key = 取消激活（条目保留，不删档，以后可再 +）
-// detail 只存"是什么"（左颈暗红色吻痕），不存"现在怎么样"（淡了/更明显了 → 写要点）
-export function parseStatusSegment(text) {
-    var out = [];
-    var body = String(text || '').replace(/^(状态|时效|变化)[：:]\s*/, '');
-    if (!body.trim()) return out;
-    var parts = body.split(/[；;]/);
-    for (var i = 0; i < parts.length; i++) {
-        var p = (parts[i] || '').trim();
-        if (!p) continue;
-        var op = '+';
-        if (/^[-－—]/.test(p)) { op = '-'; p = p.replace(/^[-－—]\s*/, ''); }
-        else if (/^[+＋]/.test(p)) { p = p.replace(/^[+＋]\s*/, ''); }
-        p = p.trim();
-        if (!p) continue;
-        out.push({ op: op, key: p });
-    }
-    return out;
-}
-
-// 从文本中提取所有 [img:…] 占位符 → [{ scene, personSegments:[{name,identity,appearance}], styleGroups, statusOps, topic, raw }]
 export function findImagePlaceholders(text) {
     var result = [];
     if (!text) return result;
-    var re = /\[img:\s*([\s\S]*?)\]/g;
-    var m;
-    while ((m = re.exec(text)) !== null) {
-        var content = (m[1] || '').trim();
+    for (const token of tokenizePlaceholders(text)) {
+        var content = token.content;
         if (!content) continue;
         var segs = content.split('|');
         var scene = '';
@@ -307,7 +282,6 @@ export function findImagePlaceholders(text) {
         var topicParts = [];
         var personSegments = [];
         var styleGroups = [];
-        var statusOps = [];
         var factParts = [];
         var seedObj = {};
         for (var i = 0; i < segs.length; i++) {
@@ -335,12 +309,6 @@ export function findImagePlaceholders(text) {
             if (/^(?:种子|印象)\s*[：:]/.test(seg)) {
                 var _sd = parseSeedSegment(seg);
                 for (var _sdk in _sd) { seedObj[_sdk] = seedObj[_sdk] ? (seedObj[_sdk] + '；' + _sd[_sdk]) : _sd[_sdk]; }
-                continue;
-            }
-            // v1.9.0：状态段（可选，以「状态:/时效:/变化:」开头）
-            if (/^(?:状态|时效|变化)[：:]/.test(seg)) {
-                var _so = parseStatusSegment(seg);
-                for (var _soi = 0; _soi < _so.length; _soi++) statusOps.push(_so[_soi]);
                 continue;
             }
             // v1.5.0：造型段（可选，以「造型:/穿搭:/衣柜:」开头）
@@ -378,11 +346,11 @@ export function findImagePlaceholders(text) {
             }
         }
         result.push({
+            ...token,
             scene: scene,
             place: place,
             personSegments: personSegments,
             styleGroups: styleGroups,
-            statusOps: statusOps,
             facts: factParts,
             topic: topicParts.join('\n'),
             seed: _seedText,
@@ -431,7 +399,7 @@ export function buildImageBlock(scene, prompt, styleHint) {
     var s = scene && scene.trim() ? scene.trim() : '未命名画面';
     if (s.length > 100) s = s.slice(0, 100) + '…';
     var p = (prompt || '').trim();
-    var head = '[image: ' + s + ']';
+    var head = '[image: ' + s.replace(/\[/g, '［').replace(/\]/g, '］') + ']';
     if (!p) return head;
     if ((styleHint || '').trim()) p = styleHint.trim() + ', ' + p;
     return head + '\n【提示词】' + p + '【/提示词】';
@@ -488,7 +456,7 @@ export function findLostNumbers(source, target) {
 // 前瞻在遇到下一个段标记时刹车，和 roster-pipeline 的 _allSections 同一套规则。
 export function parseCheckSection(text) {
     var t = String(text || '');
-    var re = /---\s*CHECK\s*---([\s\S]*?)(?:---\s*END\s*---|(?=---\s*(?:PROFILE|IMAGES|CHECK|WARDROBE|STATUSES)\s*---)|$)/g;
+    var re = /---\s*CHECK\s*---([\s\S]*?)(?:---\s*END\s*---|(?=---\s*(?:PROFILE|IMAGES|CHECK|WARDROBE)\s*---)|$)/g;
     var out = [], m;
     while ((m = re.exec(t)) !== null) {
         var lines = m[1].split(/\r?\n/);

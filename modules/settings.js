@@ -26,7 +26,6 @@ export function getDefaults() {
         // v1.28.0 Krea 2 风格预设 id（'' = 自动）。清单见 modules/style-presets.js；
         // 选中后由 comfyui.composeFinalPrompt 统一前置到每张提示词最前面（跨轮稳定）
         krea2Style: '',
-        promptPrefix: '',
         uiTheme: '雪白猫',  // [Fix] 原默认 '奶糖小猫' 主题不存在，每次启动被重置为'雪白猫'（C9）
         textTheme: '默认',
         debugMode: false,
@@ -34,9 +33,7 @@ export function getDefaults() {
         historyRounds: 5,
         // [C11] 补齐「代码在用但 defaults 缺失」的键：原实现依赖 undefined 碰巧等于默认值
         storyMode: 'narrative',
-        animeQualityPrefix: '',
         animeArtist: '',
-        neg: '',
         workflows: {},
         // 剧情库（长期记忆）：存档开关 / 总结触发条目数 / 总结最小间隔轮数
         storyLib: true,
@@ -60,8 +57,6 @@ export function getDefaults() {
         // false=扫描仅用于立绘/档案查看，人物表只保留酒馆AI收集的信息（更省 token，一致性弱）。
         // 档案跟着聊天走：同卡不同聊天【不继承】。开启后才会把卡级旧扫描档案导入新聊天（一般不需要）
     directorCastImport: false,
-    // v1.9.0 状态库（时效性状态：晒黑/吻痕/淤青/染发…）—— 按 [角色卡][聊天ID] 存，和造型库同构
-    statuses: {},
     // v1.21.0 图库：所有产出过的图都记一份账 → settings.gallery[角色卡][聊天ID][文件名] = { ts, url, kind }
     // 独立于 msgMap（v1.22 起 msgMap 住 IndexedDB、不再随设置落盘；图库是"这张图属于哪场聊天"的账本）
     gallery: {},
@@ -129,7 +124,11 @@ export function escapeHtml(text) {
 }
 
 // ── 设置持久化（localStorage + extension_settings 双存） ──
+export function removeRetiredSettings() {
+    for (const key of ['statuses', 'neg', 'promptPrefix', 'animeQualityPrefix']) delete settings[key];
+}
 export function saveSettings() {
+    removeRetiredSettings();
     try {
         // v1.22：msgMap / msgMapTs **不再随设置落盘**——它们现在住 IndexedDB（modules/imgstore.js）。
         // 原因：saveSettings 写的是整份 settings，localStorage 只有几 MB，

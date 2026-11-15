@@ -12,8 +12,6 @@ export async function loadPrompts(baseUrl) {
         'ratio-to-atom.txt',
         'wardrobe-vocab.txt',
         'wardrobe-expand.txt',
-        'statuses-vocab.txt',
-        'statuses-expand.txt',
         'pipeline/zit-overlay.txt',
         'pipeline/anima-overlay.txt',
         'pipeline/anime-overlay.txt',

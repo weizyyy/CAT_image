@@ -1,3 +1,4 @@
+import { clampPosition } from './viewport.js';
 // ── SillyImage Lab 紧凑状态条 v2.6（胶囊猫条） ──
 import { CAT, getCatStatusFace } from './theme.js';
 import { rosterEntries } from '../roster.js';
@@ -10,6 +11,7 @@ import { getScannerStatus } from '../scanner.js';
 import { getQueueLength } from '../queue.js';
 import * as panel from './panel.js';  // 循环依赖：仅函数体内引用，运行时安全
 
+var _compactCleanup = null;
 var _compactEl = null, _compactTimer = null, _compDragMoved = false;
 
 export function getCompactEl() { return _compactEl; }
@@ -25,6 +27,7 @@ export function setPluginEnabled(enabled) {
 }
 
 export function rebuildCompactBar() {
+    if (_compactCleanup) { _compactCleanup(); _compactCleanup = null; }
     if (_compactEl) { clearInterval(_compactTimer); _compactEl.remove(); _compactEl = null; _compactTimer = null; }
     createCompactBar();
 }
@@ -32,7 +35,7 @@ export function createCompactBar() {
   if (_compactEl && _compactEl.parent().length) return;
   var saved = { x: null, y: null };
   try { var s = localStorage.getItem('sl_compact_pos'); if (s) saved = JSON.parse(s); } catch (e) { }
-  var x = saved.x || null, y = saved.y || null;
+  var x = Number.isFinite(saved.x) ? saved.x : null, y = Number.isFinite(saved.y) ? saved.y : null;
   // [Fix] 手机端 UI 位置：默认右下角会被手机浏览器底部工具栏遮挡、或压在酒馆聊天输入条后面
   //（position:fixed bottom 在移动浏览器常不可见）。移动端（<640px）默认改挂右上角；
   // 桌面端保持右下角不变；拖动后以保存的位置为准。
@@ -59,7 +62,7 @@ export function createCompactBar() {
   // 按钮区
   bar += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px 12px;flex-shrink:0;height:26%;"><button id="sl_comp_gen" style="flex:1.35;font-size:12px;padding:0;height:36px;border:none;border-radius:13px;background:linear-gradient(135deg,' + CAT.accent + ',' + (CAT.accentHover || CAT.accent) + ');color:#fff;cursor:pointer;font-weight:800;box-shadow:' + CAT.btnShadow + ';">🐟 排图</button><button id="sl_comp_auto" style="flex:1;font-size:12px;padding:0;height:36px;border:1px solid ' + CAT.line + ';border-radius:13px;background:' + CAT.card + ';color:' + CAT.text + ';cursor:pointer;font-weight:700;">⚡ 自动</button></div></div>';
   _compactEl = jQuery(bar).appendTo('body');
-  (function () { var dragging = false, sx, sy, ox, oy; jQuery('#sl_comp_header').on('mousedown touchstart', function (e) { if (jQuery(e.target).is('button')) return; if (e.type === 'mousedown') e.preventDefault(); dragging = true; _compDragMoved = false; var p = (e.touches || [e])[0]; sx = p.clientX; sy = p.clientY; var o = _compactEl.offset(); ox = o.left; oy = o.top; _compactEl.css({ right: 'auto', bottom: 'auto', left: ox + 'px', top: oy + 'px' }); }).on('dblclick', function(e) { e.preventDefault(); var _mob = window.innerWidth < 640; _compactEl.css({ left: 'auto', top: _mob ? '12px' : 'auto', right: '12px', bottom: _mob ? 'auto' : '16px' }); try { localStorage.removeItem('sl_compact_pos'); } catch(e){} }); jQuery(document).on('mousemove touchmove', function (e) { if (!dragging) return; var p = (e.touches || [e])[0]; if (Math.abs(p.clientX - sx) > 2 || Math.abs(p.clientY - sy) > 2) _compDragMoved = true; var newLeft = ox + p.clientX - sx, newTop = oy + p.clientY - sy; var maxX = window.innerWidth - _compactEl.outerWidth(), maxY = window.innerHeight - _compactEl.outerHeight(); newLeft = Math.max(0, Math.min(newLeft, maxX)); newTop = Math.max(0, Math.min(newTop, maxY)); _compactEl.css({ left: newLeft + 'px', top: newTop + 'px' }); }).on('mouseup touchend', function () { if (!dragging) return; dragging = false; if (_compDragMoved) { var o = _compactEl.offset(); var maxX2 = window.innerWidth - _compactEl.outerWidth(), maxY2 = window.innerHeight - _compactEl.outerHeight(); var clX = Math.max(0, Math.min(o.left, maxX2)), clY = Math.max(0, Math.min(o.top, maxY2)); _compactEl.css({ left: clX + 'px', top: clY + 'px' }); try { localStorage.setItem('sl_compact_pos', JSON.stringify({ x: clX, y: clY })); } catch (e) { } } }); })();
+  installCompactBehavior();
   jQuery('#sl_comp_header').on('click', function (e) { var was = _compDragMoved; _compDragMoved = false; if (jQuery(e.target).is('button') || was) return; panel.togglePanel(); });
   jQuery('#sl_comp_panel_btn').on('click', function (e) { e.stopPropagation(); panel.togglePanel(); });
   jQuery('#sl_comp_gen').on('click', function (e) { e.stopPropagation(); triggerGenAll(); });
@@ -95,3 +98,76 @@ export function refreshCompactBar() {
   jQuery('#sl_comp_event').text(evText);
 }
 export function triggerGenAll() { var c = 0; jQuery('.sl_img_btn[data-prompt]').each(function () { var b = jQuery(this); if (b.text().indexOf('排队') < 0 && b.text().indexOf('🔄') < 0 && b.text().indexOf('生成图片') >= 0) { b.trigger('click'); c++; } }); if (c === 0) toast('info', '没有可生成的小鱼干喵~'); else toast('success', '已排队 ' + c + ' 张图片喵~ ✨'); }
+
+function installCompactBehavior() {
+    const el = _compactEl[0], header = el.querySelector('#sl_comp_header');
+    let collapsed = false, dragging = false, hovering = false, idleTimer, drag;
+    const viewport = () => window.visualViewport || { width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0 };
+    const dimensions = () => {
+        const v = viewport();
+        return { width: Math.max(1, Math.min(300, v.width - 16)), height: Math.max(1, Math.min(198, v.height - 16)) };
+    };
+    function clamp(save = false) {
+        const v = viewport(), size = dimensions();
+        el.style.width = (collapsed ? Math.min(56, v.width) : size.width) + 'px';
+        el.style.height = (collapsed ? Math.min(56, v.height) : size.height) + 'px';
+        const rect = el.getBoundingClientRect();
+        const pos = clampPosition(rect.left, rect.top, rect.width, rect.height, v);
+        Object.assign(el.style, { left: pos.x + 'px', top: pos.y + 'px', right: 'auto', bottom: 'auto' });
+        if (save) try { localStorage.setItem('sl_compact_pos', JSON.stringify(pos)); } catch {}
+    }
+    function setCollapsed(value) {
+        if (dragging || collapsed === value) return;
+        const rect = el.getBoundingClientRect(), size = dimensions();
+        collapsed = value;
+        el.classList.toggle('sl_compact_logo', value);
+        el.style.left = (rect.right - (value ? Math.min(56, viewport().width) : size.width)) + 'px';
+        clamp();
+    }
+    function scheduleCollapse() {
+        clearTimeout(idleTimer);
+        if (!hovering && !dragging && !el.querySelector(':focus-visible')) idleTimer = setTimeout(() => setCollapsed(true), 3000);
+    }
+    const enter = e => { if (e.pointerType === 'touch') return; hovering = true; clearTimeout(idleTimer); setCollapsed(false); };
+    const leave = () => { hovering = false; scheduleCollapse(); };
+    const focus = () => { clearTimeout(idleTimer); setCollapsed(false); };
+    const blur = () => setTimeout(scheduleCollapse, 0);
+    const down = e => {
+        if (e.button && e.button !== 0 || e.target.closest('button')) return;
+        clearTimeout(idleTimer); dragging = true; _compDragMoved = false;
+        const rect = el.getBoundingClientRect();
+        drag = { x: e.clientX, y: e.clientY, left: rect.left, top: rect.top };
+        header.setPointerCapture(e.pointerId); e.preventDefault();
+    };
+    const move = e => {
+        if (!dragging) return;
+        const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+        if (Math.abs(dx) + Math.abs(dy) > 4) _compDragMoved = true;
+        el.style.left = drag.left + dx + 'px'; el.style.top = drag.top + dy + 'px'; clamp();
+    };
+    const up = () => { if (!dragging) return; dragging = false; clamp(true); scheduleCollapse(); };
+    const reset = e => {
+        e.preventDefault();
+        const v = viewport(), size = dimensions();
+        el.style.left = (v.offsetLeft || 0) + v.width - (collapsed ? 56 : size.width) - 12 + 'px';
+        el.style.top = (v.offsetTop || 0) + (v.width < 640 ? 12 : v.height - (collapsed ? 56 : size.height) - 16) + 'px';
+        clamp(true);
+    };
+    const key = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(false); panel.togglePanel(); } };
+    const clickLogo = e => { if (collapsed && !_compDragMoved) { e.stopImmediatePropagation(); setCollapsed(false); scheduleCollapse(); } };
+    header.setAttribute('tabindex', '0'); header.setAttribute('role', 'button'); header.setAttribute('aria-label', '打开小猫生图面板（可拖动）');
+    const style = document.createElement('style');
+    style.textContent = '#sl_compact.sl_compact_logo{border-radius:50%!important;overflow:hidden!important}#sl_compact.sl_compact_logo>div:not(#sl_comp_header){display:none!important}#sl_compact.sl_compact_logo #sl_comp_header{border:0!important;padding:0!important;height:100%!important;justify-content:center!important}#sl_compact.sl_compact_logo #sl_comp_header> :not(#sl_cat_icon){display:none!important}#sl_compact #sl_comp_header:focus-visible{outline:2px solid currentColor;outline-offset:-3px}';
+    document.head.appendChild(style);
+    const listeners = [[el,'pointerenter',enter],[el,'pointerleave',leave],[el,'focusin',focus],[el,'focusout',blur],
+        [header,'pointerdown',down],[header,'pointermove',move],[header,'pointerup',up],[header,'pointercancel',up],
+        [header,'dblclick',reset],[header,'keydown',key],[window,'resize',clamp],[window,'orientationchange',clamp]];
+    if (window.visualViewport) listeners.push([window.visualViewport,'resize',clamp],[window.visualViewport,'scroll',clamp]);
+    for (const [target,name,fn] of listeners) target.addEventListener(name,fn);
+    header.addEventListener('click',clickLogo,true);
+    clamp(); scheduleCollapse();
+    _compactCleanup = () => {
+        clearTimeout(idleTimer); style.remove(); header.removeEventListener('click',clickLogo,true);
+        for (const [target,name,fn] of listeners) target.removeEventListener(name,fn);
+    };
+}

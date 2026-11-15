@@ -69,7 +69,7 @@
 ## 动态字段转英文
 - `发型:黑色低发髻，斜刘海` → `black hair in a low bun with side bangs`
 - `衣着:深灰V领紧身短袖` → `a gray v-neck tight short-sleeve shirt`
-- `状态:耳根泛红` → `slight blush on her ears`
+- `要点:耳根泛红` → `slight blush on her ears`
 
 ## 造型库 detail 的处理（v1.5.0）
 【造型库】里的 **✅ 已解析** 条目：detail 里的 **原子一个不能少、一个字不能改**；但**要融进句子里写**，不要原样粘贴整串原子。

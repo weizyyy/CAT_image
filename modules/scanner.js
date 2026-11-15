@@ -1,516 +1,190 @@
-// ── SillyImage Lab 消息扫描与触发 ──
 import { slLog, slErr } from './log.js';
-import { settings, getSTContext, escapeHtml, saveSettings } from './settings.js';
-import { extractBodyText, extractBodyContent, imgBlockHead } from './text-utils.js';
+import { settings, getSTContext } from './settings.js';
 import { getProfiles, getChatId } from './pipeline/profile.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
 import { refreshCoopCards } from './sync-cards.js';
-import { galleryPrune } from './gallery.js';
 import { imgStorePut, imgStoreDeletePrefix } from './imgstore.js';
-import { renderEnhancedLite, setRestoreDeps, restoreImageBlocks } from './render.js';
+import { renderEnhancedLite, extractImgBlocksFromEnhanced, setRestoreDeps } from './render.js';
+import { fingerprint, messageKey, tokenizePlaceholders } from './placeholders.js';
+import { resetSlots } from './dom-placeholders.js';
+import { ScanCoordinator } from './scan-coordinator.js';
 
-// 注入 render 模块需要的依赖
+let active = false, generating = false, epoch = 0, timer, fallback, observer;
+const handlers = [], observations = new Map();
 setRestoreDeps(getChatId, getSTContext);
 
-// ── 扫描会话管理 ──
-var scanSession = null;
-var sessionIdCounter = 0;
-
-function startScanSession(msgElement, mesId, chatId) {
-    // [AI-Fix] 如果当前会话正在 scanning（await 协作管线期间），新消息的扫描请求不能覆写它。
-    // 原因：覆写后旧 await 的 DOM 引用失效，渲染到僵尸 DOM，消息永久无法显示图片（致命缺陷 1）。
-    // 修复：scanning 阶段拒绝新会话，等当前会话 completed 后才允许。
-    // 同一条消息正在扫描（await 管线进行中）→ 不重复启动
-    // [AI-Fix] 仅 scanning 阶段拒绝：wait_marker/wait_end 是待命会话（无 await，仅定时器），
-    // 编辑/swipe 清除标记后必须允许替换，否则 startScanSession 被守卫拦截 → 该消息永不重扫（静默死锁）。
-    if (scanSession && scanSession.mesid === mesId && scanSession.phase === 'scanning') return;
-    // [AI-Fix] 不同消息但在 scanning 阶段 → 拒绝覆盖，等当前管线完成
-    if (scanSession && scanSession.phase === 'scanning' && scanSession.mesid !== mesId) {
-        slLog('扫描会话 #' + scanSession.id + ' 正在 scanning，拒绝 #' + mesId + ' 的覆盖请求');
-        return;
-    }
-    sessionIdCounter++;
-    var sessionId = sessionIdCounter;
-    if (scanSession) {
-        clearTimeout(scanSession.timer);
-        slLog('扫描会话 #' + scanSession.id + ' 被 #' + sessionId + ' 替代');
-    }
-    scanSession = { id: sessionId, msgEl: msgElement, mesid: mesId, chatId: chatId, phase: 'wait_marker', timer: null, tries: 0, _startTime: Date.now() };
-    // 标记会话已启动（和 sl_aux_scanned 分开，避免 auxImageScan 误判）
-    msgElement.data('sl_session_started', 1);
-    slLog('扫描会话 #' + sessionId + ' 启动');
-    scheduleMarkerCheck(sessionId);
+export function generationBusy() {
+    const stream = getSTContext()?.streamingProcessor;
+    if (generating || (stream && !stream.isFinished && !stream.isStopped)) return true;
+    const stop = document.querySelector('#mes_stop');
+    return !!(stop && stop.getClientRects().length && getComputedStyle(stop).visibility !== 'hidden');
 }
 
-function scheduleMarkerCheck(sessionId) {
-    var session = scanSession;
-    if (!session || session.id !== sessionId) return;
-    clearTimeout(session.timer);
-    session.timer = setTimeout(function() { doMarkerCheck(sessionId); }, 5000);
+// ST's message data is authoritative; DOM text contains generated cards/buttons.
+export function readSnapshot(messageId) {
+    if (messageId == null || messageId === '') return null;
+    const message = getSTContext()?.chat?.[Number(messageId)];
+    if (!message || message.is_user || message.is_system || typeof message.mes !== 'string') return null;
+    const source = message.mes, chatId = getChatId(), swipe = message.swipe_id ?? 0;
+    const key = messageKey(chatId, messageId, source, swipe), version = epoch;
+    return { owner: chatId + ':' + messageId, chatId, messageId: String(messageId),
+        source, swipe, key, results: new Map(),
+        isCurrent() {
+            const current = getSTContext()?.chat?.[Number(messageId)];
+            return active && settings.pluginOn !== false && epoch === version &&
+                !generationBusy() && getChatId() === chatId &&
+                current?.mes === source && (current.swipe_id ?? 0) === swipe;
+        } };
 }
-
-function doMarkerCheck(sessionId) {
-    var session = scanSession;
-    if (!session || session.id !== sessionId) return;
-    session.tries++;
-    var text = session.msgEl.text();
-    // ── 导演模式（唯一模式）：检测 [img:] 占位符，文本稳定后触发 ──
-    {
-        if (text.indexOf('[img:') < 0) {
-            // 流式输出中可能尚未写出占位符：继续等，最多 8 次(40s)
-            if (text !== session.lastText) {
-                // [Fix] 文本仍在流式变化（[img:] 常在长消息文末）：流式时间不计入 40s 超时，
-                // 重置等待计数；否则慢流式消息在占位符出现前就被放弃（A2）。
-                session.tries = 0;
-                session.lastText = text;
-                scheduleMarkerCheck(sessionId);
-            } else if (session.tries < 8) {
-                session.lastText = text;
-                scheduleMarkerCheck(sessionId);
-            } else {
-                session.phase = 'done';
-                // [Fix] 放弃时必须清除 sl_session_started，否则该消息被永久标记"已有会话"
-                // 而永远不会重扫（即使随后 [img:] 出现）（A2）。
-                try { session.msgEl.removeData('sl_session_started'); } catch (e) {}
-                slLog('扫描 #' + sessionId + ' 40s 未检测到 [img:]，放弃');
-            }
-            return;
-        }
-        if (session.lastText !== text) {
-            // 文本仍在变化（流式/重生成）：记住当前指纹再等一轮
-            session.lastText = text;
-            scheduleMarkerCheck(sessionId);
-            return;
-        }
-        session.phase = 'done';
-        slLog('扫描 #' + sessionId + ' 占位符文本已稳定，触发协作管线');
-        var mainBody = extractBodyText(text);
-        // [Fix] 与 runAuxImageScan 内部阈值(80/20)对齐：10 字会放行后被管线内部判过短
-        // 且不复位会话 phase → 扫描会话永久卡在 scanning 死锁（A1）。
-        var mainMinLen = settings.storyMode === 'comic' ? 20 : 80;
-        if (mainBody.length >= mainMinLen) {
-            runAuxImageScan(session.msgEl);
-        } else {
-            slLog('正文过短(' + mainBody.length + ')，跳过');
-            if (scanSession) scanSession.phase = 'completed';
-        }
-        return;
-    }
+export function messageRoot(id) {
+    return Array.from(document.querySelectorAll('.mes')).find(n =>
+        String(n.getAttribute('mesid') ?? n.getAttribute('data-mesid')) === String(id))?.querySelector('.mes_text');
 }
-
-// ── 全量消息恢复 ──
-export function scanAllMsgs() {
-    try {
-        if (!settings.cWf || !settings.autoGen) return;
-        // 分支切换检测：旧 scanSession 的 DOM 已消失 → 清理
-        if (scanSession && (!scanSession.msgEl || !scanSession.msgEl.closest('body').length)) {
-            slLog('scanSession DOM 已消失（分支切换？），清理');
-            clearTimeout(scanSession.timer);
-            scanSession = null;
-        }
-        if (jQuery('.edit_textarea').length || jQuery('#curEditTextarea').length) return;
-        var chatId = getChatId();
-        jQuery('.mes').each(function() {
-            var mesEl = jQuery(this).find('.mes_text');
-            if (!mesEl.length) return;
-            var mesId = jQuery(this).attr('mesid');
-            if (!mesId || !mesId.trim()) return;
-            var fb = findBestCachedEntry(chatId, mesId, mesEl.text());
-            if (fb && /\[image:/.test(fb.value)) {
-                if (/sl_img_btn/.test(mesEl.html()) || /sl_img_block/.test(mesEl.html())) return;
-                renderEnhancedLite(mesEl, fb.value, fb.key);
-            }
-        });
-    } catch (e) {}
-}
-
-// [AI-Fix] 保存 mesId/chatId 在 await 之前，await 后用它重新查找 DOM。
-// 原因：await 协作管线可能持续 30+ 秒，期间 ST 可能重渲染消息元素，
-// 导致 await 前捕获的 lastMsg 成为脱离 DOM 的僵尸引用（致命缺陷 1 的子问题）。
-// 修复：await 后通过 mesId 重新查找 DOM，并校验消息文本未被其他会话覆盖。
-export async function runAuxImageScan(messageElement) {
-    try {
-        slLog('auxImageScan 启动');
-        if (scanSession) scanSession.phase = 'scanning';
-        // [Fix] 早退统一复位 phase：有分支在 'scanning' 下直接 return 但忘了复位时，
-        // startScanSession 的会话守卫会永久拒绝后续所有消息（静默死锁，A1）。
-        function sessDone() { if (scanSession) scanSession.phase = 'completed'; }
-        var lastMsg = messageElement || jQuery('.mes_text').last();
-        if (!lastMsg.length) { slLog('无消息'); sessDone(); return; }
-        if (lastMsg.data('sl_aux_scanned')) { slLog('已扫描过, 跳过'); sessDone(); return; }
-        lastMsg.removeData('sl_session_started');
-        var rawText = lastMsg.text();
-        // 记录文本指纹，用于检测重新生成/swipe
-        lastMsg.data('sl_text_fp', getMsgFingerprint(rawText) || rawText.slice(0, 50).replace(/\s/g, ''));
-        lastMsg.data('sl_aux_scanned', 1);
-        var bodyText = extractBodyText(rawText);
-        var minLen = settings.storyMode === 'comic' ? 20 : 80;
-        if (bodyText.length < minLen) { slLog('过短(' + bodyText.length + ')'); lastMsg.removeData('sl_aux_scanned'); lastMsg.removeData('sl_session_started'); sessDone(); return; }
-        slLog('管线启动, 清洗后: ' + bodyText.length);
-        // [AI-Fix] await 前抓取 mesId 和 chatId，await 后据此重新查找 DOM
-        var mesContainer = lastMsg.closest('.mes');
-        var mesId = mesContainer.length ? mesContainer.attr('mesid') : (Date.now() + '');
-        var chatId = getChatId();
-        var pipeTimeout = (settings.cTimeout || 180) * 1000 + 30000;
-        // ── 导演模式（唯一管线）：主模型写 [img:] 占位符 → 协作管线出图 ──
-        var pipeFn = runRosterPipeline;
-        // [Fix] 超时改为 resolve({timedOut:true}) 而不是 reject（C8）：
-        // (1) 底层管线拿不到 signal，reject 后仍在后台跑完（档案/剧情库写入照常落地），
-        //     此时清 sl_aux_scanned 放行重试会跑出第二条管线——双倍 API 调用 + 档案被两次结果互相覆盖；
-        // (2) 保留"已扫描"标记，消息在重新生成/swipe 时才自然重扫。
-        var pipePromise = pipeFn(bodyText, mesId);
-        var pipeResult = await Promise.race([
-            pipePromise,
-            new Promise(function(resolve) { setTimeout(function() { resolve({ ok: false, timedOut: true }); }, pipeTimeout); })
-        ]);
-        if (pipeResult && pipeResult.timedOut) {
-            slErr('管线整体超时(' + pipeTimeout + 'ms)，保留扫描标记，后台管线完成后档案会落地');
-            if (scanSession) scanSession.phase = 'completed';
-            return;
-        }
-        // [Fix] 无图轮：PROFILE 已更新但无插图，属正常完成（鼓励配图模式）——不缓存、不重试、保留已扫描标记
-        if (pipeResult && pipeResult.ok && !pipeResult.enhanced) {
-            slLog('无图轮: 档案已更新, 无插图, 正常完成');
-            if (scanSession) scanSession.phase = 'completed';
-            return;
-        }
-        var enhanced = pipeResult ? pipeResult.enhanced : null;
-        // [AI-Fix] 原逻辑 enhanced=null 时只 log 就 return，不清除 sl_aux_scanned，
-        // 导致这条消息被永久标记为"已扫描"，永远不再尝试。现在清除标记允许重试。
-        if (!enhanced) {
-        var retryCount = (lastMsg.data('sl_noimg_retries') || 0) + 1;
-        if (retryCount >= 3) {
-            slLog('无增强输出已达3次, 不再重试');
-            lastMsg.data('sl_aux_scanned', 1);
-        } else {
-            slLog('无增强输出(第' + retryCount + '次), 清除标记允许重试');
-            lastMsg.data('sl_noimg_retries', retryCount);
-            lastMsg.removeData('sl_aux_scanned');
-            // [B6] 死字段清理（_castSent 无读取方）
-        }
-        // [Fix] 失败/重试分支复位会话 phase：原实现漏复位，phase 卡在 'scanning'，
-        // 会导致后续新消息的扫描被会话守卫永久拒绝（静默死锁）。
-        if (scanSession) scanSession.phase = 'completed';
-        return;
-    }
-        if (!settings.msgMap) settings.msgMap = {};
-        // [AI-Fix] 通过 mesId 重新查找 DOM，不依赖 30 秒前的 lastMsg 引用
-        var freshContainer = mesId ? jQuery('.mes[mesid="' + mesId + '"]') : jQuery();
-        var freshMsg = freshContainer.length ? freshContainer.find('.mes_text') : lastMsg;
-        // [AI-Fix] 校验消息文本未被其他扫描会话覆盖（致命缺陷 1 的子问题）
-        if (freshContainer.length && freshMsg.data('sl_aux_scanned') && freshMsg.text().slice(0, 50) !== rawText.slice(0, 50)) {
-            slLog('消息已被其他会话处理，放弃渲染');
-            return;
-        }
-        var key = getMsgKey(chatId, mesId, freshMsg.text());
-        // 导演模式：只替换 [img:] 占位符为图卡，正文/状态栏原文保留（不重建）
-        // v1.22：图片缓存改走 IndexedDB（imgstore）→ 不再有"全库 50 条"的硬上限，
-        //        一轮 1-3 张图也不会在几十轮之后把老图挤掉。
-        imgStorePut(key, enhanced, Date.now());
-        renderEnhancedLite(freshMsg, enhanced, key);
-        saveSettings();
-        slLog('增强文本已缓存, key=' + key + ' (共' + Object.keys(settings.msgMap || {}).length + '条缓存)');
-        slLog('管线完成, img块:' + (enhanced.match(/\[image:/g) || []).length);
-        if (scanSession) scanSession.phase = 'completed';
-        scanAllMsgs();
-    } catch (e) {
-        slErr('管线失败: ' + e.message);
-        if (scanSession) scanSession.phase = 'completed';
-
-        // [AI-Fix] 异常时清除 sl_aux_scanned 和 sl_session_started 两个标记，
-        // 否则这条消息永久无法重新扫描。原逻辑只清 sl_session_started 且用可能已失效的 lastMsg。
-        try {
-            var errMsg = messageElement || jQuery('.mes_text').last();
-            if (errMsg && errMsg.length) {
-                errMsg.removeData('sl_session_started');
-                errMsg.removeData('sl_aux_scanned');
-            }
-        } catch (e2) { slErr('清理失败: ' + e2.message); }
-    }
-}
-
-// ── 消息指纹（正文###后50字，用于检测🔄 重新生成/swipe切换） ──
-export function getMsgFingerprint(text) {
-    var si = text.indexOf('正文###');
-    if (si >= 0) return text.slice(si + 5, si + 55).replace(/\s/g, '');
-    return text.slice(0, 50).replace(/\s/g, '');
-}
-// ── 为消息缓存生成唯一 key（含指纹，支持 swipe 分支独立缓存） ──
-export function getMsgKey(chid, mesid, text) {
-    return chid + '_' + mesid + '_' + getMsgFingerprint(text || '').slice(0, 20);
-}
-// ── 精确条目版：返回 {key, value}，供渲染时生成"消息key#序号"块标识 ──
-export function findBestCachedEntry(chid, mesid, text) {
-    var msgMap = settings.msgMap || {};
-    var key = getMsgKey(chid, mesid, text);
-    if (msgMap[key] && /\[image:/.test(msgMap[key])) return { key: key, value: msgMap[key] };
-    var prefix = chid + '_' + mesid + '_';
-    for (var k in msgMap) {
-        if (k.indexOf(prefix) === 0 && msgMap[k] && /\[image:/.test(msgMap[k])) {
-            var cachedText = imgBlockHead(msgMap[k]);
-            var msgText = imgBlockHead(text);
-            if (cachedText && msgText && cachedText === msgText) {
-                var best = { key: k, value: msgMap[k] }, foundComplete = msgMap[k].indexOf('结尾###') >= 0;
-                for (var k2 in msgMap) {
-                    if (k2 === k || k2.indexOf(prefix) !== 0) continue;
-                    if (!msgMap[k2] || !/\[image:/.test(msgMap[k2])) continue;
-                    var ct2 = extractBodyContent(msgMap[k2]).slice(0,40).replace(/\s/g,'');
-                    if (ct2 === msgText && msgMap[k2].indexOf('结尾###') >= 0) { best = { key: k2, value: msgMap[k2] }; foundComplete = true; break; }
+function renderSnapshot(snapshot, enhanced) {
+    const root = messageRoot(snapshot.messageId);
+    if (!root) return;
+    renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source);
+    if (settings.feBridge === false) return;
+    const visit = (node, depth = 0) => {
+        if (depth > 3) return;
+        for (const frame of node.querySelectorAll('iframe')) {
+            try {
+                const doc = frame.contentDocument;
+                if (doc?.body) {
+                    renderEnhancedLite(jQuery(doc.body), enhanced, snapshot.key, snapshot.source);
+                    visit(doc.body, depth + 1);
                 }
-                return best;
-            }
+            } catch { /* Cross-origin frames cannot be modified. */ }
         }
+    };
+    visit(root);
+}
+export const scanCoordinator = new ScanCoordinator({
+    run: (snapshot, isCurrent, signal) => snapshot.run ? snapshot.run(isCurrent, signal)
+        : runRosterPipeline(snapshot.source, snapshot.messageId, { isCurrent, signal, results: snapshot.results,
+            onSlot(index, enhanced) {
+                if (!isCurrent()) return;
+                snapshot.blocks ||= [];
+                snapshot.blocks[index] = extractImgBlocksFromEnhanced(enhanced, snapshot.key, index)[0];
+                renderSnapshot(snapshot, snapshot.blocks);
+            } }),
+    async commit(snapshot, result) {
+        if (snapshot.commit) return snapshot.commit(result);
+        await imgStorePut(snapshot.key, JSON.stringify({ version: 2, source: snapshot.source,
+            swipe: snapshot.swipe, enhanced: result.enhanced }), Date.now());
+        if (snapshot.isCurrent()) renderSnapshot(snapshot, result.enhanced);
+    },
+    onError(error, snapshot) {
+        slErr('配图分析失败: ' + error.message);
+        if (snapshot.onError) snapshot.onError(error);
+        messageRoot(snapshot.messageId)?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
+            slot.textContent = '🐱 分析失败，点击重试'; slot.classList.add('sl_scan_retry'); slot.style.cursor = 'pointer';
+        });
     }
-    // [Fix] 已删除"全表跨消息兜底"（原子串匹配会把旧消息条目盗用给新消息——覆盖/串台的根源）。
-    // 宁可空缓存（按钮重生成）也不跨消息盗图。
+});
+export function getMsgFingerprint(text) { return fingerprint(text); }
+export function getMsgKey(chid, mesid, text, swipe = 0) { return messageKey(chid, mesid, text, swipe); }
+export function findBestCachedEntry(chid, mesid, text, swipe = 0) {
+    const key = getMsgKey(chid, mesid, text, swipe), raw = settings.msgMap?.[key];
+    if (!raw) return null;
+    try {
+        const record = JSON.parse(raw);
+        if (record.version === 2 && record.source === text && record.swipe === swipe) return { key, value: record.enhanced };
+    } catch { /* Old prefix caches cannot safely be attributed to a swipe. */ }
     return null;
 }
-
-// ── 模糊匹配缓存（支持 swipe 分支 + 编辑恢复；旧调用保留返回 value） ──
-export function findBestCached(chid, mesid, text) {
-    var e = findBestCachedEntry(chid, mesid, text);
-    return e ? e.value : null;
-}
-// ── 清理某条消息的所有 swipe 分支缓存 ──
+export function findBestCached(chid, mesid, text, swipe = 0) { return findBestCachedEntry(chid, mesid, text, swipe)?.value || null; }
 export function clearMsgCache(chid, mesid) {
-    var prefix = chid + '_' + mesid + '_';
-    for (var k in (settings.msgMap || {})) {
-        if (k.indexOf(prefix) === 0) { delete settings.msgMap[k]; slLog('清理旧缓存: ' + k); }
-    }
-    // v1.22：IndexedDB 里同前缀的一起清（否则刷新后又被装回来）
+    const prefix = chid + '_' + mesid + '_';
+    for (const key of Object.keys(settings.msgMap || {})) if (key.startsWith(prefix)) delete settings.msgMap[key];
     imgStoreDeletePrefix(prefix);
 }
-
-// ── 轮询 + 事件钩子注册 ──
-
-// ── 事件驱动扫描（替代 2s/3s 高频轮询） ──
-// [AI-Fix] 原实现：poll1(3s 全量 scanAllMsgs) + poll2(2s 检测最后一条) 双轮询 + 延迟5s注册事件。
-//   问题：轮询空转、事件注册延迟导致事件丢失、MESSAGE_UPDATED 只恢复图片不触发扫描。
-//   新实现：ST 官方事件驱动（MESSAGE_RECEIVED/GENERATION_ENDED/SWIPED/EDITED/UPDATED/CHAT_CHANGED），
-//   仅保留 10s 低频兜底轮询（事件丢失保护），成本约为原来的 1/5。
-
-function checkLastMessage() {
-    try {
-        if (settings.pluginOn === false) return;
-        var all = jQuery('.mes_text');
-        if (!all || !all.length) return;
-        var last = all.last();
-        if (!last || !last.length) return;
-        var rawText = last.text() || '';
-        // 导演模式：只要求 [img:] 占位符（不依赖任何正文标记）
-        if (rawText.indexOf('[img:') < 0) return;
-        // 从 DOM 中获取 mesid：优先 closest->parents 兜底
-        var mesContainer = last.closest('.mes');
-        if (!mesContainer || !mesContainer.length) mesContainer = last.parents('.mes').first();
-        var mesId = mesContainer.length ? mesContainer.attr('mesid') : null;
-        if (!mesId) { slLog('检查: 未获取到mesId, 跳过'); return; }
-        var chatId = getChatId();
-        if (last.data('sl_session_started')) return;     // 已有扫描会话，等待完成
-        if (last.data('sl_aux_scanned')) {
-            var oldFp = last.data('sl_text_fp');
-            var newFp = getMsgFingerprint(rawText) || rawText.slice(0, 50).replace(/\s/g, '');
-            if (oldFp && oldFp !== newFp) {
-                slLog('检查: 检测到文本变化(重新生成/swipe), 清除旧渲染');
-                resetMessageMarkers(last);
-            } else { return; }
-        }
-        var bodyText = extractBodyText(rawText);
-        if (bodyText.length < (settings.storyMode === 'comic' ? 20 : 80)) { slLog('检查: 正文过短(' + bodyText.length + '字), 跳过'); return; }
-        // 已有缓存内容则跳过新扫描（防止重启后二次扫描覆盖缓存）
-        var cachedContent = findBestCached(chatId, mesId, rawText);
-        if (cachedContent && /\[image:/.test(cachedContent)) { slLog('检查: 已有缓存, 跳过扫描, mesId=' + mesId); return; }
-        slLog('检查: 检测到标记, 启动扫描会话, mesId=' + mesId);
-        startScanSession(last, mesId, chatId);
-    } catch (e) { slErr('消息检查异常: ' + e.message); }
-}
-
-function resetMessageMarkers(el) {
-    el.removeData('sl_aux_scanned');
-    el.removeData('sl_session_started');
-    el.find('.sl_img_block, .sl_img_btn').remove();
-    el.css({ background: '', 'border-left': '', padding: '', 'border-radius': '', 'line-height': '', color: '', 'font-size': '', overflow: '' });
-}
-
-// [AI-Fix] 编辑/swipe：清除该消息旧渲染并按新内容重新扫描
-function handleMessageChanged(messageId) {
-    try {
-        if (settings.pluginOn === false) return;
-        var el = messageId != null ? jQuery('.mes[mesid="' + messageId + '"]') : jQuery();
-        if (!el || !el.length) { checkLastMessage(); return; }
-        var msgText = el.find('.mes_text').first();
-        if (!msgText || !msgText.length) { checkLastMessage(); return; }
-        slLog('消息变更(编辑/swipe) mesid=' + messageId + ', 清除旧渲染');
-        resetMessageMarkers(msgText);
-        var text = msgText.text() || '';
-        if (text.indexOf('[img:') < 0) return;
-        var bodyText = extractBodyText(text);
-        if (bodyText.length < (settings.storyMode === 'comic' ? 20 : 80)) { slLog('变更: 正文过短, 跳过'); return; }
-        var cachedContent = findBestCached(getChatId(), messageId, text);
-        if (cachedContent && /\[image:/.test(cachedContent)) { slLog('变更: 已有缓存, 跳过扫描'); return; }
-        slLog('变更: 启动扫描会话, mesId=' + messageId);
-        startScanSession(msgText, messageId, getChatId());
-    } catch (e) { slErr('消息变更处理异常: ' + e.message); }
-}
-
-// [Fix] 初始恢复（事件驱动改革后刷新无事件可依赖）：1.5s 一次太早——
-// 酒馆消息 DOM/聊天上下文未就绪时 getChatId 走兜底 key → 缓存匹配失败 → 图片"凭空消失"；
-// 改为：等 DOM+上下文就绪（最多10s），恢复后再补两轮（4s/8s）兜底后续加载。
-// [Fix] DOM 观察器：酒馆聊天区任何渲染变化（硬刷新后的再渲染/聊天加载/流式完成/文本替换）
-// 都会触发自动恢复——不再赌"什么时候就绪"，无论 ST 何时/几次重渲都能接住。
-// 幂等：已渲染出 sl_img_block 的消息会被跳过，不会循环。
-var _restoreObserver = null, _restoreDebounce = null;
-function scheduleRestoreNow() {
-    if (_restoreDebounce) clearTimeout(_restoreDebounce);
-    _restoreDebounce = setTimeout(function () {
-        try { restoreImageBlocks(); scanAllMsgs(); } catch (e) { slErr('DOM变化恢复异常: ' + e.message); }
-    }, 600);
-}
-function startDomObserver() {
-    if (_restoreObserver || typeof MutationObserver === 'undefined') return;
-    try {
-        var target = document.getElementById('chat') || document.body;
-        _restoreObserver = new MutationObserver(function (mutations) {
-            for (var i = 0; i < mutations.length; i++) {
-                var t = mutations[i].target;
-                if (t && t.closest && (t.closest('#chat') || t.closest('.mes_text') || t.closest('.mes'))) {
-                    scheduleRestoreNow();
-                    return;
-                }
-            }
-        });
-        _restoreObserver.observe(target, { childList: true, subtree: true, characterData: false });
-        slLog('DOM观察器已启动：聊天渲染变化自动恢复图片');
-    } catch (e) { slLog('DOM观察器启动失败: ' + e.message); }
-}
-function stopDomObserver() {
-    if (_restoreObserver) { try { _restoreObserver.disconnect(); } catch (e) {} _restoreObserver = null; }
-    if (_restoreDebounce) { clearTimeout(_restoreDebounce); _restoreDebounce = null; }
-}
-
-function initialRestore(attempt) {
-    attempt = attempt || 0;
-    try {
-        var mesCount = jQuery('.mes').length;
-        if (mesCount > 0) {
-            // [Fix] 日志实锤：硬刷新后酒馆需数秒才把聊天渲染进 DOM（首个 pass 只见 1 条消息）。
-            // "有消息就算就绪"太弱 → 改为 12s 内每秒重试（恢复幂等，已渲染图卡的消息自动跳过）。
-            restoreImageBlocks();
-            scanAllMsgs();
-            slLog('初始恢复: 第' + (attempt + 1) + '次, mes=' + mesCount + ', 本次渲染图卡=' + (restoreImageBlocks._lastCount || 0));
-        } else {
-            slLog('初始恢复: 等待消息DOM (第' + (attempt + 1) + '次, mes=' + mesCount + ')');
-        }
-        if (attempt < 12) {
-            setTimeout(function () { initialRestore(attempt + 1); }, 1000);
-        } else {
-            slLog('初始恢复: 12s 轮询窗口结束（DOM观察器持续兜底）');
-        }
-    } catch (e) { slErr('初始恢复异常: ' + e.message); }
-}
-
-export function startPolling() {
-    // [AI-Fix] 幂等守卫：防止重复注册定时器和事件钩子
-    if (startPolling._active) return;
-    startPolling._active = true;
-    slLog('startPolling: 启动事件驱动扫描');
-    var ctx = null, evSrc = null, evTypes = null;
-    try {
-        ctx = getSTContext();
-        evSrc = ctx.eventSource;
-        evTypes = ctx.event_types || ctx.eventTypes;
-    } catch (e) { slLog('事件源获取失败, 仅兜底轮询: ' + e.message); }
-
-    if (evSrc && evSrc.on && evTypes) {
-        var onReceived = function() { checkLastMessage(); };
-        var onGenEnded = function() { checkLastMessage(); };
-        var onMsgUpdated = function() { setTimeout(restoreImageBlocks, 300); };
-        var onMsgChanged = function(messageId) { handleMessageChanged(messageId); };
-        var onChatChanged = function() {
-            slLog('检测到聊天切换喵~ 清理旧会话中… ✨');
-            if (scanSession) { clearTimeout(scanSession.timer); scanSession = null; }
-            try { refreshCoopCards(); } catch (e) { slLog('协作卡刷新异常: ' + e.message); }
-            // v1.21 图库级联：切聊天时顺手清掉"聊天文件已不存在"的图账与消息图缓存（60s 节流）
-            try {
-                if (!startPolling._galPruneTs || Date.now() - startPolling._galPruneTs > 60000) {
-                    startPolling._galPruneTs = Date.now();
-                    galleryPrune().catch(function () {});
-                }
-            } catch (eGP) { slLog('图库清理跳过: ' + eGP.message); }
-            var last = jQuery('.mes_text').last();
-            setTimeout(function() { restoreImageBlocks(); scanAllMsgs(); }, 2000);
-        };
-        if (evTypes.MESSAGE_RECEIVED) evSrc.on(evTypes.MESSAGE_RECEIVED, onReceived);
-        if (evTypes.GENERATION_ENDED) evSrc.on(evTypes.GENERATION_ENDED, onGenEnded);
-        if (evTypes.MESSAGE_UPDATED) evSrc.on(evTypes.MESSAGE_UPDATED, onMsgUpdated);
-        if (evTypes.MESSAGE_SWIPED) evSrc.on(evTypes.MESSAGE_SWIPED, onMsgChanged);
-        if (evTypes.MESSAGE_EDITED) evSrc.on(evTypes.MESSAGE_EDITED, onMsgChanged);
-        if (evTypes.CHAT_CHANGED) evSrc.on(evTypes.CHAT_CHANGED, onChatChanged);
-        startPolling._handlers = { onReceived: onReceived, onGenEnded: onGenEnded, onMsgUpdated: onMsgUpdated, onMsgChanged: onMsgChanged, onChatChanged: onChatChanged };
-        slLog('ST 事件钩子就绪喵~ ✨');
-        startDomObserver();
-        // [BugFix v3.1] 退出重进/刷新后历史图片不恢复：事件驱动改革删除了旧轮询恢复，
-        // 但刷新后无任何事件 → restoreImageBlocks/scanAllMsgs 永不被调。首次延迟统一恢复。
-        initialRestore();
-    } else {
-        slLog('事件源不可用, 降级为 10s 兜底轮询');
-        startDomObserver();
-        initialRestore();
+export function scanAllMsgs() {
+    if (!active || settings.pluginOn === false || generationBusy()) return;
+    for (const el of document.querySelectorAll('.mes')) {
+        const id = el.getAttribute('mesid') ?? el.getAttribute('data-mesid'), snapshot = readSnapshot(id);
+        if (!snapshot) continue;
+        const cached = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
+        if (cached) renderSnapshot(snapshot, cached.value);
     }
-
-    // [AI-Fix] 10s 低频兜底轮询（事件丢失保护），替代原 2s+3s 双轮询
-    startPolling._fallback = setInterval(function() {
-        try {
-            if (settings.pluginOn === false) return;
-            checkLastMessage();
-        } catch (e) { slErr('兜底轮询异常: ' + e.message); }
-    }, 10000);
 }
-
+export function checkLastMessage() {
+    if (!active || settings.pluginOn === false || generationBusy() || document.querySelector('.edit_textarea,#curEditTextarea')) return;
+    const chat = getSTContext()?.chat || [];
+    let id = chat.length - 1;
+    while (id >= 0 && (chat[id].is_user || chat[id].is_system)) id--;
+    if (id >= 0) scheduleMessage(id);
+}
+function scheduleMessage(id, immediate = false) {
+    const snapshot = readSnapshot(id);
+    if (!snapshot || !snapshot.isCurrent()) return;
+    const root = messageRoot(id);
+    if (root && root.dataset.slRevision !== snapshot.key) {
+        resetSlots(root); root.querySelectorAll('.sl_img_block').forEach(n => n.remove()); root.dataset.slRevision = snapshot.key;
+    }
+    if (!tokenizePlaceholders(snapshot.source).length) return;
+    const cache = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
+    if (cache) { renderSnapshot(snapshot, cache.value); return; }
+    if (!settings.cWf || !settings.auxUrl || !settings.auxModel) return;
+    const observation = observations.get(snapshot.owner);
+    if (!observation || observation.key !== snapshot.key) {
+        observations.set(snapshot.owner, { key: snapshot.key, since: Date.now() });
+        if (!immediate) { requestCheck(800); return; }
+    } else if (!immediate && Date.now() - observation.since < 700) { requestCheck(800); return; }
+    renderSnapshot(snapshot, null);
+    scanCoordinator.submit(snapshot);
+}
+export async function runAuxImageScan(element) {
+    if (generationBusy()) return;
+    const id = element?.closest('.mes').attr('mesid') ?? (getSTContext()?.chat?.length - 1);
+    const snapshot = readSnapshot(id);
+    if (snapshot) {
+        const job = scanCoordinator.jobs.get(snapshot.key);
+        if (job?.state === 'running' || job?.state === 'queued') return;
+        scanCoordinator.jobs.delete(snapshot.key);
+    }
+    scheduleMessage(id, true);
+}
+function requestCheck(delay = 150) {
+    clearTimeout(timer); timer = setTimeout(() => { scanAllMsgs(); checkLastMessage(); }, delay);
+}
+export function startPolling() {
+    if (active) return;
+    active = true;
+    const ctx = getSTContext(), source = ctx?.eventSource, types = ctx?.event_types || ctx?.eventTypes;
+    const on = (name, fn) => {
+        if (!types?.[name] || !source?.on) return;
+        source.on(types[name], fn); handlers.push(() => (source.off || source.removeListener)?.call(source, types[name], fn));
+    };
+    on('GENERATION_STARTED', (_type, _options, dryRun) => {
+        if (dryRun) return;
+        generating = true; epoch++; scanCoordinator.clear(); clearTimeout(timer);
+    });
+    for (const name of ['GENERATION_ENDED', 'GENERATION_STOPPED']) on(name, () => { generating = false; requestCheck(300); });
+    for (const name of ['MESSAGE_RECEIVED', 'MESSAGE_UPDATED', 'CHARACTER_MESSAGE_RENDERED', 'MESSAGE_DELETED']) on(name, () => requestCheck());
+    for (const name of ['MESSAGE_EDITED', 'MESSAGE_SWIPED']) on(name, id => {
+        requestCheck(); setTimeout(() => { if (active) scheduleMessage(id); }, 850);
+    });
+    on('CHAT_CHANGED', () => { epoch++; generating = false; observations.clear(); scanCoordinator.clear(); refreshCoopCards(); requestCheck(500); });
+    observer = new MutationObserver(mutations => {
+        if (mutations.every(m => (m.target.nodeType === 1 ? m.target : m.target.parentElement)?.closest?.('[data-sl-slot],.sl_img_block'))) return;
+        requestCheck(250);
+    });
+    const chatRoot = document.querySelector('#chat');
+    if (chatRoot) { observer.observe(chatRoot, { subtree: true, childList: true, characterData: true }); chatRoot.addEventListener('load', onFrameLoad, true); }
+    jQuery(document).off('click.slScan', '.sl_scan_retry').on('click.slScan', '.sl_scan_retry', function () { runAuxImageScan(jQuery(this).closest('.mes_text')); });
+    fallback = setInterval(() => requestCheck(), 3000); requestCheck(500);
+    slLog('扫描器 v2：完整回复版本 + 生成生命周期 + 独立图位');
+}
+function onFrameLoad() { requestCheck(200); }
 export function stopPolling() {
-    slLog('stopPolling: 停止扫描');
-    startPolling._active = false;
-    stopDomObserver();
-    if (startPolling._fallback) { clearInterval(startPolling._fallback); startPolling._fallback = null; }
-    if (startPolling._hookTimer) { clearTimeout(startPolling._hookTimer); startPolling._hookTimer = null; }
-    try {
-        var ctx = getSTContext();
-        var evSrc = ctx.eventSource;
-        var evTypes = ctx.event_types || ctx.eventTypes;
-        var hs = startPolling._handlers;
-        if (evSrc && evSrc.off && evTypes && hs) {
-            if (evTypes.MESSAGE_RECEIVED && hs.onReceived) evSrc.off(evTypes.MESSAGE_RECEIVED, hs.onReceived);
-            if (evTypes.GENERATION_ENDED && hs.onGenEnded) evSrc.off(evTypes.GENERATION_ENDED, hs.onGenEnded);
-            if (evTypes.MESSAGE_UPDATED && hs.onMsgUpdated) evSrc.off(evTypes.MESSAGE_UPDATED, hs.onMsgUpdated);
-            if (evTypes.MESSAGE_SWIPED && hs.onMsgChanged) evSrc.off(evTypes.MESSAGE_SWIPED, hs.onMsgChanged);
-            if (evTypes.MESSAGE_EDITED && hs.onMsgChanged) evSrc.off(evTypes.MESSAGE_EDITED, hs.onMsgChanged);
-            if (evTypes.CHAT_CHANGED && hs.onChatChanged) evSrc.off(evTypes.CHAT_CHANGED, hs.onChatChanged);
-            startPolling._handlers = null;
-        }
-    } catch (e) { slErr('stopPolling 清理钩子异常: ' + e.message); }
+    active = false; epoch++; generating = false; clearTimeout(timer); clearInterval(fallback); observer?.disconnect();
+    document.querySelector('#chat')?.removeEventListener('load', onFrameLoad, true);
+    handlers.splice(0).forEach(off => off()); observations.clear(); scanCoordinator.clear(); jQuery(document).off('click.slScan');
 }
-// 检查当前角色卡是否有静态档案缓存
-export function hasCastCache() {
-    try {
-        var pf = getProfiles();
-        return pf && Object.keys(pf.root[pf.charName].cast || {}).length > 0;
-    } catch(e) { return false; }
-}
-
-// 暴露扫描器状态给 UI 小窗
+export function hasCastCache() { const pf = getProfiles(); return !!(pf && Object.keys(pf.root[pf.charName].cast || {}).length); }
 export function getScannerStatus() {
-    if (!settings.pluginOn) return 'off';
-    if (!scanSession) return 'idle';
-    var p = scanSession.phase || '';
-    if (p === 'wait_marker') return 'waiting_body';
-    if (p === 'wait_end') return 'waiting_end';
-    if (p === 'scanning') return 'scanning';
-    if (p === 'completed') return 'completed';
-    if (p === 'done') return 'completed';
-    return 'scanning';
+    if (settings.pluginOn === false) return 'off';
+    if (generationBusy()) return 'waiting_end';
+    return scanCoordinator.running ? 'scanning' : 'idle';
 }
-
-// ══════════════════════════════
-
-
-
-

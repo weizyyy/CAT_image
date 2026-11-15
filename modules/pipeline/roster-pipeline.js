@@ -1,3 +1,4 @@
+import { tokenizePlaceholders, replaceTokens } from '../placeholders.js';
 // ── SillyImage Lab v2.4 协作管线（酒馆AI模式） ──
 // 主LLM写正文+[img:]占位 → 插件AI按占位符与人物表写提示词 → 填回占位 → 走现有渲染/生成链
 // v1.2 起为唯一管线（旧画师管线 runAuxPipeline 已移除）
@@ -10,7 +11,6 @@ import { findImagePlaceholders, buildImageBlock, extractDynamicBits, findLostNum
 import { rosterDataTextFor, rosterEntries, upsertPerson, applyPersonSegments, importFromCast, splitKnownPersonSegments, setEnglishAnchor, setZitAnchor, getAtomAnchor, atomValues, setPortraitPrompts } from '../roster.js';
 import { getProfiles } from './profile.js';
 import { wardrobeDataTextFor, upsertEntry, normKey } from '../wardrobe.js';
-import { statusesDataTextFor, upsertStatus, setStatusActive } from '../statuses.js';
 import { krea2StyleById } from '../style-presets.js';
 
 // ── v1.13.1 管线输出合格性判定（失败重试用）──
@@ -37,7 +37,7 @@ export function classifyPipelineFailure(out, expectCount, meta) {
     // 结构标记在 → 再看 IMAGES 段实际回了几条
     if (expectCount && expectCount > 0) {
         var lines = [];
-        try { lines = parseRosterImages(t) || []; } catch (ePL) { lines = []; }
+        try { lines = parseRosterImages(t, expectCount) || []; } catch (ePL) { lines = []; }
         if (!lines.length) return REFUSAL_RE.test(t) ? 'refusal' : 'noimage';
         if (lines.length < expectCount) {
             // v1.27.2：条数不足时把"标记计数"打出来 —— 不猜，让失败可见。
@@ -177,8 +177,7 @@ function buildPurgeMessages() {
     // ④ 后段：behavior_prerecord / 三层法则 / 职业规范 / 建档 vs 写提示词 / 输出格式（原文顺序）
     push(cut.after);
     // ⑤ 语料（查表用，压在最后）
-    push(['atomic-vocab.txt', 'wardrobe-vocab.txt', 'wardrobe-expand.txt',
-          'statuses-vocab.txt', 'statuses-expand.txt']
+    push(['atomic-vocab.txt', 'wardrobe-vocab.txt', 'wardrobe-expand.txt']
         .map(_p).filter(Boolean).join('\n\n'));
     // ⑥ 模式 overlay（v1.28.0：模式 → 文件收敛成一张表；新增模式只改 settings.MODES + 这张表）
     var pipeMode = getActiveMode();
@@ -270,9 +269,9 @@ function _mergePartial(oldOut, newPart) {
         + ck;
 }
 
-async function _continueOutput(baseMsgs, partial, fromN, toN) {
+async function _continueOutput(baseMsgs, partial, fromN, toN, callApi = auxApiCallRaw) {
     var note = CONTINUE_NOTE.replace(/%FROM%/g, String(fromN)).replace(/%TO%/g, String(toN));
-    return await auxApiCallRaw(
+    return await callApi(
         baseMsgs.concat([
             { role: 'assistant', content: String(partial || '') },
             { role: 'user', content: note }
@@ -283,9 +282,7 @@ async function _continueOutput(baseMsgs, partial, fromN, toN) {
 }
 
 // ── 用户消息：人物表 + 占位符（不发送正文——导演模式插件AI 只做"档案+酒馆AI要点 → 提示词"的编辑） ──
-function buildRosterUserContent(placeholders, wardrobeInfo, statusInfo) {
-    var avatar = '';
-    try { avatar = settings.promptPrefix || ''; } catch (e) {}
+function buildRosterUserContent(placeholders, wardrobeInfo) {
     var lines = [];
     lines.push('【任务】为每个 [img:] 占位符输出 1 条提示词，按【占位符】编号一一对应。人物外貌必须引用【人物档案】，禁止用名字代替外貌。禁止偷懒：每一幅图都要写完整详情（人物当前状态+衣着发型+表情+动作+场景+光影），不允许省略/概括/一句话带过。');
     // v1.28.0：Krea 2 风格锁定 —— 风格句由插件统一前置（跨轮稳定），这里告诉模型"别再自己写媒介"
@@ -305,7 +302,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo, statusInfo) {
     // 于是 3 个占位符 → 3 个 PROFILE/IMAGES/END（实测 14707 字被误判 short）。
     // 解析器已经能合并多段；这里再把源头堵上，省掉重复输出的 token。
     lines.push('⚠️ **整轮只输出一次三段**：占位符有 N 个，就在**同一个** `---IMAGES---` 段里写 N 行。禁止"每个占位符各写一份 PROFILE/IMAGES/END"。');
-    lines.push('---PROFILE---\n{人物建档 JSON，无更新写{}}---END---\n\n[---WARDROBE---\n{造型具象化 JSON}---END---  ← **仅当【造型库】有「待具象化」条目时才输出这一段；没有就整段省略**]\n\n[---STATUSES---\n{状态具象化 JSON}---END---  ← **仅当【状态库】有「待具象化」条目时才输出；没有就整段省略**]\n\n---IMAGES---\n第1条纯文本提示词（禁止 [image:]、禁止【提示词】包裹、禁止解释性文字）\n第2条……\n（条数=占位符数；零图写：（无））\n---END---');
+    lines.push('---PROFILE---\n{人物建档 JSON，无更新写{}}---END---\n\n[---WARDROBE---\n{造型具象化 JSON}---END---  ← **仅当【造型库】有「待具象化」条目时才输出这一段；没有就整段省略**]\n\n---IMAGES---\n第1条纯文本提示词（禁止 [image:]、禁止【提示词】包裹、禁止解释性文字）\n第2条……\n（条数=占位符数；零图写：（无））\n---END---');
     lines.push('只输出以上段落，禁止任何其他内容：禁止图块、禁止复述正文/占位符原文、禁止聊天口吻、禁止 Markdown 代码块。');
     lines.push('');
     lines.push('【事实段·必须由你写进提示词】`事实:` 段里的每一条，都是**前提**不是描写，插件**不会**替你补写。');
@@ -332,16 +329,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo, statusInfo) {
         lines.push('· 禁止把造型详情写进氛围段；禁止把「怎么穿」写进 ---WARDROBE--- 回传');
         lines.push('');
     }
-    // v1.9.0：【状态库】—— 时效性状态（晒黑/染发/吻痕/淤青/缠绷带…）
-    if (statusInfo && statusInfo.text) {
-        lines.push('【状态库】（主模型写了 ±key；你负责「原样复用」或「具象化」，规则见 statuses-vocab.txt / statuses-expand.txt）');
-        lines.push(statusInfo.text);
-        lines.push('· ✅ 已解析：**逐字写进提示词，禁止改写、禁止同义替换**');
-        lines.push('· ⚠️ 待具象化：按维度表写具体（位置 / 颜色 / 形态），并通过 ---STATUSES--- 回传');
-        lines.push('· ⚠️ **看不见就不写**（被衣服挡住 / 景别拍不到）—— 但库里仍然要有');
-        lines.push('· ⛔ 已取消的状态：本轮起不要写进提示词');
-        lines.push('');
-    }
+
     // v1.11.1：【种子】—— 主模型给的是"取词方向"，精度由你按 roster/system.txt 的四步反推
     var _seedLines = [];
     for (var _sqi = 0; _sqi < placeholders.length; _sqi++) {
@@ -425,7 +413,7 @@ function _looseJson(raw) {
 function _allSections(output, name) {
     var re = new RegExp(
         '---\\s*' + name + '\\s*---([\\s\\S]*?)'
-        + '(?:---\\s*END\\s*---|(?=---\\s*(?:PROFILE|IMAGES|CHECK|WARDROBE|STATUSES)\\s*---)|$)',
+        + '(?:---\\s*END\\s*---|(?=---\\s*(?:PROFILE|IMAGES|CHECK|WARDROBE)\\s*---)|$)',
         'g');
     var out = [], m, t = String(output || '');
     while ((m = re.exec(t)) !== null) {
@@ -465,7 +453,7 @@ function _mergePersonEntry(a, b) {
     return out;
 }
 
-// WARDROBE / STATUSES 这种 key→string 的段：宽容 JSON → 对象
+// WARDROBE 这种 key→string 的段：宽容 JSON → 对象
 function _looseKeyMap(text, tag) {
     try {
         var fixed = (String(text || '').trim()).replace(/:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g,
@@ -513,18 +501,6 @@ export function parseRosterWardrobe(output) {
     return Object.keys(merged).length ? merged : null;
 }
 
-// v1.9.0：解析可选的 ---STATUSES--- 段（key → detail）
-export function parseRosterStatuses(output) {
-    var sections = _allSections(output, 'STATUSES');
-    if (!sections.length) return null;
-    var merged = {};
-    for (var s = 0; s < sections.length; s++) {
-        var obj = _looseKeyMap(sections[s], '状态 STATUSES');
-        if (obj) for (var k in obj) merged[k] = obj[k];
-    }
-    return Object.keys(merged).length ? merged : null;
-}
-
 // 单段内的行解析（原逻辑，逐字搬出以免行为漂移）
 function _parseImageLines(text) {
     var t = String(text || '').trim();
@@ -563,9 +539,15 @@ function _parseImageLines(text) {
     return out;
 }
 
-export function parseRosterImages(output) {
+export function parseRosterImages(output, expectedCount) {
     var sections = _allSections(output, 'IMAGES');
     if (!sections.length) return [];
+    if (expectedCount === 1) {
+        const part = sections[0].trim();
+        if (!part || /^(?:（无）|\(无\))$/.test(part)) return [];
+        const wrapped = part.match(/【提示词[】:：]*([\s\S]*?)【\/提示词】/);
+        return [(wrapped ? wrapped[1] : part).replace(/^\s*(?:\d+[.、)]|[-•·])\s*/, '').trim()];
+    }
     if (sections.length === 1) return _parseImageLines(sections[0]);
     // 多段：逐段解析后按出现顺序拼接（跨段重复条目丢弃）
     var out = [];
@@ -582,7 +564,8 @@ export function parseRosterImages(output) {
 // ── 占位符替换：原文 [img:…] → [image:场景]【提示词】…【/提示词】 ──
 export function fillPlaceholders(bodyText, placeholders, prompts) {
     var phIdx = 0, pIdx = 0, missing = 0;
-    var out = bodyText.replace(/\[img:\s*[\s\S]*?\]/g, function(m) {
+    var values = placeholders.map(function(ph) {
+        var m = ph.text;
         var ph = placeholders[phIdx];
         phIdx++;
         if (!ph) return m;                    // 意外错位：保留原文
@@ -608,6 +591,7 @@ export function fillPlaceholders(bodyText, placeholders, prompts) {
         } catch (eWrap) {}
         return buildImageBlock(ph.scene, prompt);
     });
+    var out = replaceTokens(bodyText, placeholders, values);
     if (prompts.length !== placeholders.length) {
         slErr('⚠️ 提示词条数(' + prompts.length + ') ≠ 占位符数(' + placeholders.length + ')，按序配对');
     }
@@ -630,7 +614,14 @@ function _auditFacts(ph, prompt, idx) {
 }
 
 // ── 入口 ──
-export async function runRosterPipeline(bodyText, mesId) {
+async function runSinglePipeline(bodyText, mesId, options) {
+    const callApi = async (...args) => {
+        if (!options.isCurrent()) throw new Error('回复版本已变更');
+        args[6] = options.signal;
+        const result = await auxApiCallRaw(...args);
+        if (!options.isCurrent()) throw new Error('回复版本已变更');
+        return result;
+    };
     var placeholders = findImagePlaceholders(bodyText);
     if (!placeholders.length) {
         slLog('协作管线: 无 [img:] 占位符，本轮无图（正常完成）');
@@ -695,39 +686,13 @@ export async function runRosterPipeline(bodyText, mesId) {
             }
         }
 
-        // 1.6 状态库：解析状态段 → 查库（取消立即生效，不等 AI 回传）
-        var _allStatusOps = [];
-        for (var _spi = 0; _spi < placeholders.length; _spi++) {
-            var _so2 = placeholders[_spi].statusOps || [];
-            for (var _soj = 0; _soj < _so2.length; _soj++) _allStatusOps.push(_so2[_soj]);
-        }
-        for (var _offi = 0; _offi < _allStatusOps.length; _offi++) {
-            if (_allStatusOps[_offi].op === '-') setStatusActive(_allStatusOps[_offi].key, false);
-        }
-        var statusInfo = { text: '', resolved: [], pending: [], off: [] };
-        if (_allStatusOps.length) {
-            statusInfo = statusesDataTextFor(_allStatusOps);
-            slLog('状态库: 已解析 ' + statusInfo.resolved.length + ' / 待具象化 ' + statusInfo.pending.length + ' / 取消 ' + statusInfo.off.length);
-            for (var _spj = 0; _spj < placeholders.length; _spj++) {
-                var _pp = placeholders[_spj];
-                _pp._statuses = [];
-                var _ops2 = _pp.statusOps || [];
-                for (var _oki = 0; _oki < _ops2.length; _oki++) {
-                    if (_ops2[_oki].op !== '+') continue;
-                    for (var _rki = 0; _rki < statusInfo.resolved.length; _rki++) {
-                        if (statusInfo.resolved[_rki].query === _ops2[_oki].key) _pp._statuses.push(statusInfo.resolved[_rki]);
-                    }
-                }
-            }
-        }
-
         // 2. 调用插件AI（v1.27.0：分层 system + finish_reason 通道 + 帧内续写）
         var sysMsgs = buildPurgeMessages();
-        var userContent = buildRosterUserContent(placeholders, wardrobeInfo, statusInfo);
+        var userContent = buildRosterUserContent(placeholders, wardrobeInfo);
         var expectN = placeholders.length;
         var baseMsgs = sysMsgs.concat([{ role: 'user', content: userContent }]);
 
-        var _res = await auxApiCallRaw(baseMsgs, null, 16384, 0.25);
+        var _res = await callApi(baseMsgs, null, 16384, 0.25);
         slLog('首调: finish=' + _res.finish + ', content=' + _res.content.length + ' 字, reasoning=' + _res.reasoningLen + ' 字'
             + ', system 分层=' + sysMsgs.length + ' 条');
 
@@ -735,14 +700,14 @@ export async function runRosterPipeline(bodyText, mesId) {
         // 而思考在第一轮已经完成 —— 续写只补正文，思考一律关掉。
         var _cont = 0;
         while (_res.truncated && _cont < CONTINUE_MAX) {
-            var _got = (parseRosterImages(_res.content) || []).length;
+            var _got = (parseRosterImages(_res.content, 1) || []).length;
             if (_got >= expectN) break;
             // 截断时最后一条可能是半截 → 丢掉它，从它的位置重写（半截不能当成品）
             var _safe = Math.max(0, _got - 1);
             slErr('⚠️ 输出被截断(finish=length, reasoning=' + _res.reasoningLen + ' 字) → 帧内续写 #'
                 + (_cont + 1) + '：已有 ' + _got + ' 条（保留 ' + _safe + ' 条），需 ' + expectN + ' 条');
             var _trimmed = _trimTo(_res.content, _safe);
-            var _c = await _continueOutput(baseMsgs, _trimmed, _safe + 1, expectN);
+            var _c = await _continueOutput(baseMsgs, _trimmed, _safe + 1, expectN, callApi);
             if (!_c || !String(_c.content || '').trim()) {
                 slErr('⛔ 续写返回空 → 停在 ' + _safe + '/' + expectN + ' 条');
                 _res = { content: _trimmed, finish: _res.finish, reasoningLen: _res.reasoningLen, truncated: true };
@@ -757,7 +722,7 @@ export async function runRosterPipeline(bodyText, mesId) {
             _cont++;
         }
         if (_cont) {
-            slLog('续写结束: ' + _cont + ' 次 → ' + (parseRosterImages(_res.content) || []).length + '/' + expectN
+            slLog('续写结束: ' + _cont + ' 次 → ' + (parseRosterImages(_res.content, 1) || []).length + '/' + expectN
                 + ' 条' + (_res.truncated ? '（仍被截断）' : ''));
         }
         var output = _res.content;
@@ -769,7 +734,7 @@ export async function runRosterPipeline(bodyText, mesId) {
         // v1.13.6 数字保真闸门：条数对了，但主模型给的数字在提示词里蒸发了 → 同样算不合格
         var _lostNum = [];
         if (!_fail) {
-            try { _lostNum = findLostNumbersInPrompts(placeholders, parseRosterImages(output)); } catch (eLN) { _lostNum = []; }
+            try { _lostNum = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1)); } catch (eLN) { _lostNum = []; }
             if (_lostNum.length) {
                 _fail = 'lostnum';
                 slErr('⚠️ 数字保真：主模型给的数字在提示词里丢了 → 重试 · ' + _lostNum.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / '));
@@ -779,7 +744,7 @@ export async function runRosterPipeline(bodyText, mesId) {
         if (_fail) {
             slErr('⚠️ 管线输出不合格(' + _fail + ', ' + (output ? output.length : 0) + ' 字, 需要 ' + expectN + ' 条) → 重试');
             var _gotN = 0;
-            try { _gotN = (_fail === 'short' || _fail === 'truncated') ? (parseRosterImages(output) || []).length : 0; } catch (eG) { _gotN = 0; }
+            try { _gotN = (_fail === 'short' || _fail === 'truncated') ? (parseRosterImages(output, 1) || []).length : 0; } catch (eG) { _gotN = 0; }
             var _need = _missingHint(expectN, _gotN);
             // v1.13.2：**除了 refusal，其余一律带上上次输出**。
             // 理由：模型每次调用都是无状态的，任务素材（档案/种子/占位符）全在 userContent 里，
@@ -820,7 +785,7 @@ export async function runRosterPipeline(bodyText, mesId) {
                     { role: 'assistant', content: output },
                     { role: 'user', content: _retryNote + '\n禁止输出拒绝、道歉、警告、元评论。' }
                 ]);
-                var _r2 = await auxApiCallRaw(_msgs, null, 16384, 0.25, undefined);
+                var _r2 = await callApi(_msgs, null, 16384, 0.25, undefined);
                 output = _r2.content;
                 _meta = { finish: _r2.finish, truncated: _r2.truncated, reasoningLen: _r2.reasoningLen };
             } else {
@@ -829,7 +794,7 @@ export async function runRosterPipeline(bodyText, mesId) {
                     + '本轮任务必须完成。即使某个情节你不愿展开，也只允许**删掉该情节的敏感细节**，\n'
                     + '但 ---PROFILE--- 与 ---IMAGES--- 两段必须完整输出，' + _need + '，每条提示词必须是可用的生图描述。\n'
                     + '禁止输出拒绝、道歉、警告、元评论；拒绝或空回 = 格式错误 = 本轮管线中断、用户算力作废。';
-                var _r3 = await auxApiCallRaw(sysMsgs.concat([{ role: 'user', content: _retryContent }]), null, 16384, 0.25, undefined);
+                var _r3 = await callApi(sysMsgs.concat([{ role: 'user', content: _retryContent }]), null, 16384, 0.25, undefined);
                 output = _r3.content;
                 _meta = { finish: _r3.finish, truncated: _r3.truncated, reasoningLen: _r3.reasoningLen };
             }
@@ -842,7 +807,7 @@ export async function runRosterPipeline(bodyText, mesId) {
             // 拿它去回退到上一次输出会更差。让人看图确认才是正确处置。
             if (!_fail2) {
                 try {
-                    var _lostNum2 = findLostNumbersInPrompts(placeholders, parseRosterImages(output));
+                    var _lostNum2 = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1));
                     if (_lostNum2.length) {
                         slErr('⚠️ 重试后数字仍未字面出现（可能合法同义改写）: '
                             + _lostNum2.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / ')
@@ -855,12 +820,12 @@ export async function runRosterPipeline(bodyText, mesId) {
                 // 缺的那几条交给 fillPlaceholders 的「锚点+场景」兜底（脸是对的，只是描述薄）。
                 // 0 图对用户来说是最差结果 —— 比"描述薄一点"糟糕得多。
                 var _n1 = 0, _n2 = 0;
-                try { _n1 = _beforeRetry ? (parseRosterImages(_beforeRetry) || []).length : 0; } catch (eN1) {}
-                try { _n2 = (parseRosterImages(output) || []).length; } catch (eN2) {}
+                try { _n1 = _beforeRetry ? (parseRosterImages(_beforeRetry, 1) || []).length : 0; } catch (eN1) {}
+                try { _n2 = (parseRosterImages(output, 1) || []).length; } catch (eN2) {}
                 if (_n1 >= _n2 && _n1 > 0) { output = _beforeRetry; _n2 = _n1; }
                 slErr('⚠️ 重试后仍不合格(' + _fail2 + ') → 用已拿到的 ' + _n2 + '/' + expectN + ' 条继续；缺失的走【锚点+场景】兜底（本轮不是 0 图）');
             } else {
-                slLog('重试成功: ' + output.length + ' 字, ' + (parseRosterImages(output) || []).length + ' 条');
+                slLog('重试成功: ' + output.length + ' 字, ' + (parseRosterImages(output, 1) || []).length + ' 条');
             }
         }
         if (!output || !output.trim()) throw new Error('插件AI返回空');
@@ -868,6 +833,7 @@ export async function runRosterPipeline(bodyText, mesId) {
         slLog('协作管线LLM返回, 长度=' + output.length + ' 前200: ' + output.slice(0, 200).replace(/\n/g, '⏎'));
         slLog('协作管线LLM返回, 尾200: ' + output.slice(-200).replace(/\n/g, '⏎'));
 
+        if (!options.isCurrent()) return { ok: false, stale: true };
         // 3.0 v1.25 自校记录（---CHECK---）：模型自己写的校对结果，只记录、不判分、不进生图
         try {
             var _check = parseCheckSection(output);
@@ -968,28 +934,8 @@ export async function runRosterPipeline(bodyText, mesId) {
         }
         saveSettings();
 
-        // 3.6 解析 ---STATUSES--- → 回写状态库，并激活本轮 +key
-        var stData = parseRosterStatuses(output);
-        if (stData && statusInfo.pending.length) {
-            var sUps = 0;
-            for (var _sk in stData) {
-                var _sdet = stData[_sk];
-                if (typeof _sdet !== 'string' || !_sdet.trim()) continue;
-                var _pendKey = null;
-                for (var _pi3 = 0; _pi3 < statusInfo.pending.length; _pi3++) {
-                    if (normKey(statusInfo.pending[_pi3].key) === normKey(_sk)) { _pendKey = statusInfo.pending[_pi3].key; break; }
-                }
-                if (!_pendKey) { slLog('状态回写跳过（不在待办里）: ' + _sk); continue; }
-                if (upsertStatus(_pendKey, _sdet.trim())) sUps++;
-            }
-            if (sUps) slLog('状态库回写: ' + sUps + ' 条');
-        }
-        for (var _ai2 = 0; _ai2 < _allStatusOps.length; _ai2++) {
-            if (_allStatusOps[_ai2].op === '+') setStatusActive(_allStatusOps[_ai2].key, true);
-        }
-
         // 4. 解析提示词并填充
-        var prompts = parseRosterImages(output);
+        var prompts = parseRosterImages(output, 1);
         // v1.14.2 地点保真：不阻断、不重试，只点名（场景对不上就是这里漏的）
         try {
             var _lostPlace = findLostPlaces(placeholders, prompts);
@@ -1003,4 +949,27 @@ export async function runRosterPipeline(bodyText, mesId) {
         slErr('协作管线失败: ' + e.message);
         return null;
     }
+}
+
+// A distinct request and result slot for EVERY occurrence (including identical
+// markers). A model omission can never shift later prompts into the wrong image.
+export async function runRosterPipeline(bodyText, mesId, options = {}) {
+    const isCurrent = options.isCurrent || (() => true);
+    const tokens = tokenizePlaceholders(bodyText);
+    const values = [];
+    const results = options.results || new Map();
+    let succeeded = 0;
+    for (const token of tokens) {
+        if (!isCurrent()) return { ok: false, stale: true };
+        const result = results.get(token.index) || await runSinglePipeline(token.text, mesId + '#' + token.index, { isCurrent, signal: options.signal });
+        if (!isCurrent()) return { ok: false, stale: true };
+        if (result?.enhanced && result.enhanced !== token.text) {
+            results.set(token.index, result);
+            values[token.index] = result.enhanced;
+            options.onSlot?.(token.index, result.enhanced);
+            succeeded++;
+        }
+    }
+    return { ok: succeeded === tokens.length, enhanced: replaceTokens(bodyText, tokens, values),
+        tokens, partial: succeeded > 0 && succeeded < tokens.length };
 }

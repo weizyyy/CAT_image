@@ -17,19 +17,24 @@ function _genOwner() {
 
 var imageQueue = [];
 var queueRunning = false;
+const pendingBlocks = new Map();
 
 async function processImageQueue() {
     if (queueRunning || !imageQueue.length) return;
     queueRunning = true;
     var task = imageQueue.shift();
+    if (!task.custom && (!task.btn[0]?.isConnected || settings.pluginOn === false)) {
+        pendingBlocks.delete(task.blockId);
+        queueRunning = false;
+        return processImageQueue();
+    }
     slLog('排队处理:', task.id, '剩余:', imageQueue.length);
     try {
-        var workflow = JSON.parse(settings.cWf);
+        var workflow = task.workflow;
         var prompt = task.prompt;
         // Anime 模式强制清理中文（删空则保留原文，防空提示词）
         if (isEnglishMode()) { var _clean = cleanAnimePrompt(prompt); if (_clean) prompt = _clean; }
         var result = await generateImage(workflow, prompt);
-        imgCacheSet(task.prompt, result.url);
         // v1.21 图库：每张产出的图都记一笔（独立账本，不受 msgMap 50 条上限影响）
         try {
             galleryAdd(result.url, {
@@ -40,8 +45,14 @@ async function processImageQueue() {
             });
         } catch (eG) { slLog('图库记录跳过: ' + eG.message); }
         // [Fix] 图块精确缓存：按块标识（消息key#序号）记录，同一提示词内容不再互相覆盖
-        var _slid = task.btn && task.btn.data ? task.btn.data('slid') : '';
+        var _slid = task.blockId;
         if (_slid) imgCacheSetById(_slid, result.url);
+        // A message may be redrawn during generation. Update the live button for
+        // this exact block ID, never another image with the same prompt.
+        if (!task.custom && task.btn[0]?.ownerDocument) {
+            const live = Array.from(task.btn[0].ownerDocument.querySelectorAll('.sl_img_btn')).find(n => n.dataset.slid === task.blockId);
+            if (live) task.btn = jQuery(live);
+        }
         if (task.custom) {
             // [Fix] 通用任务（如生成立绘）：由调用方回调处理结果
             task.custom.onSuccess(result);
@@ -59,11 +70,6 @@ async function processImageQueue() {
             task.btn.parent()[0].offsetHeight;
             getSTContext().saveMetadataDebounced && getSTContext().saveMetadataDebounced();
             // 重新绑定点击，恢复按钮功能
-            task.btn.on('click', async function() {
-                var b = jQuery(this);
-                if (b.text() === '排队中\u2026') return;
-                enqueueGen(b, b.data('prompt'));
-            });
             slLog('排队完成:', task.id);
         }
     } catch (e) {
@@ -72,24 +78,23 @@ async function processImageQueue() {
             slLog('排队失败(任务):', task.id, e.message);
         } else {
             task.btn.text('\u2715 \u91cd\u8bd5').css({ background: COLORS.red, color: '#fff' });
-            task.btn.on('click', async function() {
-                var b = jQuery(this);
-                if (b.text() === '排队中\u2026') return;
-                enqueueGen(b, b.data('prompt'));
-            });
             slLog('排队失败:', task.id, e.message);
         }
     }
+    pendingBlocks.delete(task.blockId);
     queueRunning = false;
     processImageQueue();
 }
 
 export function enqueueGen(btn, prompt) {
+    const blockId = btn.attr('data-slid');
+    if (blockId && pendingBlocks.has(blockId)) { btn.text('排队中\u2026'); return; }
+    if (blockId) pendingBlocks.set(blockId, true);
     var id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
     btn.text('排队中\u2026').css({ background: COLORS.orange, color: '#fff' }).off('click');
     var _own = _genOwner(), _scene = '';
     try { _scene = String(btn.closest('.sl_img_block').find('div').first().text() || '').replace(/^🖼️\s*/, '').slice(0, 60); } catch (eS) {}
-    imageQueue.push({ id: id, btn: btn, prompt: prompt, scene: _scene, charName: _own.charName, chatKey: _own.chatKey });
+    imageQueue.push({ id: id, btn: btn, blockId, prompt: prompt, workflow: settings.cWf, scene: _scene, charName: _own.charName, chatKey: _own.chatKey });
     slLog('入队:', id, '队列长度:', imageQueue.length);
     processImageQueue();
 }
@@ -97,7 +102,7 @@ export function enqueueGen(btn, prompt) {
 // [Fix] 通用排队任务（立绘等非聊天图按钮的生成）：与聊天图共用同一队列，串行打 ComfyUI
 export function enqueueTask(id, prompt, onSuccess, onFail) {
     var _own = _genOwner();
-    imageQueue.push({ id: id, prompt: prompt, custom: { onSuccess: onSuccess, onFail: onFail }, charName: _own.charName, chatKey: _own.chatKey });
+    imageQueue.push({ id: id, prompt: prompt, workflow: settings.cWf, custom: { onSuccess: onSuccess, onFail: onFail }, charName: _own.charName, chatKey: _own.chatKey });
     slLog('入队(任务):', id, '队列长度:', imageQueue.length);
     processImageQueue();
 }
@@ -107,7 +112,11 @@ export function getQueueLength() {
 }
 
 export function clearQueue() {
+    for (const task of imageQueue) {
+        pendingBlocks.delete(task.blockId);
+        if (task.btn) task.btn.text('✦ 生成图片');
+        if (task.custom?.onFail) task.custom.onFail(new Error('队列已清空'));
+    }
     imageQueue = [];
-    queueRunning = false;
     slLog('排队已清空');
 }

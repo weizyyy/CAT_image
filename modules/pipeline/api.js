@@ -57,21 +57,26 @@ export function stripCoT(text) {
         // 旧实现把它当思考残留砍掉（1788 字 → 1730 字，正好一段 CHECK）。
         // 判据：残余里还有段标记就不截，只有纯废话才砍。
         var tail = t.slice(lastIdx);
-        if (!/---\s*(?:PROFILE|IMAGES|CHECK|WARDROBE|STATUSES)\s*---/.test(tail)) {
+        if (!/---\s*(?:PROFILE|IMAGES|CHECK|WARDROBE)\s*---/.test(tail)) {
             t = t.slice(0, lastIdx);
         }
     }
     return t.trim();
 }
 
-async function _post(endpoint, headers, body, timeoutMs) {
+async function _post(endpoint, headers, body, timeoutMs, signal) {
     var ctrl = new AbortController();
     var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs);
+    const abort = () => ctrl.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) ctrl.abort();
     try {
-        return await fetch(endpoint, { method: 'POST', headers: headers, body: JSON.stringify(body), signal: ctrl.signal });
+        const response = await fetch(endpoint, { method: 'POST', headers: headers, body: JSON.stringify(body), signal: ctrl.signal });
+        const text = await response.text();
+        return { ok: response.ok, status: response.status, text: async () => text, json: async () => JSON.parse(text) };
     } catch (e) {
         throw new Error(e && e.name === 'AbortError' ? '辅助API请求超时(' + timeoutMs + 'ms)' : (e ? e.message : 'fetch失败'));
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 
 /**
@@ -87,7 +92,7 @@ async function _post(endpoint, headers, body, timeoutMs) {
  * @param {string} forceModel
  * @param {string} thinkingLevel       off | low | high | max（缺省 off）
  */
-export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel, thinkingLevel) {
+export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel, thinkingLevel, signal) {
     var model = forceModel || settings.auxModel;
     if (!settings.auxUrl || !model) {
         slLog('auxApiCall: auxUrl或model未配置');
@@ -113,7 +118,7 @@ export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temper
     applyThinking(body, thinkingLevel);
 
     var timeoutMs = (settings.cTimeout || 180) * 1000;
-    var response = await _post(endpoint, headers, body, timeoutMs);
+    var response = await _post(endpoint, headers, body, timeoutMs, signal);
     slLog('auxApiCall 响应状态:', response.status, '| max_tokens=' + mt + ' | thinking=' + (thinkingLevel || 'off'));
 
     if (!response.ok) {
@@ -128,7 +133,7 @@ export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temper
             // v1.27.0：删掉 thinking 字段 = 对端按服务端默认（DeepSeek 官方是 enabled + high）
             // → reasoning 会开始吃 token。这里必须同步把预算抬到 high 档，否则必然截断。
             body.max_tokens = Math.max(Number(body.max_tokens) || 0, THINKING_BUDGET.high);
-            response = await _post(endpoint, headers, body, timeoutMs);
+            response = await _post(endpoint, headers, body, timeoutMs, signal);
             slLog('auxApiCall 降级重试响应状态:', response.status, '| max_tokens 已按 high 档抬到 ' + body.max_tokens);
             if (!response.ok) {
                 var errorText2 = await response.text().catch(function () { return ''; });

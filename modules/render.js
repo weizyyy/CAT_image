@@ -1,3 +1,5 @@
+import { tokenizePlaceholders } from './placeholders.js';
+import { mountSlots, updateSlots } from './dom-placeholders.js';
 // ── SillyImage Lab 渲染 ──
 import { slLog, slErr } from './log.js';
 import { settings, COLORS, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
@@ -57,71 +59,19 @@ var _getChatId, _getSTContext, _restoringBlocks = false; // 从外部注入的�
 export function setRestoreDeps(getChatIdFn, getContextFn) { _getChatId = getChatIdFn; _getSTContext = getContextFn; }
 
 export function restoreImageBlocks() {
-    if (!_getChatId || !_getSTContext) return;
-    _restoringBlocks = true;
-    restoreImageBlocks._lastCount = 0;  // 本次恢复渲染的图卡数（诊断日志用）
-    // [AI-Fix] 所有早退路径都归零 _restoringBlocks，否则 autoGen 永久停摆
-    if (jQuery('.edit_textarea').length || jQuery('#curEditTextarea').length) { _restoringBlocks = false; return; }
-    var chatId = _getChatId();
-    jQuery('.mes').each(function() {
-        var mesEl = jQuery(this).find('.mes_text');
-        if (!mesEl.length) return;
-        var mesId = jQuery(this).attr('mesid');
-        if (!mesId) { mesId = jQuery(this).attr('data-mesid') || jQuery(this).attr('id'); }
-        if (!mesId || !mesId.trim()) return;
-        if (/sl_img_btn/.test(mesEl.html()) || mesEl.find('.sl_img_block').length) return;
-        // [Fix] 与 scanner.findBestCached 同口径按当前文本匹配（B3）：
-        // 原实现按 chatId_mesId_ 前缀取"第一条"，同一消息多条 swipe 分支时会恢复错图
-        var msgMap = settings.msgMap || {};
-        var mesRawText = mesEl.text() || '';
-        var key = chatId + '_' + mesId;
-        var cached = msgMap[key];
-        var cachedKey = key;
-        if (!cached || !/\[image:/.test(cached)) {
-            var fpPrefix = key + '_';
-            var mHead = imgBlockHead(mesRawText);
-            var kvMatch = null, kvMatchK = null;
-            for (var kk in msgMap) {
-                if (kk.indexOf(fpPrefix) !== 0 || !msgMap[kk] || !/\[image:/.test(msgMap[kk])) continue;
-                var kHead = imgBlockHead(msgMap[kk]);
-                if (kHead && mHead && kHead === mHead) {
-                    kvMatch = msgMap[kk]; kvMatchK = kk;
-                    if (msgMap[kk].indexOf('结尾###') >= 0) break;  // 优先带完整标记的条目
-                }
-            }
-            // [Fix] 不再"取任意前缀首条"（swipe 分支随机取错）；仅接受正文前40字全等的条目
-            cached = kvMatch;
-            cachedKey = kvMatchK || key;
-        }
-        // [Fix] 已删除"跨聊天/子串模糊兜底"——它会把旧消息的缓存盗用给新消息（覆盖/串台根源）。
-        // 消息→缓存仅允许：精确 key / 前缀内正文前40字全等；失败即放弃（按钮自动重生，绝不盗图）。
-        if (!cached || !/\[image:/.test(cached)) return;
-        // 导演模式：只替换占位符为图卡，保留原文 HTML（状态栏等）
-        renderEnhancedLite(mesEl, cached, cachedKey); restoreImageBlocks._lastCount++;
-    });
-    _restoringBlocks = false;
-    // [Fix] 恢复阶段不自动点击（_restoringBlocks），如果确实缺图（缓存未命中）用户得手点——
-    // 恢复结束 800ms 后补一次兜底自动出图（仅"⚡ 生成图片"未生成按钮；已缓存/排队/重新生成不触发）
-    if (settings.autoGen === 1) {
-        setTimeout(function() {
-            if (_restoringBlocks) return;
-            jQuery('.sl_img_btn').each(function() {
-                var b = jQuery(this);
-                if (b.text().indexOf('排队') < 0 && b.text().indexOf('🔄') < 0 && b.text().indexOf('生成图片') >= 0) b.trigger('click');
-            });
-        }, 800);
-    }
+    // Defer module lookup to avoid a scanner/render initialization cycle.
+    return import('./scanner.js').then(m => m.scanAllMsgs()).catch(e => slErr('恢复图片失败: ' + e.message));
 }
 
 // ══════════════════════════════
 // ── v2.4 轻量渲染（酒馆AI模式）：只替换 [img:…] 占位符为图卡，正文/状态栏原文 HTML 全部保留 ──
 // 修复：旧 renderEnhanced 全量重建（escape+<br>）→ 文字挤成一坨、原文 HTML 结构（状态栏等）丢失
-export function extractImgBlocksFromEnhanced(enhancedText, blockKey) {
+export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex = 0) {
     var blocks = [];
     if (!enhancedText) return blocks;
     var re = /\[image:\s*([\s\S]*?)\]/g;
     var m;
-    var blockIdx = 0;
+    var blockIdx = startIndex;
     while ((m = re.exec(enhancedText)) !== null) {
         var scene = (m[1] || '').trim();
         // [Fix] 用正则匹配位置定位提示词（同场景多图不共用第一块，B4）
@@ -133,56 +83,22 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey) {
         // [Fix] 旧缓存 key 兼容（644d40c 前缓存 key=scene+', '+prompt），否则刷新后需重新生成
         var bid = blockKey ? blockKey + '#' + blockIdx : '';
         blockIdx++;
-        blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, imgCacheGetById(bid) || imgCacheGet(fullPrompt) || (promptContent && scene ? imgCacheGet(scene + ', ' + promptContent) : null), bid) });
+        blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, (bid ? imgCacheGetById(bid) : imgCacheGet(fullPrompt)), bid) });
     }
     return blocks;
 }
 
-export function renderEnhancedLite(element, enhancedText, blockKey) {
-    if (!element || !element.length) return;
-    if (element.find('.sl_img_block').length) return;  // 已渲染防重
-    var blocks = extractImgBlocksFromEnhanced(enhancedText, blockKey);
-    if (!blocks.length) return;
-    var bi = 0;
-    try {
-        // 按序在文本节点中找 [img:…] 占位符，原位替换为图卡（其余 HTML 原样保留）
-        var walker = document.createTreeWalker(element[0], NodeFilter.SHOW_TEXT, {
-            acceptNode: function(n) {
-                var v = n.nodeValue || '';
-                if (v.indexOf('[img:') >= 0) return NodeFilter.FILTER_ACCEPT;
-                return NodeFilter.FILTER_REJECT;
-            }
-        });
-        var nodes = [];
-        while (walker.nextNode()) nodes.push(walker.currentNode);
-        for (var ni = 0; ni < nodes.length && bi < blocks.length; ni++) {
-            var node = nodes[ni];
-            var val = node.nodeValue || '';
-            var idx = val.indexOf('[img:');
-            if (idx < 0) continue;
-            var close = val.indexOf(']', idx);
-            if (close < 0) continue;  // 跨节点未闭合 → 跳过，交给末尾兜底
-            var before = val.slice(0, idx);
-            var after = val.slice(close + 1);
-            var frag = document.createDocumentFragment();
-            if (before) frag.appendChild(document.createTextNode(before));
-            var tmp = document.createElement('div');
-            tmp.innerHTML = blocks[bi].html;
-            while (tmp.firstChild) frag.appendChild(tmp.firstChild);
-            if (after) frag.appendChild(document.createTextNode(after));
-            node.parentNode.replaceChild(frag, node);
-            bi++;
-            slLog('Lite渲染: 第' + bi + '个占位符已替换为图卡');
+export function renderEnhancedLite(element, enhancedText, blockKey, sourceText) {
+    const root = element?.[0];
+    if (!root) return;
+    const tokens = tokenizePlaceholders(sourceText ?? root.textContent);
+    const blocks = Array.isArray(enhancedText) ? enhancedText : enhancedText ? extractImgBlocksFromEnhanced(enhancedText, blockKey) : null;
+    mountSlots(root, tokens, blockKey, blocks);
+    bindImageButtonsIn(root.ownerDocument);
+    if (blocks) updateSlots(root, blockKey, blocks);
+    if (blocks && settings.autoGen === 1 && settings.pluginOn !== false) {
+        for (const btn of root.querySelectorAll('.sl_img_btn')) {
+            if (btn.textContent.includes('生成图片')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'));
         }
-    } catch (e) { slLog('Lite渲染节点替换异常: ' + e.message); }
-    // 兜底：占位符找不到（节点被切分/包裹）→ 图卡追加消息末尾，不丢图
-    if (bi < blocks.length) {
-        var left = blocks.length - bi;
-        for (; bi < blocks.length; bi++) element.append(blocks[bi].html);
-        slLog('Lite渲染: 兜底追加 ' + left + ' 张图卡');
-    }
-    if (settings.autoGen === 1 && !_restoringBlocks) {
-        setTimeout(function() { element.find('.sl_img_btn').each(function() { var b = jQuery(this); if (b.text().indexOf('生成图片') >= 0) b.trigger('click'); }); }, 600);
     }
 }
-

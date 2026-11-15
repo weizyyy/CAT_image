@@ -1,3 +1,4 @@
+import { workflowRequest } from './workflow-template.js';
 // ── SillyImage Lab 🎨 ComfyUI连接 通信 ──
 import { slLog } from './log.js';
 import { settings, getSTHeaders, saveSettings, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
@@ -122,84 +123,9 @@ export async function deleteWorkflow(name) {
     saveSettings();
 }
 
-export async function fetchComfyModels() {
-    // 直接调 ComfyUI 的 object_info（不走后端代理，减少依赖）
-    var base = (settings.cUrl || '').replace(/\/+$/, '');
-    if (!base) throw new Error('未配置 ComfyUI 地址');
-    var response = await fetch(base + '/object_info');
-    if (!response.ok) throw new Error('ComfyUI 返回 ' + response.status);
-    var info = await response.json();
-    var models = { checkpoints: [], unets: [], clips: [], vaes: [] };
-    for (var key in info) {
-        var obj = info[key];
-        if (!obj || !obj.input || !obj.input.required) continue;
-        for (var k in obj.input.required) {
-            var v = obj.input.required[k];
-            if (!Array.isArray(v) || v.length < 2) continue;
-            var list = v[0];
-            if (!Array.isArray(list)) continue;
-            var cat = null;
-            if (/checkpoint|ckpt_name/i.test(k)) cat = 'checkpoints';
-            else if (/unet_name/i.test(k)) cat = 'unets';
-            else if (/clip_name|text_encoder/i.test(k)) cat = 'clips';
-            else if (/vae_name/i.test(k)) cat = 'vaes';
-            if (cat) list.forEach(function(m) { if (!models[cat].includes(m)) models[cat].push(m); });
-        }
-    }
-    settings.models = { unet: models.checkpoints, clip: models.clips, vae: models.vaes, lora: [] };
-    saveSettings();
-    return settings.models;
-}
-
-// ── v1.4.2 条件节点定位：跟着采样器连线找「正向 / 负向」文本节点 ──
-// 为什么不能靠遍历顺序：ComfyUI 的正向与负向文本节点 class_type 都是 CLIPTextEncode、
-// 输入名都是 text ——「判断输入名是否含 negative」永远为真，这层保护形同虚设。
-// 当负向节点的 id 比正向小时（很多分享的工作流如此），正向提示词会被写进负向节点，图直接废掉。
-// KSampler.inputs.positive / .negative = ["节点id", 槽位] 才是权威答案。
-function _isTextEncodeNode(node) {
-    return !!(node && /CLIPTextEncode|TextEncode/i.test(String(node.class_type || '')));
-}
-
-function _collectUpstream(workflow, startId) {
-    var seen = {}, out = [], stack = [String(startId)], guard = 0;
-    while (stack.length && guard++ < 500) {
-        var id = stack.pop();
-        if (!id || id === 'undefined' || seen[id]) continue;
-        seen[id] = true;
-        var node = workflow[id];
-        if (!node) continue;
-        out.push(id);
-        var inputs = node.inputs || {};
-        for (var k in inputs) {
-            var v = inputs[k];
-            if (Array.isArray(v) && v.length === 2 && (typeof v[0] === 'string' || typeof v[0] === 'number')) stack.push(String(v[0]));
-        }
-    }
-    return out;
-}
-
-// 返回 { pos:{id:true}, neg:{id:true}, wired:bool }
-// wired=false = 工作流里没有同时带 positive/negative 输入的采样器 → 调用方退回启发式定位
-export function resolveConditioningNodes(workflow) {
-    var pos = {}, neg = {}, wired = false;
-    for (var id in workflow) {
-        var n = workflow[id];
-        if (!n || !n.inputs) continue;
-        if (!Array.isArray(n.inputs.positive) || !Array.isArray(n.inputs.negative)) continue;
-        wired = true;
-        var up = _collectUpstream(workflow, n.inputs.positive[0]);
-        for (var i = 0; i < up.length; i++) if (_isTextEncodeNode(workflow[up[i]])) pos[up[i]] = true;
-        var un = _collectUpstream(workflow, n.inputs.negative[0]);
-        for (var j = 0; j < un.length; j++) if (_isTextEncodeNode(workflow[un[j]])) neg[un[j]] = true;
-    }
-    // 同一节点被正负同时引用（罕见）→ 优先当正向，避免漏写提示词
-    for (var k in pos) if (neg[k]) delete neg[k];
-    return { pos: pos, neg: neg, wired: wired };
-}
-
 // ── 最终正向提示词组装（v1.8.3 抽出）──
 // 目的：面板里"复制提示词"必须等于**实际发给 ComfyUI 的那一条**（走一遍真实管线，而不是只给裸提示词）
-// 顺序与 generateImage 原实现完全一致：画风预设(zit) → anime质量前缀 → 前置提示词 → 主体 → 艺术家标签
+// 仅保留模型输出、画风和艺术家风格，不注入通用前缀或负面词。
 export function composeFinalPrompt(prompt) {
     prompt = String(prompt || '')
         .replace(/\[image:[^\]]*\]/g, '')
@@ -221,119 +147,27 @@ export function composeFinalPrompt(prompt) {
     if (stylePrefix && STYLE_PRESETS[stylePrefix] && (curMode === 'zit' || !curMode)) {
         prompt = STYLE_PRESETS[stylePrefix] + ' ' + prompt;
     }
-    if (isEnglishMode(curMode) && settings.animeQualityPrefix) prompt = settings.animeQualityPrefix + ', ' + prompt;
     if (isEnglishMode(curMode) && settings.animeArtist) prompt = prompt + ', ' + settings.animeArtist;
-    // v1.28.0：Krea 2 风格锁定 —— 紧跟在全局「前置提示词」之后、质量前缀之前（见下方顺序）。
-    // 风格 = 媒介/质感（本场固定）；质量前缀 = 用户自己的补充。自动模式不插。
+    // Krea 2 风格锁定：画风是唯一自动拼接的前置内容。
+    // 自动模式不插入风格。
     if (curMode === 'krea2') {
         var _stylePrompt = krea2StylePrompt(settings.krea2Style);
         if (_stylePrompt) prompt = _stylePrompt + ', ' + prompt;
     }
-    if (settings.promptPrefix) prompt = settings.promptPrefix + ', ' + prompt;
     return prompt;
 }
 
 export async function generateImage(workflow, prompt) {
-    // 最终组装（画风预设 / anime质量前缀 / 前置提示词 / 艺术家标签）——
+    // 最终组装（模型输出 / 画风预设 / 艺术家风格）——
     // 与面板"提示词"里显示的完全同源（v1.8.3）
     prompt = composeFinalPrompt(prompt);
     slLog('🎨ComfyUI-prompt(' + prompt.length + '字):', prompt);
 
-    // ── v1.4.2：按连线定位正向/负向文本节点（旧实现靠遍历顺序 + 输入名判断，保护形同虚设）──
-    var cond = resolveConditioningNodes(workflow);
-    var useGraph = cond.wired && Object.keys(cond.pos).length > 0;
-    var negCount = Object.keys(cond.neg).length;
-    if (useGraph) {
-        slLog('genWf: 按连线定位 → 正向节点[' + Object.keys(cond.pos).join(',') + '] 负向节点[' + Object.keys(cond.neg).join(',') + ']');
-    } else {
-        slLog('genWf: 取不到 positive/negative 连线，退回启发式定位');
-    }
-    function _allowPos(nid) { return !useGraph || !!cond.pos[nid]; }
-    function _allowNeg(nid) { return !useGraph || negCount === 0 || !!cond.neg[nid]; }
-
-    var matchCount = 0;
-    // 遍历节点注入 prompt
-    for (var nodeId in workflow) {
-        var node = workflow[nodeId];
-        if (!node || !node.inputs) continue;
-        var classType = node.class_type || '';
-        if (/CLIPTextEncode|TextEncode/i.test(classType)) {
-            for (var key in node.inputs) {
-                if (/(text|prompt|positive|clip_l|t5xxl|clip_g|bert|mt5xl)/i.test(key) && !/negative/i.test(key)) {
-                    var original = node.inputs[key];
-                    var text = Array.isArray(original) ? original[0] : original;
-                    if (typeof text !== 'string') text = '';
-                    // [Fix] 负面占位符节点（key 不含 negative 但文本是 %negative_prompt% 的双CLIP结构）
-                    if (text.indexOf('%negative_prompt%') >= 0) {
-                        if (settings.neg && _allowNeg(nodeId)) {
-                            text = text.replace(/%negative_prompt%/g, settings.neg);
-                            node.inputs[key] = Array.isArray(original) && original.length === 2 ? [text, original[1]] : text;
-                            slLog('genWf: 负面占位符已替换 → ' + settings.neg.slice(0, 60));
-                        }
-                        continue;
-                    }
-                    // v1.4.2：正向提示词只写进「正向条件节点」，绝不写进负向节点
-                    if (!_allowPos(nodeId)) { slLog('genWf: 跳过非正向节点 ' + nodeId + '（避免写进负面）'); continue; }
-                    if (text.indexOf('%prompt%') >= 0) {
-                        text = text.replace(/%prompt%/g, prompt);
-                        node.inputs[key] = Array.isArray(original) && original.length === 2 ? [text, original[1]] : text;
-                        matchCount++;
-                        slLog('genWf: 注入prompt %prompt% → ' + prompt.slice(0, 60));
-                    }
-                } else if (/negative/i.test(key) && settings.neg && _allowNeg(nodeId)) {
-                    // [Fix] 负面提示词接线：key 明确带 negative 的输入（negative_prompt/negative_text 等）
-                    var negOriginal = node.inputs[key];
-                    var negText = Array.isArray(negOriginal) ? negOriginal[0] : negOriginal;
-                    if (typeof negText !== 'string') negText = '';
-                    if (negText.indexOf('%negative_prompt%') >= 0) {
-                        negText = negText.replace(/%negative_prompt%/g, settings.neg);
-                    } else {
-                        negText = settings.neg;
-                    }
-                    node.inputs[key] = Array.isArray(negOriginal) && negOriginal.length === 2 ? [negText, negOriginal[1]] : negText;
-                    slLog('genWf: 负面提示词已注入 → ' + settings.neg.slice(0, 60));
-                }
-            }
-        }
-        // 随机 seed
-        if (/ksampler|sampler\b/i.test(classType) && !/scheduler|schedule|upscale/i.test(classType)) {
-            for (var seedKey in node.inputs) {
-                if (/seed|noise_seed/i.test(seedKey)) {
-                    var seedOriginal = node.inputs[seedKey];
-                    var randomSeed = Math.floor(Math.random() * 1000000000000000);
-                    node.inputs[seedKey] = Array.isArray(seedOriginal) && seedOriginal.length === 2 ? [randomSeed, seedOriginal[1]] : randomSeed;
-                }
-            }
-        }
-    }
-    // 保底覆盖（v1.4.2：同样只允许正向条件节点）
-    if (matchCount === 0) {
-        for (var fbId in workflow) {
-            var fbNode = workflow[fbId];
-            if (!fbNode || !fbNode.inputs) continue;
-            if (!/CLIPTextEncode|TextEncode/i.test(fbNode.class_type || '')) continue;
-            if (!_allowPos(fbId)) continue;
-            var _fbDone = false;
-            for (var fbKey in fbNode.inputs) {
-                if (/(text|prompt|positive|clip_l|t5xxl|clip_g|bert|mt5xl)/i.test(fbKey) && !/negative/i.test(fbKey)) {
-                    var fbOriginal = fbNode.inputs[fbKey];
-                    var fallbackText = Array.isArray(fbOriginal) ? fbOriginal[0] : fbOriginal;
-                    if (typeof fallbackText === 'string' && fallbackText.indexOf('%negative_prompt%') >= 0) continue;
-                    fbNode.inputs[fbKey] = Array.isArray(fbOriginal) && fbOriginal.length === 2 ? [prompt, fbOriginal[1]] : prompt;
-                    matchCount++;
-                    slLog('genWf: 没找到%prompt%, 覆盖正向节点 ' + fbId + ' → ' + prompt.slice(0, 60));
-                    _fbDone = true;
-                    break;
-                }
-            }
-            if (_fbDone) break;
-        }
-    }
     var clientId = 'sl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-    var raw = JSON.stringify({ prompt: workflow, client_id: clientId });
+    var raw = workflowRequest(workflow, prompt, clientId);
     var ctrl2 = new AbortController();
     var timer2 = setTimeout(function() { ctrl2.abort(); }, (settings.cTimeout || 180) * 1000);
-    var response;
+    var response, data;
     try {
         response = await fetch('/api/sd/comfy/generate', {
             method: 'POST',
@@ -341,13 +175,13 @@ export async function generateImage(workflow, prompt) {
             body: JSON.stringify({ url: settings.cUrl, prompt: raw }),
             signal: ctrl2.signal
         });
+        if (!response.ok) { var errorText = await response.text(); throw new Error(errorText.slice(0, 800)); }
+        data = await response.json();
     } catch (e) {
         clearTimeout(timer2);
         throw new Error(e && e.name === 'AbortError' ? 'ComfyUI生成超时(' + ((settings.cTimeout || 180)) + 's)' : (e ? e.message : 'fetch失败'));
     }
     clearTimeout(timer2);
-    if (!response.ok) { var text = await response.text(); throw new Error(text.slice(0, 800)); }
-    var data = await response.json();
     if (!data.data) throw new Error('无输出');
     var dataUrl = 'data:image/' + (data.format || 'png') + ';base64,' + data.data;
     try {

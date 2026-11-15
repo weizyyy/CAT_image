@@ -12,7 +12,6 @@ import { getQueueLength, enqueueTask } from '../queue.js';
 import { cleanAnimePrompt } from '../text-utils.js';
 import { rosterEntries, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry } from '../roster.js';
 import { composeFinalPrompt } from '../comfyui.js';
-import { activeStatuses, setStatusActive } from '../statuses.js';
 import { galleryList, galleryCount, galleryRemove, galleryClearChat, galleryPrune } from '../gallery.js';
 import { openSubPanel } from './sub-panels.js';
 import * as panel from './panel.js';
@@ -62,7 +61,7 @@ export function renderHomeTab() {
   h += '</div>';
   h += groupTitle('生图与设置');
   h += '<div style="' + card() + ';padding:4px 8px;">';
-  h += cell('🎨', 'ComfyUI & 工作流', '连 ComfyUI 出图：地址/工作流/画风/负面词', (hc ? '已连接' : '未连接'), 'data-nav="comfy"');
+  h += cell('🎨', 'ComfyUI & 工作流', '连 ComfyUI 出图：地址/工作流/画风', (hc ? '已连接' : '未连接'), 'data-nav="comfy"');
   h += cell('🧠', 'AI 助理', '配辅助 AI：写提示词、分析档案用哪个模型', (ha ? '已就绪' : '未配置'), 'data-nav="aux"');
   h += cell('🖼️', '模型与偏好', '提示词风格 · 配图频率 · 额外词条', '', 'data-nav="settings"');
   h += '</div>';
@@ -142,10 +141,9 @@ export function renderSettingsPage() {
       '<button id="sl_fe_test" style="width:100%;' + btnGhost() + 'color:' + CAT.accent + ';margin-bottom:8px;">🧪 测试末尾插卡（不出图，插一张占位图卡）</button>' +
       '<button id="sl_fe_probe" style="width:100%;' + btnGhost() + '">🩺 诊断（写进日志）</button>' +
       '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:8px;line-height:1.6;">前端卡必须装「酒馆助手 / JS-Slash-Runner」才能跑；每条剧情都会多一次辅助 AI 调用（导演管线的开销）。</div></div>';
-    h += '<div style="' + card() + '">' + cardHead('📝', '前置提示词', '拼到每张提示词最前') + '<input id="sl_prompt_prefix" type="text" value="' + escAttr(settings.promptPrefix || '') + '" style="' + f + '" placeholder="留空则不生效"></div>';
     h += '<div style="' + card() + ';padding:14px 16px;">' + switchHTML('sl_show_prompt', settings.showGenPrompt === true, '图块显示完整提示词', '默认关闭：图块只显示短标题（详细字段只进生成链，用户看不到）；调试时打开可看到每张图的完整生成提示词') + '</div>';
-    h += '<div id="sl_anime_opts" style="' + card() + 'background:' + CAT.bg + ';' + (isEnglishMode(settings.modelType) ? '' : 'display:none;') + '">' + cardHead('🎬', '英文模式增强', 'Anime / Tag / Anima / Krea 2 生效') + '<span style="' + lbl() + '">质量前缀</span><input id="sl_anime_prefix" type="text" value="' + escAttr(settings.animeQualityPrefix || '') + '" style="' + f + 'margin-bottom:10px;"><span style="' + lbl() + '">艺术家标签</span><input id="sl_anime_artist" type="text" value="' + escAttr(settings.animeArtist || '') + '" style="' + f + '" placeholder="留空则不使用（Krea 2 建议留空，风格用下方下拉）"></div>';
-    h += '<div id="sl_krea2_style_card" style="' + card() + ';' + (settings.modelType === 'krea2' ? '' : 'display:none;') + '">' + cardHead('🎨', 'Krea 2 风格', '锁定本场画风 · 插件统一前置，跨轮不漂') + '<select id="sl_krea2_style" style="' + f + '">' + krea2StyleOptionsHTML(settings.krea2Style) + '</select>' + '<div id="sl_krea2_style_note" style="font-size:10px;color:' + CAT.sub + ';margin-top:6px;line-height:1.7;">' + esc((krea2StyleById(settings.krea2Style) || {}).note || '') + '</div>' + '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.7;">官方没有固定的内置风格清单：Krea 2 的风格靠<b>提示词 / 风格参考图 / 情绪板 / LoRA</b> 四条路。这里是从官方示例归纳出的风格句 —— 选中后由插件加在每张提示词最前，辅助 AI 只写人物与场景，不再另写画风。<br>已选风格时，上面「质量前缀」只写质量（<code>sharp focus</code> / <code>high detail</code>），别再写媒介，否则会打架。</div></div>';
+    h += '<div id="sl_krea2_style_card" style="' + card() + ';' + (settings.modelType === 'krea2' ? '' : 'display:none;') + '">' + cardHead('🎨', 'Krea 2 风格', '锁定本场画风 · 插件统一前置，跨轮不漂') + '<select id="sl_krea2_style" style="' + f + '">' + krea2StyleOptionsHTML(settings.krea2Style) + '</select>' + '<div id="sl_krea2_style_note" style="font-size:10px;color:' + CAT.sub + ';margin-top:6px;line-height:1.7;">' + esc((krea2StyleById(settings.krea2Style) || {}).note || '') + '</div>' + '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.7;">官方没有固定的内置风格清单：Krea 2 的风格靠<b>提示词 / 风格参考图 / 情绪板 / LoRA</b> 四条路。这里是从官方示例归纳出的风格句 —— 选中后由插件加在每张提示词最前，辅助 AI 只写人物与场景，不再另写画风。<br>画风由插件统一拼接，不再自动注入质量前缀。</div></div>';
+    h += '<div style="' + card() + '">' + cardHead('🎨', '艺术家风格', '英文模式可选') + '<input id="sl_anime_artist" type="text" value="' + escAttr(settings.animeArtist || '') + '" style="' + f + '" placeholder="留空则不添加"></div>';
     h += '<div style="text-align:center;font-size:10px;color:' + CAT.mute + ';padding:6px 0 2px;">所有改动即时保存 · 无需手动保存</div>';
     body.html(h);
     bindSettingsEvents(body);
@@ -153,7 +151,7 @@ export function renderSettingsPage() {
 }
 export function bindSettingsEvents(b) {
   b.off('change', '#sl_plugin_on').on('change', '#sl_plugin_on', function () { settings.pluginOn = jQuery(this).is(':checked'); saveSettings(); if (settings.pluginOn) { startPolling(); compact.setPluginEnabled(true); } else { stopPolling(); compact.setPluginEnabled(false); } });
-  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); jQuery('#sl_anime_opts').toggle(isEnglishMode(settings.modelType)); jQuery('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); saveSettings(); });
+  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); jQuery('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); saveSettings(); });
   b.off('change', '#sl_image_mode').on('change', '#sl_image_mode', function () { settings.imageMode = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_img_width').on('change', '#sl_img_width', function () { settings.imgBlockWidth = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_director_cast').on('change', '#sl_director_cast', function () { settings.directorCastImport = jQuery(this).is(':checked'); saveSettings(); try { refreshCoopCards(); } catch (e) {} toast('success', settings.directorCastImport !== false ? '已开启：卡库档案导入人物表' : '已关闭：扫描仅用于立绘/档案，人物表只留占位符收集'); });
@@ -187,9 +185,7 @@ export function bindSettingsEvents(b) {
     toast(r.hooked ? 'success' : 'warning', '钩子' + (r.hooked ? '已挂' : '未挂') + ' · ' + (r.appFound ? '找到前端应用' : '未找到前端应用') + ' · 详细写进日志页');
     setTimeout(function () { try { renderSettingsPage(); } catch (e) {} }, 400);
   });
-  b.off('change input', '#sl_prompt_prefix').on('change input', '#sl_prompt_prefix', function () { settings.promptPrefix = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_show_prompt').on('change', '#sl_show_prompt', function () { settings.showGenPrompt = jQuery(this).is(':checked'); saveSettings(); });
-  b.off('change input', '#sl_anime_prefix').on('change input', '#sl_anime_prefix', function () { settings.animeQualityPrefix = jQuery(this).val(); saveSettings(); });
   b.off('change input', '#sl_anime_artist').on('change input', '#sl_anime_artist', function () { settings.animeArtist = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_krea2_style').on('change', '#sl_krea2_style', function () {
     settings.krea2Style = jQuery(this).val() || '';
@@ -315,20 +311,6 @@ function renderArchiveInto(body) {
     h += '<div style="color:' + CAT.mute + ';font-size:15px;padding-right:2px;">›</div>';
     h += '</div></div>';
   }
-  // ⏳ 当前生效的状态（聊天级：晒黑/吻痕/淤青/缠绷带…）—— 主模型忘写 -key 时在这里手动取消
-  var _act = [];
-  try { _act = activeStatuses(); } catch (e10) {}
-  if (_act.length) {
-    h += '<div style="' + card() + 'margin-top:10px;padding:11px 14px;">';
-    h += '<div style="font-weight:700;font-size:12px;color:' + CAT.text + ';margin-bottom:7px;">⏳ 当前生效的状态<span style="font-weight:400;font-size:9.5px;color:' + CAT.mute + ';margin-left:6px;">（主模型忘写 -key 时，在这里手动取消）</span></div>';
-    for (var _ai3 = 0; _ai3 < _act.length; _ai3++) {
-      h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-      h += '<div style="flex:1;min-width:0;"><div style="font-size:11px;color:' + CAT.text + ';">' + esc(_act[_ai3].key) + '</div>';
-      h += '<div style="font-size:9.5px;color:' + CAT.mute + ';line-height:1.5;">' + esc(_act[_ai3].detail) + '</div></div>';
-      h += '<button class="sl_st_off" data-key="' + escAttr(_act[_ai3].key) + '" style="' + btnGhost() + 'font-size:10px;padding:5px 11px;">取消</button></div>';
-    }
-    h += '</div>';
-  }
   body.html(h); bindArchiveEvents(body);
 }
 
@@ -381,7 +363,7 @@ function buildPortraitPrompt(ent, view, bm) {
     body = atomValues(anchor, bm) + _portraitTail(v, bm, underage);
   }
   if (isEnglishMode(bm)) body = cleanAnimePrompt(body);
-  // v1.8.3：走与 generateImage 完全同源的组装（画风预设 / 质量前缀 / 前置提示词 / 艺术家标签）
+  // v1.8.3：走与 generateImage 完全同源的组装（画风预设 / 艺术家标签）
   return composeFinalPrompt(body);
 }
 
@@ -428,9 +410,9 @@ function renderPersonDetail(body, key) {
   h += '<button class="sl_prompt_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnGhost() + 'font-size:10.5px;padding:6px 13px;">提示词</button>';
   h += '</div>';
   h += '<div class="sl_prompt_box" data-char="' + escAttr(ppl.key) + '" style="display:none;margin-top:10px;">';
-  h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-bottom:4px;">下方就是**实际发给 ComfyUI 的那一条**（含画风预设 / 质量前缀 / 前置提示词 / 艺术家标签）</div>';
+  h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-bottom:4px;">下方就是**实际发给 ComfyUI 的那一条**（含画风预设 / 艺术家标签）</div>';
   h += '<textarea class="sl_prompt_ta" data-char="' + escAttr(ppl.key) + '" readonly style="width:100%;min-height:110px;' + fi() + 'font-size:10.5px;resize:vertical;">' + esc(buildPortraitPrompt(ppl.ent, 'front', bm)) + '</textarea>';
-  h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><button class="sl_copy_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnSm() + 'font-size:10px;">复制提示词</button><span style="font-size:9.5px;color:' + CAT.mute + ';">负向：' + (settings.neg ? esc(String(settings.neg).slice(0, 60)) : '（未设置）') + '</span></div></div>';
+  h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><button class="sl_copy_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnSm() + 'font-size:10px;">复制提示词</button></div></div>';
   h += '</div></div></div>';
   body.html(h); bindArchiveEvents(body);
 }
@@ -439,13 +421,6 @@ export function bindArchiveEvents(b) {
   b.off('change input', '#sl_specialization').on('change input', '#sl_specialization', function () { var pf = getProfiles(); if (pf && pf.root[pf.charName] && pf.root[pf.charName].meta) { pf.root[pf.charName].meta.specialization = jQuery(this).val(); saveSettings(); } });
   b.off('click', '.sl_arch_st').on('click', '.sl_arch_st', function () { var st = parseInt(jQuery(this).data('ast')); b.find('.sl_arch_st').css({ background: 'transparent', color: CAT.sub, fontWeight: '600' }); jQuery(this).css({ background: CAT.accent, color: '#fff', fontWeight: '700' }); b.find('#sl_arch_static').toggle(st === 0); b.find('#sl_arch_dynamic').toggle(st === 1); });
   // 卡片 → 详情页；返回
-  b.off('click', '.sl_st_off').on('click', '.sl_st_off', function (e) {
-    e.stopPropagation();
-    var k = jQuery(this).data('key');
-    setStatusActive(k, false); saveSettings();
-    toast('success', '已取消：' + k + '（条目保留，主模型可再 + 激活）');
-    renderArchiveInto(b);
-  });
   b.off('click', '.sl_pcard').on('click', '.sl_pcard', function () { renderPersonDetail(b, jQuery(this).data('char')); });
   b.off('click', '.sl_pback').on('click', '.sl_pback', function () { renderArchiveInto(b); });
   // 提示词：打开时按最新锚点重新生成
@@ -495,8 +470,7 @@ export function bindArchiveEvents(b) {
         : '还没有【英文锚点】—— ' + bm + ' 模式只读英文锚点（中文会被清洗逻辑删空、画出路人）。先正常聊一轮出一次图');
       return;
     }
-    var wf2 = JSON.parse(settings.cWf || '{}');
-    if (!Object.keys(wf2).length) { toast('error', '工作流未配置'); return; }
+    if (!settings.cWf) { toast('error', '工作流未配置'); return; }
     var prompt = buildPortraitPrompt(ent, view, bm);
     if (!prompt) { toast('warning', '这条立绘还没有提示词'); return; }
     var oldTxt = btn.text();
