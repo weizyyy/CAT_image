@@ -75,7 +75,7 @@ async function _post(endpoint, headers, body, timeoutMs, signal) {
         const text = await response.text();
         return { ok: response.ok, status: response.status, text: async () => text, json: async () => JSON.parse(text) };
     } catch (e) {
-        throw new Error(e && e.name === 'AbortError' ? '辅助API请求超时(' + timeoutMs + 'ms)' : (e ? e.message : 'fetch失败'));
+        throw new Error(signal?.aborted ? '回复版本已变更，请求已取消' : e && e.name === 'AbortError' ? '辅助API请求超时(' + timeoutMs + 'ms)' : (e ? e.message : 'fetch失败'));
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 

@@ -42,22 +42,23 @@ export function messageRoot(id) {
 }
 function renderSnapshot(snapshot, enhanced) {
     const root = messageRoot(snapshot.messageId);
-    if (!root) return;
-    renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source);
-    if (settings.feBridge === false) return;
+    if (!root) return false;
+    let mounted = renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source);
+    if (settings.feBridge === false) return mounted;
     const visit = (node, depth = 0) => {
         if (depth > 3) return;
         for (const frame of node.querySelectorAll('iframe')) {
             try {
                 const doc = frame.contentDocument;
                 if (doc?.body) {
-                    renderEnhancedLite(jQuery(doc.body), enhanced, snapshot.key, snapshot.source);
+                    mounted = renderEnhancedLite(jQuery(doc.body), enhanced, snapshot.key, snapshot.source) || mounted;
                     visit(doc.body, depth + 1);
                 }
             } catch { /* Cross-origin frames cannot be modified. */ }
         }
     };
     visit(root);
+    return mounted;
 }
 export const scanCoordinator = new ScanCoordinator({
     run: (snapshot, isCurrent, signal) => snapshot.run ? snapshot.run(isCurrent, signal)
@@ -131,7 +132,7 @@ function scheduleMessage(id, immediate = false) {
         observations.set(snapshot.owner, { key: snapshot.key, since: Date.now() });
         if (!immediate) { requestCheck(800); return; }
     } else if (!immediate && Date.now() - observation.since < 700) { requestCheck(800); return; }
-    renderSnapshot(snapshot, null);
+    if (!renderSnapshot(snapshot, null)) return;
     scanCoordinator.submit(snapshot);
 }
 export async function runAuxImageScan(element) {

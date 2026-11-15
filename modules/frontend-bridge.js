@@ -12,6 +12,7 @@ import { getPrompt } from '../prompts/loader.js';
 
 let running = false, timer, serial = 0, chatId = '', observer;
 const hooks = [], records = new Map(), frameIds = new WeakMap();
+const rootOwners = new WeakMap(), inflight = new WeakMap(), latestCalls = new WeakMap(), holdUntil = new WeakMap();
 let frameSerial = 0;
 
 function eachWindow(fn, win = window, depth = 0) {
@@ -64,35 +65,42 @@ function findTarget(win, text) {
             // Require the full marker sequence. Never borrow an old unmatched marker.
             if (markers.length !== tokens.length) continue;
             const norm = s => s.replace(/<[^>]*>/g, '').replace(/[*`\s]/g, '');
-            if (markers.every((m, i) => norm(m.content) === norm(tokens[i].content))) return root;
+            if (markers.every((m, i) => norm(m.content) === norm(tokens[i].content)) && norm(root.textContent).includes(norm(text))) return root;
         }
         return null;
     };
     try {
         const own = find(win);
-        if (own && win !== window) return own;
+        if (win !== window) return own;
         // Top-level helper calls can originate in an iframe: match exact content.
-        let found = null;
-        eachWindow(w => { if (w !== window) { const root = find(w); if (root) found = root; } });
-        return found || own;
+        const found = [];
+        eachWindow(w => { if (w !== window) { const root = find(w); if (root) found.push(root); } });
+        return found.length === 1 ? found[0] : own;
     } catch { return null; }
 }
 function visibleRecord(record) {
     try {
         return record.root?.isConnected && record.root.ownerDocument.defaultView?.frameElement?.isConnected !== false &&
             (Array.from(record.root.querySelectorAll('[data-sl-slot]')).some(n => n.dataset.slSlot.startsWith(record.key + '#')) ||
-                !!findTarget(record.win, record.text));
+                findTarget(record.win, record.text) === record.root);
     } catch { return false; }
 }
 function submitRecord(record) {
     if (generationBusy() || settings.pluginOn === false) return;
-    if (!record.root?.isConnected) record.root = findTarget(record.win, record.text);
+    if (inflight.get(record.win)) return;
+    if (record.callId !== latestCalls.get(record.win) && (holdUntil.get(record.win) || 0) > Date.now()) return;
+    if (record.root && rootOwners.get(record.root) !== record.key) return;
+    if (!record.root?.isConnected) {
+        record.root = findTarget(record.win, record.text);
+        if (record.root) rootOwners.set(record.root, record.key);
+    }
     if (!record.root) return;
     renderEnhancedLite(jQuery(record.root), record.enhanced || record.blocks || null, record.key, record.text);
     if (record.enhanced) return;
     scanCoordinator.submit({ owner: record.key, key: record.key, source: record.text,
         isCurrent: () => running && settings.feBridge !== false && settings.pluginOn !== false &&
-            getChatId() === record.chatId && !generationBusy() && visibleRecord(record),
+            getChatId() === record.chatId && !generationBusy() && !inflight.get(record.win) &&
+            rootOwners.get(record.root) === record.key && visibleRecord(record),
         run: (isCurrent, signal) => runRosterPipeline(record.text, record.key, { isCurrent, signal, results: record.results,
             onSlot(index, enhanced) {
                 if (!isCurrent()) return;
@@ -109,14 +117,14 @@ function submitRecord(record) {
         }
     });
 }
-function receive(win, raw, capturedChat) {
+function receive(win, raw, capturedChat, callId) {
     if (!running || settings.feBridge === false || settings.pluginOn === false || getChatId() !== capturedChat) return;
     const text = extractNarrativeText(raw);
     if (!tokenizePlaceholders(text).length) return;
     if (getSTContext()?.chat?.some(message => !message.is_user && extractNarrativeText(message.mes) === text)) return;
-    const signature = capturedChat + ':' + frameId(win) + ':' + fingerprint(text);
+    const signature = capturedChat + ':' + frameId(win) + ':' + callId + ':' + fingerprint(text);
     if (records.has(signature)) return;
-    const record = { key: 'fe_v2_' + signature, chatId: capturedChat, win, text, results: new Map(), root: null };
+    const record = { key: 'fe_v2_' + signature, chatId: capturedChat, callId, win, text, results: new Map(), root: null };
     records.set(signature, record);
     if (records.size > 100) records.delete(records.keys().next().value);
     // Let the card's own Promise continuation commit its final response first.
@@ -127,16 +135,23 @@ function wrap(win, name) {
     if (typeof original !== 'function' || original.__sillab_fe) return;
     const wrapped = function (params, ...rest) {
         const capturedChat = getChatId();
+        const isScene = sceneCall(params), callId = ++serial;
         let callParams = params;
         if (running && settings.pluginOn !== false && settings.feBridgeMode === 'director' && sceneCall(params)) {
             const instruction = getPrompt('main-llm-instruction.txt');
             if (instruction) callParams = { ...params, user_input: String(params?.user_input || '') + '\n' + instruction };
         }
-        const result = original.call(this, callParams, ...rest);
-        if (!sceneCall(params)) return result;
-        if (result?.then) return result.then(value => { receive(win, value, capturedChat); return value; });
+        if (isScene) { latestCalls.set(win, callId); inflight.set(win, (inflight.get(win) || 0) + 1); }
+        const finish = () => {
+            if (isScene) { inflight.set(win, Math.max(0, (inflight.get(win) || 0) - 1)); holdUntil.set(win, Date.now() + 350); }
+        };
+        let result;
+        try { result = original.call(this, callParams, ...rest); } catch (error) { finish(); throw error; }
+        if (!isScene) return result;
+        if (result?.then) return result.then(value => { finish(); receive(win, value, capturedChat, callId); return value; }, error => { finish(); throw error; });
+        finish();
         // Async iterables and generators are not complete replies; leave them alone.
-        if (!result?.[Symbol.asyncIterator] && !result?.next) receive(win, result, capturedChat);
+        if (!result?.[Symbol.asyncIterator] && !result?.next) receive(win, result, capturedChat, callId);
         return result;
     };
     wrapped.__sillab_fe = true;

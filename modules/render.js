@@ -101,4 +101,5 @@ export function renderEnhancedLite(element, enhancedText, blockKey, sourceText) 
             if (btn.textContent.includes('生成图片')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'));
         }
     }
+    return Array.from(root.querySelectorAll('[data-sl-slot]')).some(n => n.dataset.slSlot.startsWith(blockKey + '#'));
 }

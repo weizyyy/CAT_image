@@ -62,6 +62,11 @@ export async function runBrowserFixture() {
         await wait(() => frame.contentDocument.querySelectorAll('.sl_img_btn').length === 2);
         const framePrompts = Array.from(frame.contentDocument.querySelectorAll('.sl_img_btn'), b => b.dataset.prompt);
         checks.push({ name: 'webview-frontend-helper-owning-iframe', ok: framePrompts[0] === 'BLUE-FIXTURE-PROMPT' && framePrompts[1] === 'RED-FIXTURE-PROMPT' });
+        const oldId = frame.contentDocument.querySelector('.sl_img_btn').dataset.slid;
+        const oldCalls = calls;
+        await frame.contentWindow.TavernHelper.generate({});
+        await wait(() => frame.contentDocument.querySelectorAll('.sl_img_btn').length === 2 && frame.contentDocument.querySelector('.sl_img_btn').dataset.slid !== oldId);
+        checks.push({ name: 'webview-frontend-identical-new-turn-rechecks', ok: calls === oldCalls + 2 });
         return { ok: checks.every(c => c.ok), checks, mockedAnalysisRequests: calls, externalRequests: 0 };
     } finally { scanner.stopPolling(); bridge.stopFrontendBridge(); }
 }

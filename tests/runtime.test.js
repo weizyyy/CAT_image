@@ -97,3 +97,30 @@ test('frontend tool calls/content arrays extract all narrative markers; original
     initFrontendBridge(); assert.notEqual(window.TavernHelper.generate, original);
     stopFrontendBridge(); assert.equal(window.TavernHelper.generate, original); assert.equal(window.TavernHelper.generateRaw, original);
 });
+
+test('code examples with no renderable marker do not spend analysis requests', async () => {
+    show('[img:仅代码示例]');
+    document.querySelector('.mes_text').innerHTML = '<pre><code>[img:仅代码示例]</code></pre>';
+    let calls = 0; fetch = async () => { calls++; return response('无用请求'); };
+    scanner.startPolling();
+    try { await scanner.runAuxImageScan(jQuery('.mes_text')); assert.equal(calls, 0); }
+    finally { scanner.stopPolling(); }
+});
+
+test('ComfyUI request forwards the exact template except prompt and zero seed, with no mutation', async () => {
+    const { generateImage } = await import('../modules/comfyui.js');
+    const wf = '{\n"future":{"class_type":"FutureText","inputs":{"value":"%prompt%"}},"sampler":{"class_type":"KSamplerVariant","inputs":{"noise_seed":0,"fixed":18446744073709551615}},"negative":"keep %negative_prompt%"\n}';
+    let sent;
+    fetch = async (url, options) => {
+        if (String(url).endsWith('/generate')) { sent = JSON.parse(options.body).prompt; return { ok: true, json: async () => ({ data: 'AA==', format: 'png' }) }; }
+        return { ok: true, json: async () => ({ path: '/fixture.png' }) };
+    };
+    settings.stylePreset = ''; settings.animeArtist = '';
+    const result = await generateImage(wf, '画面"换行\n$&');
+    const payload = JSON.parse(sent);
+    assert.equal(result.url, '/fixture.png');
+    assert.equal(payload.prompt.future.inputs.value, '画面"换行\n$&');
+    assert.ok(payload.prompt.sampler.inputs.noise_seed > 0);
+    assert.ok(sent.includes('18446744073709551615')); assert.ok(sent.includes('keep %negative_prompt%'));
+    assert.ok(wf.includes('"noise_seed":0'));
+});
