@@ -4,7 +4,7 @@
 // key = 名字（身份标签）→ 重名天然区分（同名不同人）。
 
 import { slLog } from './log.js';
-import { settings, saveSettings, getSTContext, getActiveMode } from './settings.js';
+import { settings, saveSettings, getSTContext, getActiveMode, isEnglishProseMode } from './settings.js';
 import { getCharacterName, getChatId } from './pipeline/profile.js';
 import { refreshCoopCards } from './sync-cards.js';  // [Fix] 人物表变化时刷新导演模式协作卡索引
 import { stripSeedText, parseSeedSegment, formatSeed, hasSeedField, findLostNumbers } from './text-utils.js';  // v1.11.1 种子剥离（+ v1.13.6 数字保真）
@@ -294,7 +294,7 @@ export function rosterIndexText(limit) {
 
 // ── 从卡库扫描档案导入人物表（复用 scanCharacterProfile 产出，保证人物一致性） ──
 // cast: { 角色名: { static, body, enPrompt, enTags, ... } }
-// mode: 'zit' | 'anima' | 'anime' | 'anime_tag' | 'krea2' → 选对应语言锚点
+// mode: 'zit' | 'anima' | 'anime' | 'anime_tag' | 'krea2' | 'minimax_h3_image' → 选对应语言锚点
 // 返回值：导入/更新条数
 // 身份维度过滤器：档案只保留"脸部/身材/永久标记"（用户规则）——
 // 发型/衣着/配饰/状态等可变维度由酒馆AI按轮次写（插件AI只做 档案+酒馆AI提示词 → 图片prompt）。
@@ -322,7 +322,7 @@ export function importFromCast(cast) {
         var appearance = '';
         // anima 混合模式：结构用标签，所以优先 enTags；没有则退回 enPrompt
         if (mode === 'anima' && (c.enTags || c.enPrompt)) appearance = c.enTags || c.enPrompt;
-        else if ((mode === 'anime' || mode === 'krea2') && c.enPrompt) appearance = c.enPrompt;   // 英文锚点为整体描述，暂不拆维度
+        else if (isEnglishProseMode(mode) && c.enPrompt) appearance = c.enPrompt;   // 英文锚点为整体描述，暂不拆维度
         else if (mode === 'anime_tag' && c.enTags) appearance = c.enTags;
         else appearance = identityAnchorOnly(c.static || '');             // 中文：只保留脸/身形/永久标记
         if (c.body && appearance && !/身形/.test(appearance)) appearance += '；身形：' + c.body;

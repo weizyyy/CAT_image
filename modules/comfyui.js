@@ -5,6 +5,7 @@ import { settings, getSTHeaders, saveSettings, escapeHtml, getActiveMode, isEngl
 import { uploadImageToST } from './cache.js';
 import { getProfiles } from './pipeline/profile.js';
 import { krea2StylePrompt } from './style-presets.js';
+import { preserveQuotedText } from './text-utils.js';
 
 // [Fix] 提示词角色名过滤（最后防线）：LLM 偶发违规把角色名写进提示词，或 FACE 占位符残留。
 // 角色名是生图模型无法理解的概念噪音，且会把名字当成画面元素画出来。
@@ -126,14 +127,14 @@ export async function deleteWorkflow(name) {
 // ── 最终正向提示词组装（v1.8.3 抽出）──
 // 目的：面板里"复制提示词"必须等于**实际发给 ComfyUI 的那一条**（走一遍真实管线，而不是只给裸提示词）
 // 仅保留模型输出、画风和艺术家风格，不注入通用前缀或负面词。
-export function composeFinalPrompt(prompt) {
+export function composeFinalPrompt(prompt, curMode = getActiveMode()) {
     prompt = String(prompt || '')
         .replace(/\[image:[^\]]*\]/g, '')
         .replace(/【提示词[】:：]*/g, '').replace(/【\/提示词】/g, '')
         .replace(/【\s*💬[^\n]*/g, '')
         .replace(/\n\s*【[^】]*】/g, '\n')
         .trim();
-    prompt = stripCharacterNames(prompt);
+    prompt = curMode === 'minimax_h3_image' ? preserveQuotedText(prompt, stripCharacterNames) : stripCharacterNames(prompt);
     var domVal = (jQuery('#sl_style_preset').length ? jQuery('#sl_style_preset').val() : '') || '';
     var stylePrefix = domVal || settings.stylePreset || '';
     if (stylePrefix && !STYLE_PRESETS[stylePrefix]) {
@@ -143,7 +144,6 @@ export function composeFinalPrompt(prompt) {
         }
         if (matched) stylePrefix = matched;
     }
-    var curMode = getActiveMode();
     if (stylePrefix && STYLE_PRESETS[stylePrefix] && (curMode === 'zit' || !curMode)) {
         prompt = STYLE_PRESETS[stylePrefix] + ' ' + prompt;
     }
@@ -157,11 +157,11 @@ export function composeFinalPrompt(prompt) {
     return prompt;
 }
 
-export async function generateImage(workflow, prompt, { signal } = {}) {
+export async function generateImage(workflow, prompt, { signal, mode = getActiveMode() } = {}) {
     signal?.throwIfAborted();
     // 最终组装（模型输出 / 画风预设 / 艺术家风格）——
     // 与面板"提示词"里显示的完全同源（v1.8.3）
-    prompt = composeFinalPrompt(prompt);
+    prompt = composeFinalPrompt(prompt, mode);
     slLog('🎨ComfyUI-prompt(' + prompt.length + '字):', prompt);
 
     var clientId = 'sl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);

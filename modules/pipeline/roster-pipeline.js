@@ -51,6 +51,9 @@ export function classifyPipelineFailure(out, expectCount, meta) {
         }
         for (var i = 0; i < lines.length; i++) {
             if (lines[i] && lines[i].length < 120 && REFUSAL_RE.test(lines[i])) return 'refusal';
+            if (getActiveMode() === 'minimax_h3_image' && /^[\[{]/.test(lines[i]?.trim() || '')) {
+                try { if (typeof JSON.parse(lines[i]) === 'object') return 'captionformat'; } catch { /* Ordinary prose is allowed. */ }
+            }
         }
     }
     return '';
@@ -148,6 +151,7 @@ var MODE_OVERLAY = {
     anime:     'pipeline/anime-overlay.txt',
     anime_tag: 'pipeline/anime-tag-overlay.txt',
     krea2:     'pipeline/krea2-overlay.txt',
+    minimax_h3_image: 'pipeline/minimax-h3-image-overlay.txt',
 };
 
 function buildPurgeMessages() {
@@ -199,6 +203,10 @@ function buildPurgeMessages() {
 function buildRosterUserContent(placeholders, wardrobeInfo) {
     var lines = [];
     lines.push('【任务】为每个 [img:] 占位符输出 1 条提示词，按【占位符】编号一一对应。人物外貌必须引用【人物档案】，禁止用名字代替外貌。禁止偷懒：每一幅图都要写完整详情（人物当前状态+衣着发型+表情+动作+场景+光影），不允许省略/概括/一句话带过。');
+    if (getActiveMode() === 'minimax_h3_image') {
+        lines.push('【MiniMax-H3-Image】本图提示词写成连贯英文。先解决主体数量、相机视角、人物朝向和单一瞬间的接触关系，再补入镜身份与场景细节；不把所有肢体同时写成多个动作，不额外堆皮肤纹理。');
+        lines.push('【默认构图】用户未指定构图时采用 near-square, slightly taller-than-wide composition（宽略小于高）；保留明确指定的景别、方向与取景。不输出比例建议或尺寸，工作流画布由用户控制。');
+    }
     // v1.28.0：Krea 2 风格锁定 —— 风格句由插件统一前置（跨轮稳定），这里告诉模型"别再自己写媒介"
     if (getActiveMode() === 'krea2') {
         var _kstyle = krea2StyleById(settings.krea2Style);
@@ -652,6 +660,8 @@ async function runSinglePipeline(bodyText, mesId, options) {
                         + '然后重新完整输出 ---PROFILE--- 与 ---IMAGES--- 两段。';
                 } else if (_fail === 'truncated') {
                     _retryNote = '【系统重试】上一条回复被长度限制截断。请重新完整输出本张图的 ---PROFILE--- 和 ---IMAGES---，只写本张图的一条完整提示词，不要接着写第2条。';
+                } else if (_fail === 'captionformat') {
+                    _retryNote = '【系统重试】MiniMax-H3-Image 的 IMAGES 段只接受一段英文画面纯文本。去掉 JSON 对象/数组、expanded_caption / aspect_ratio 字段及比例或尺寸建议，保留画面内容；PROFILE 仍沿用插件档案协议。重新完整输出 PROFILE 与 IMAGES 两段。';
                 } else {   // format
                     _retryNote = '【系统重试】你上一轮的内容方向是对的，但**没有按格式输出**（缺少 ---PROFILE--- / ---IMAGES--- 的分段标记）。\n'
                         + '请保留你上一轮的画面内容，**改成规定的两段式格式重新输出**：---PROFILE--- 段 + ---IMAGES--- 段'

@@ -1,0 +1,37 @@
+【模式：MiniMax-H3-Image · 英文自然语言画面描述】
+
+此模式参考 MiniMax 官方文生图扩写指导，但在插件中只负责图像描述：不要接入官方的画布选择或 JSON 包装流程。人物档案仍按插件的 PROFILE 协议更新；IMAGES 段中每张图只有连贯英文纯文本，不输出 expanded_caption / aspect_ratio 字段、尺寸、比例建议、分析过程、Markdown 或负面提示词字段。
+
+## 写成一幅可检查的画面
+- 用完整英文句子组成一段，可自然换行；不要标签链、括号权重、质量词串或提纲。长度由画面需要决定，优先写清身份、主动作、接触与空间关系，再补可见细节，不以篇幅替代信息。
+- 保留输入的主体数量、身份、年龄、物种、衣着、明确文字、场景、方向和媒介。身份锚点沿用已解析的英文值，融入句子；只写当前景别可见的部位，特写不补全身，中景不补腿脚。永久标记按其所在部位是否入镜落地，不为展示标记扭曲姿态。
+- 一张图只截取一个明确瞬间。不要把“伸手—拿起—递出”整段过程挤进同一姿态，也不要同时给出两个镜头或前后两个状态。保留本轮指定的动作和表情，不擅自改成站桩或缩成无关的脸部特写。
+- 未指定画布或取景方向时，采用 near-square, slightly taller-than-wide composition：横向长度略小于纵向，主体紧凑、接触点有空间。用户明确给出的方向、景别、取景优先。不推荐数字比例，不因添加背景改成宽幅全景，也不声称改变了工作流画布。
+- 媒介由当前素材、已选风格和角色设定决定；照片、动漫、水彩等保持各自的表现方式，不把所有图改成真人照。照明与环境写成看得见的结果，并保留实际地域、材质和光源；不凭空加道具、路人、首饰、纹样或背景剧情。
+
+## 朝向、肢体与接触：先把关系写通
+- 先固定场景布局与一个视点，再确定人物在画面左/右、前/后以及面向镜头、背向镜头或侧身。身体可见面、视线、前倾方向与行动方向要一致，不为凑正脸把背身动作拧成反关节。
+- 动作以“谁对谁做什么”组织，关键接触再补清执行部位：哪只手托住何处、哪只手持物、物件怎样落在手掌或支撑面。涉及左右时明确是人物自身的左/右手，screen-left / screen-right 只用于画面位置。
+- 每条可见肢体在这个瞬间只有一项相容的任务；支撑点与受力一致。关节沿自然方向连接，相邻人物的手臂在遮挡处仍能辨认归属。对没有被要求的肢体保持简单，不额外安排抓握、交叉或伸向镜头。
+- 人类手部是焦点时，可简短描述手腕连续、手指按抓握自然弯曲、接触轮廓清晰；不要机械追加“所有手指都可见”，握拳和遮挡本就会藏住手指，也不要在非人角色、缺肢或特殊设定上强行套用标准人类肢体数。
+- 手与脸的互动是主旨且景别未指定时，选择能看清接触点的中近景；保留明确要求的全身/远景。通过清楚的前后层次与接触轮廓减少混叠，不靠删人、删动作或把手藏出画外来规避难点。
+- 不堆“perfect anatomy / perfect hands / extra fingers / bad hands”等口号或缺陷词串。该模型的原生采样不使用负面提示词；把约束写为短而具体的正向关系，输入确有排除条件时忠实保留其含义。
+
+## 皮肤：克制、分清媒介与角色特征
+- 优先准确保留肤色、年龄和明确的痣、疤、雀斑等身份特征；不要为了“修皮肤”把人物变年轻、换脸或抹去这些特征。潮红、汗、湿润等只由本轮要点决定。
+- 真人向画面通常无需追加通用“真实皮肤”句。已有肤质只自然落地一次；确需补充且素材允许时，用简短的平顺明暗过渡或适度表面细节描述，不反复强调 realism / skin texture。
+- 不主动添加 visible pores / micro-imperfections / peach fuzz / hyper-detailed skin / gritty texture / oversharpened / subsurface scattering，也不同时堆磨皮、蜡质、玻璃皮肤与毛孔噪点。它们容易把正常肤质写成夸张表面效果；输入明确要求的粗糙、伤疤或年龄纹理仍须保留。
+- 光线未指定时可用柔和、有方向的局部照明让五官易读；已有硬光、暗夜、特殊色光则按场景表达，不能一律改成明亮影棚。不要把极端反差、锐化或油亮高光当作清晰度。
+- 动漫、插画或绘画按既定上色、轮廓和笔触写皮肤，不加入摄影毛孔或真人皮肤微纹理；背景空镜不写人体、皮肤或手指约束。
+
+## 字、物与信息图
+- 需要画出的文字用英文双引号圈住原文，并说清承载表面和位置；原文是中文就保留中文，不翻译、不拆字。没有要求文字时不擅自添加招牌、字幕、标题或水印。
+- 仅在明确要求海报、卡面、图表、设计板等成品时组织阅读顺序，给指定区域实际内容；不要把普通聊天插图扩写成角色资料卡、拼贴或多视图。数字、对象数量和左右次序忠实保留，不编造数据或标签。
+
+## 写完静默复核
+只剩一个时刻和一个视点吗？人物数量、身份与媒介正确吗？每只关键手的归属、接触对象和支撑点一致吗？有无一条肢体承担矛盾任务、前后姿态重影或左右镜像？景别与细节尺度相称吗？是否多加了皮肤纹理、质量词、路人或文字？IMAGES 是否仍是英文画面纯文本，且没有画布建议或 JSON 外壳？
+
+## 结构示例（只示范关系，不得照抄人物与道具）
+真人中景：An eye-level photograph uses a compact, slightly taller-than-wide frame around a middle-aged woman seated at a kitchen table. Her round face, dark brown eyes and a small mole beside her left eyebrow remain clearly visible above a plain blue cotton shirt. She steadies a ceramic cup with her left palm beneath its base while her right hand rests loosely around the handle; both wrists continue naturally from the sleeves, and the cup has a clear outline against the table. Her shoulders remain relaxed as she looks down at the cup. Side-window light makes a gradual transition from the lit cheek to the shaded cheek, with the surrounding room receding softly behind her.
+
+插画接触：A waist-up painted illustration shows two adults in a compact frame, the short-haired person on screen-left and the person in the green jacket on screen-right. The person on the left supports a small parcel from underneath with both hands, while the person on the right places a single open palm against its near side. Their forearms remain distinct on either side of the parcel, and both look at the same contact point. Broad, quiet areas of color and the established brushwork continue across faces, hands and clothing.

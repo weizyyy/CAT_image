@@ -1,6 +1,23 @@
-# 🐱 CATimage v1.29.1 — 小猫的生图插件
+# 🐱 CATimage v1.30.0 — 小猫的生图插件
 
 **SillyTavern 1.18+ / Tauritavern 第三方扩展 · 文生图人物一致性方案**
+
+## v1.30.0 MiniMax-H3-Image
+
+- 模型类型与角色扫描模式新增 **MiniMax-H3-Image**。沿用 Krea 2 的英文自然语言接入方式，使用独立提示词规则、英文档案与缓存；已有 Krea 2 风格选择不会被当作 H3 风格自动拼接。
+- 依据 [官方扩写指导](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image-PE/blob/main/prompt/t2i/task_prompt.txt) 和 [官方文生图写作指南](https://github.com/MiniMax-AI/MiniMax-H3-Image/blob/main/skills/h3-image-prompt-writing/references/t2i-en.txt)，描述一幅完整画面，优先主体、单一瞬间、朝向、接触、支撑与空间层次。图像提示词保持纯文本，不采用官方 PE 的 JSON 外壳或画布选择。
+- 默认构图接近方形，**宽略小于高**；明确取景优先。插件不改工作流中的宽高或其他参数，也不输出比例建议。需要画出的文字用双引号保留，中文招牌不会被英文清洗删掉。
+- 皮肤与解剖规则是减少风险的提示词策略，不能保证消除模型缺陷。照片不反复追加真实皮肤、毛孔、微瑕疵、锐化词；动漫不追加摄影肤质。手部只承担明确、相容的任务，接触轮廓与支撑点保持连贯，不强迫遮挡中的手指全部出现。
+
+### 研究依据与使用边界
+
+[官方模型说明](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image) 明确原生模型不使用 CFG，接口不支持负面提示词。本插件因此使用正向画面描述，不恢复负向词注入。
+
+社区存在相反的肤质体验：[Comfy-Org 讨论 #2](https://huggingface.co/Comfy-Org/MiniMax-H3-Image/discussions/2) 中，一位实测者反馈反复要求真实皮肤会过度强化表面效果；[SillyTavern 用户实测](https://www.reddit.com/r/SillyTavernAI/comments/1xv6gm8/generating_good_images_out_of_sillytavern_with/) 更强调可见互动、接触和明确视点。因此本模式采用克制肤质与关系描述，这是基于官方规则和个别社区经验作出的实现取舍，并非经过统计验证的修复。
+
+[高分辨率测试讨论](https://www.reddit.com/r/StableDiffusion/comments/1xw9oja/the_minimax_h3_image_is_a_beast_at_ultrahigh/) 仍有手指、指甲和肢体失败反馈。输出分辨率、权重量化、VAE、LoRA 及工作流内二次扩写也可能影响结果；仅靠加“完美手部”或皮肤词无法保证解决。若工作流本身还启用提示词扩写，可固定其余条件对比开关效果，插件不会自动解析或关闭这些节点。
+
+使用时选择本模式并导入对应 H3-Image 工作流；若当前人物档案锁定了其他模型，请在档案扫描中选择 H3-Image 重新扫描。切换模式会为当前回复建立 H3 专用结果；同一 H3 回复后续只改一个占位符仍只重做该处。现有艺术家风格输入可选，留空可避免额外风格干扰。
 
 ## v1.29.1 修复与新增
 
@@ -40,7 +57,7 @@
 
 完整清单见 [CHANGELOG.md](CHANGELOG.md)；手把手教程见 [GUIDE.md](GUIDE.md)（新手指引）。
 
-## 支持的模型（按提示词写法分五档）
+## 支持的模型（按提示词写法分六档）
 
 | 档位 | 提示词 | 生图模型 | 状态 |
 |---|---|---|---|
@@ -49,6 +66,7 @@
 | Anima | 标签定结构 + 自然语言写氛围 | Anima 系 | 推荐（混合训练） |
 | Anime Tag | 英文标签链 | SDXL 等 tag 系模型 | 理论可用 |
 | Krea 2 | 英文自然语言段落（不吃标签/权重） | Krea 2 | v1.28.0 新增 · 13 种风格预设 |
+| MiniMax-H3-Image | 连贯英文画面描述，明确朝向、接触与支撑 | MiniMax-H3-Image | v1.30.0 新增 · 独立肤质与肢体规则 |
 
 ## 🎬 导演模式（v1.2 起唯一模式）
 

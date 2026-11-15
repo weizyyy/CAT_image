@@ -3,7 +3,7 @@ import { slLog } from './log.js';
 import { settings, COLORS, getSTContext, getActiveMode, isEnglishMode, escapeHtml } from './settings.js';
 import { imgCacheGetById, imgCacheSetById } from './cache.js';
 import { generateImage } from './comfyui.js';
-import { cleanAnimePrompt } from './text-utils.js';
+import { cleanPromptForMode } from './text-utils.js';
 import { resolveFacePrompt, getCharacterName, getChatId } from './pipeline/profile.js';
 import { galleryAdd } from './gallery.js';
 
@@ -58,8 +58,8 @@ async function processImageQueue() {
         var workflow = task.workflow;
         var prompt = task.prompt;
         // Anime 模式强制清理中文（删空则保留原文，防空提示词）
-        if (isEnglishMode()) { var _clean = cleanAnimePrompt(prompt); if (_clean) prompt = _clean; }
-        var result = await generateImage(workflow, prompt, { signal: task.controller.signal });
+        if (isEnglishMode(task.mode)) { var _clean = cleanPromptForMode(prompt, task.mode); if (_clean) prompt = _clean; }
+        var result = await generateImage(workflow, prompt, { signal: task.controller.signal, mode: task.mode });
         if (task.cancelled) return;
         // v1.21 图库：每张产出的图都记一笔（独立账本，不受 msgMap 50 条上限影响）
         try {
@@ -120,7 +120,7 @@ export function enqueueGen(btn, prompt, { automatic = false } = {}) {
     btn.text('排队中\u2026').css({ background: COLORS.orange, color: '#fff' }).off('click');
     var _own = _genOwner(), _scene = '';
     try { _scene = String(btn.closest('.sl_img_block').find('div').first().text() || '').replace(/^🖼️\s*/, '').slice(0, 60); } catch (eS) {}
-    const task = { id: id, btn: btn, blockId, prompt: prompt, workflow: settings.cWf, scene: _scene, charName: _own.charName, chatKey: _own.chatKey };
+    const task = { id: id, btn: btn, blockId, prompt: prompt, mode: getActiveMode(), workflow: settings.cWf, scene: _scene, charName: _own.charName, chatKey: _own.chatKey };
     if (blockId) pendingBlocks.set(blockId, task);
     imageQueue.push(task);
     slLog('入队:', id, '队列长度:', imageQueue.length);
@@ -130,7 +130,7 @@ export function enqueueGen(btn, prompt, { automatic = false } = {}) {
 // [Fix] 通用排队任务（立绘等非聊天图按钮的生成）：与聊天图共用同一队列，串行打 ComfyUI
 export function enqueueTask(id, prompt, onSuccess, onFail) {
     var _own = _genOwner();
-    imageQueue.push({ id: id, prompt: prompt, workflow: settings.cWf, custom: { onSuccess: onSuccess, onFail: onFail }, charName: _own.charName, chatKey: _own.chatKey });
+    imageQueue.push({ id: id, prompt: prompt, mode: getActiveMode(), workflow: settings.cWf, custom: { onSuccess: onSuccess, onFail: onFail }, charName: _own.charName, chatKey: _own.chatKey });
     slLog('入队(任务):', id, '队列长度:', imageQueue.length);
     processImageQueue();
 }

@@ -16,6 +16,7 @@ function modeDesc(m) {
     if (m === 'anime') return 'anime（纯英文自然语言）';
     if (m === 'anime_tag') return 'anime_tag（纯 Danbooru 英文标签）';
     if (m === 'krea2') return 'krea2（英文自然语言段落：一段连贯描述，不吃标签链与权重语法）';
+    if (m === 'minimax_h3_image') return 'MiniMax-H3-Image（英文自然语言：单一瞬间，人物朝向与接触关系明确；默认近方形、宽略小于高）';
     return 'zit（中文提示词）';
 }
 

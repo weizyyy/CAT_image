@@ -173,6 +173,7 @@ export var MODES = [
     { id: 'anime',     label: 'Anime（纯英文描述）',                                        short: 'Anime（纯英文描述）',          badge: '🎬 Anime' },
     { id: 'anime_tag', label: 'Anime Tag（纯英文标签）',                                    short: 'Anime Tag（纯英文标签）',      badge: '🎬 Tag' },
     { id: 'krea2',     label: '🎬 Krea 2（英文自然语言段落）★ Krea 2 / 通用基座模型推荐',      short: 'Krea 2（英文自然语言段落）',   badge: '🎬 Krea2' },
+    { id: 'minimax_h3_image', label: '🎬 MiniMax-H3-Image（英文自然语言 · 构图与接触关系）', short: 'MiniMax-H3-Image（英文自然语言）', badge: '🎬 H3 Image' },
 ];
 
 export function modeLabel(id) {
@@ -185,11 +186,16 @@ export function modeBadge(id) {
     return '🖼️ ZIT';
 }
 
-// ── 是否「英文提示词」模式（anime / anime_tag / anima / krea2 都输出英文）──
+// ── 是否「英文提示词」模式（含 Krea 2 / MiniMax-H3-Image）──
 // 统一入口：以后新增英文模式只改这里，不用再去各处撒 if
 export function isEnglishMode(mode) {
     var m = mode || getActiveMode();
-    return m === 'anime' || m === 'anime_tag' || m === 'anima' || m === 'krea2';
+    return m === 'anime' || m === 'anime_tag' || m === 'anima' || m === 'krea2' || m === 'minimax_h3_image';
+}
+
+// English prose modes share the EN-PROMPT profile field, rather than EN-TAGS.
+export function isEnglishProseMode(mode = getActiveMode()) {
+    return mode === 'anime' || mode === 'krea2' || mode === 'minimax_h3_image';
 }
 
 // ── v1.27.0 轻量同步指纹（FNV-1a 32bit + djb2，拼成 16 位 hex）──

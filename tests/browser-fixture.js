@@ -22,17 +22,20 @@ export async function runBrowserFixture() {
     const { setEnqueueGen, buildImgCard } = await import('../modules/render.js');
     const queue = await import('../modules/queue.js');
     setEnqueueGen(queue.enqueueGen); settings.autoGen = 1;
-    let calls = 0, generations = 0;
+    let calls = 0, generations = 0, lastAnalysis, lastWorkflow;
     const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8l0AAAAASUVORK5CYII=';
     const mockFetch = async (url, options) => {
         if (String(url).endsWith('/generate')) {
+            lastWorkflow = JSON.parse(JSON.parse(options.body).prompt).prompt;
             generations++; return new Response(JSON.stringify({ data: pixel, format: 'png' }));
         }
         // Use an existing local image for the displayed mock result; no file is uploaded.
         if (String(url).endsWith('/upload')) return new Response(JSON.stringify({ path: '/img/ai4.png' }));
         calls++;
+        lastAnalysis = JSON.parse(options.body);
         const user = JSON.parse(options.body).messages.at(-1).content;
-        const prompt = user.includes('红衣') ? 'RED-FIXTURE-PROMPT' : user.includes('蓝衣') ? 'BLUE-FIXTURE-PROMPT' : 'OTHER-FIXTURE-PROMPT';
+        const prompt = user.includes('H3-FIXTURE') ? 'A compact painted scene shows a sign reading "Fixture的茶铺". The woman supports a cup with her left palm while her right hand rests around the handle.'
+            : user.includes('红衣') ? 'RED-FIXTURE-PROMPT' : user.includes('蓝衣') ? 'BLUE-FIXTURE-PROMPT' : 'OTHER-FIXTURE-PROMPT';
         return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content:
             '---PROFILE---\n{}\n---END---\n---IMAGES---\n' + prompt + '\n---END---' } }] }), { status: 200 });
     };
@@ -120,6 +123,22 @@ export async function runBrowserFixture() {
         await wait(() => !!root.querySelector('.sl_img_btn') && !scanner.scanCoordinator.running);
         checks.push({ name: 'webview-cancelled-analysis-explicit-resume', ok: calls === oldCalls + 3 });
         compact.setPluginEnabled(false);
+        const panel = await import('../modules/ui/panel.js'), tabs = await import('../modules/ui/tabs.js');
+        panel.showPanel(); tabs.renderSettingsPage();
+        jQuery('#sl_model_type').val('minimax_h3_image').trigger('change');
+        checks.push({ name: 'webview-h3-model-selection-and-guidance-card', ok: settings.modelType === 'minimax_h3_image' &&
+            !!document.querySelector('#sl_model_type option[value="minimax_h3_image"]') && document.querySelector('#sl_minimax_h3_card').style.display !== 'none' &&
+            document.querySelector('#sl_krea2_style_card').style.display === 'none' });
+        settings.autoGen = 1;
+        settings.cWf = '{"native":{"inputs":{"text":"%prompt%"}},"canvas":{"inputs":{"width":1152,"height":1280}}}';
+        ctx.chat[0].mes = '[img:H3-FIXTURE|要点:招牌文字Fixture的茶铺，手托杯子]'; root.textContent = ctx.chat[0].mes;
+        await scanner.runAuxImageScan(jQuery(root));
+        await wait(() => !!root.querySelector('.sl_img_block img') && !scanner.scanCoordinator.running);
+        const h3System = lastAnalysis.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+        checks.push({ name: 'webview-h3-overlay-reaches-analysis-and-keeps-quoted-lettering', ok: h3System.includes('【模式：MiniMax-H3-Image') &&
+            !h3System.includes('【模式：Krea 2') && root.querySelector('.sl_img_btn').dataset.prompt.includes('"Fixture的茶铺"') });
+        checks.push({ name: 'webview-h3-plain-caption-to-comfy-with-unchanged-canvas', ok: lastWorkflow.native.inputs.text.includes('"Fixture的茶铺"') &&
+            lastWorkflow.canvas.inputs.width === 1152 && lastWorkflow.canvas.inputs.height === 1280 && !lastWorkflow.native.inputs.text.includes('expanded_caption') });
         return { ok: checks.every(c => c.ok), checks, mockedAnalysisRequests: calls, mockedImageRequests: generations, externalRequests: 0 };
     } finally { scanner.stopPolling(); bridge.stopFrontendBridge(); }
 }

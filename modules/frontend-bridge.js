@@ -1,6 +1,6 @@
 // Frontend replies use the same scheduler and DOM slots as normal chat messages.
 // No property traps, global first-iframe target, pending-turn overwrite or tail append.
-import { settings, getSTContext } from './settings.js';
+import { settings, getSTContext, getActiveMode } from './settings.js';
 import { slLog, slErr } from './log.js';
 import { getChatId } from './pipeline/profile.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
@@ -87,6 +87,7 @@ function visibleRecord(record) {
 }
 function submitRecord(record) {
     if (record.cancelled) return;
+    if (record.mode !== getActiveMode()) return;
     if (generationBusy() || settings.pluginOn === false) return;
     if (inflight.get(record.win)) return;
     if (record.callId !== latestCalls.get(record.win) && (holdUntil.get(record.win) || 0) > Date.now()) return;
@@ -100,7 +101,7 @@ function submitRecord(record) {
     if (record.enhanced) return;
     scanCoordinator.submit({ owner: record.key, key: record.key, source: record.text,
         isCurrent: () => running && settings.feBridge !== false && settings.pluginOn !== false &&
-            getChatId() === record.chatId && !generationBusy() && !inflight.get(record.win) &&
+            getChatId() === record.chatId && getActiveMode() === record.mode && !generationBusy() && !inflight.get(record.win) &&
             rootOwners.get(record.root) === record.key && visibleRecord(record),
         run: (isCurrent, signal) => runRosterPipeline(record.text, record.key, { isCurrent, signal, results: record.results,
             onSlot(index, enhanced) {
@@ -132,7 +133,7 @@ function receive(win, raw, capturedChat, callId) {
     if (getSTContext()?.chat?.some(message => !message.is_user && extractNarrativeText(message.mes) === text)) return;
     const signature = capturedChat + ':' + frameId(win) + ':' + callId + ':' + fingerprint(text);
     if (records.has(signature)) return;
-    const record = { key: 'fe_v2_' + signature, chatId: capturedChat, callId, win, text, results: new Map(), root: null };
+    const record = { key: 'fe_v2_' + signature, chatId: capturedChat, callId, mode: getActiveMode(), win, text, results: new Map(), root: null };
     records.set(signature, record);
     if (records.size > 100) records.delete(records.keys().next().value);
     // Let the card's own Promise continuation commit its final response first.

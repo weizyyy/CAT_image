@@ -1,5 +1,5 @@
 import { slLog, slErr } from './log.js';
-import { settings, getSTContext } from './settings.js';
+import { settings, getSTContext, getActiveMode } from './settings.js';
 import { getProfiles, getChatId } from './pipeline/profile.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
 import { refreshCoopCards } from './sync-cards.js';
@@ -26,15 +26,15 @@ export function readSnapshot(messageId) {
     if (messageId == null || messageId === '') return null;
     const message = getSTContext()?.chat?.[Number(messageId)];
     if (!message || message.is_user || message.is_system || typeof message.mes !== 'string') return null;
-    const source = message.mes, chatId = getChatId(), swipe = message.swipe_id ?? 0;
-    const key = messageKey(chatId, messageId, source, swipe), version = epoch;
+    const source = message.mes, chatId = getChatId(), swipe = message.swipe_id ?? 0, mode = getActiveMode();
+    const key = getMsgKey(chatId, messageId, source, swipe, mode), version = epoch;
     return { owner: chatId + ':' + messageId, chatId, messageId: String(messageId),
-        source, swipe, key, results: new Map(),
+        source, swipe, mode, key, results: new Map(),
         isCurrent() {
             const current = getSTContext()?.chat?.[Number(messageId)];
             return active && settings.pluginOn !== false && epoch === version &&
                 !generationBusy() && getChatId() === chatId &&
-                current?.mes === source && (current.swipe_id ?? 0) === swipe;
+                current?.mes === source && (current.swipe_id ?? 0) === swipe && getActiveMode() === mode;
         } };
 }
 export function messageRoot(id) {
@@ -94,13 +94,14 @@ export const scanCoordinator = new ScanCoordinator({
 });
 function saveRevision(snapshot) {
     const values = snapshot.slots.map(s => s.enhanced);
-    imgStorePut(snapshot.key, JSON.stringify({ version: 3, source: snapshot.source, swipe: snapshot.swipe,
+    imgStorePut(snapshot.key, JSON.stringify({ version: 3, source: snapshot.source, swipe: snapshot.swipe, mode: snapshot.mode,
         slots: snapshot.slots, enhanced: replaceTokens(snapshot.source, tokenizePlaceholders(snapshot.source), values) }), Date.now());
 }
-function readRecord(key) {
+function readRecord(key, mode = getActiveMode()) {
     try {
         const record = JSON.parse(settings.msgMap?.[key]);
         if (![2, 3].includes(record.version) || typeof record.source !== 'string') return null;
+        if ((mode === 'minimax_h3_image') !== (record.mode === 'minimax_h3_image')) return null;
         const tokens = tokenizePlaceholders(record.source);
         if (record.version === 2) {
             const values = Array.from(String(record.enhanced || '').matchAll(/\[image:\s*[\s\S]*?\]\s*【提示词】[\s\S]*?【\/提示词】/g), m => m[0]);
@@ -112,18 +113,18 @@ function readRecord(key) {
     } catch { return null; }
 }
 function prepareRevision(snapshot) {
-    const owner = JSON.stringify([snapshot.chatId, snapshot.messageId, snapshot.swipe]);
+    const owner = JSON.stringify([snapshot.chatId, snapshot.messageId, snapshot.swipe, snapshot.mode]);
     let previous = revisions.get(owner);
     if (previous?.key === snapshot.key) {
         snapshot.slots = previous.slots; snapshot.results = previous.results;
         revisions.set(owner, snapshot); return snapshot;
     }
-    previous = readRecord(snapshot.key) || previous;
+    previous = readRecord(snapshot.key, snapshot.mode) || previous;
     if (!previous) {
         const prefix = snapshot.chatId + '_' + snapshot.messageId + '_v2_' + snapshot.swipe + '_';
         const keys = Object.keys(settings.msgMap || {}).filter(k => k.startsWith(prefix))
             .sort((a, b) => (settings.msgMapTs?.[b] || 0) - (settings.msgMapTs?.[a] || 0));
-        for (const key of keys) { previous = readRecord(key); if (previous) break; }
+        for (const key of keys) { previous = readRecord(key, snapshot.mode); if (previous) break; }
     }
     snapshot.slots = reconcileSlots(snapshot.source, snapshot.key, previous);
     for (const [i, slot] of snapshot.slots.entries()) if (slot.enhanced) snapshot.results.set(i, { ok: true, enhanced: slot.enhanced });
@@ -132,7 +133,10 @@ function prepareRevision(snapshot) {
     return snapshot;
 }
 export function getMsgFingerprint(text) { return fingerprint(text); }
-export function getMsgKey(chid, mesid, text, swipe = 0) { return messageKey(chid, mesid, text, swipe); }
+export function getMsgKey(chid, mesid, text, swipe = 0, mode = getActiveMode()) {
+    // Preserve existing cache IDs; the new mode gets its own prompt/image lineage.
+    return messageKey(chid, mesid, text, swipe) + (mode === 'minimax_h3_image' ? '_minimax_h3_image' : '');
+}
 export function findBestCachedEntry(chid, mesid, text, swipe = 0) {
     const key = getMsgKey(chid, mesid, text, swipe), record = readRecord(key);
     if (record?.source === text && record.swipe === swipe)

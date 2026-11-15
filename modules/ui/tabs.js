@@ -7,9 +7,9 @@ import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge 
 import { KREA2_STYLES, krea2StyleById } from '../style-presets.js';
 import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
 import { getProfiles, getCharacterName } from '../pipeline/profile.js';
-import { startPolling, stopPolling, getScannerStatus } from '../scanner.js';
+import { startPolling, stopPolling, getScannerStatus, checkLastMessage } from '../scanner.js';
 import { getQueueLength, enqueueTask } from '../queue.js';
-import { cleanAnimePrompt } from '../text-utils.js';
+import { cleanPromptForMode } from '../text-utils.js';
 import { rosterEntries, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry } from '../roster.js';
 import { composeFinalPrompt } from '../comfyui.js';
 import { galleryList, galleryCount, galleryRemove, galleryClearChat, galleryPrune } from '../gallery.js';
@@ -143,6 +143,7 @@ export function renderSettingsPage() {
       '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:8px;line-height:1.6;">前端卡必须装「酒馆助手 / JS-Slash-Runner」才能跑；每条剧情都会多一次辅助 AI 调用（导演管线的开销）。</div></div>';
     h += '<div style="' + card() + ';padding:14px 16px;">' + switchHTML('sl_show_prompt', settings.showGenPrompt === true, '图块显示完整提示词', '默认关闭：图块只显示短标题（详细字段只进生成链，用户看不到）；调试时打开可看到每张图的完整生成提示词') + '</div>';
     h += '<div id="sl_krea2_style_card" style="' + card() + ';' + (settings.modelType === 'krea2' ? '' : 'display:none;') + '">' + cardHead('🎨', 'Krea 2 风格', '锁定本场画风 · 插件统一前置，跨轮不漂') + '<select id="sl_krea2_style" style="' + f + '">' + krea2StyleOptionsHTML(settings.krea2Style) + '</select>' + '<div id="sl_krea2_style_note" style="font-size:10px;color:' + CAT.sub + ';margin-top:6px;line-height:1.7;">' + esc((krea2StyleById(settings.krea2Style) || {}).note || '') + '</div>' + '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.7;">官方没有固定的内置风格清单：Krea 2 的风格靠<b>提示词 / 风格参考图 / 情绪板 / LoRA</b> 四条路。这里是从官方示例归纳出的风格句 —— 选中后由插件加在每张提示词最前，辅助 AI 只写人物与场景，不再另写画风。<br>画风由插件统一拼接，不再自动注入质量前缀。</div></div>';
+    h += '<div id="sl_minimax_h3_card" style="' + card() + ';' + (settings.modelType === 'minimax_h3_image' ? '' : 'display:none;') + '">' + cardHead('🎬', 'MiniMax-H3-Image', '连贯英文 · 明确接触 · 克制肤质') + '<div style="font-size:10.5px;color:' + CAT.sub + ';line-height:1.7;">提示词会优先写清单一瞬间、人物朝向、手部归属与支撑关系，避免反复堆毛孔、皮肤微瑕疵或锐化词。照片和插画分别处理肤质。<br>默认近方形、宽略小于高；明确构图优先，实际画布尺寸由工作流决定。请使用该图像模型对应的工作流。<br>原生模型不使用负面提示词。肤质和畸形也受模型与工作流影响，提示词无法保证消除。</div></div>';
     h += '<div style="' + card() + '">' + cardHead('🎨', '艺术家风格', '英文模式可选') + '<input id="sl_anime_artist" type="text" value="' + escAttr(settings.animeArtist || '') + '" style="' + f + '" placeholder="留空则不添加"></div>';
     h += '<div style="text-align:center;font-size:10px;color:' + CAT.mute + ';padding:6px 0 2px;">所有改动即时保存 · 无需手动保存</div>';
     body.html(h);
@@ -151,7 +152,7 @@ export function renderSettingsPage() {
 }
 export function bindSettingsEvents(b) {
   b.off('change', '#sl_plugin_on').on('change', '#sl_plugin_on', function () { settings.pluginOn = jQuery(this).is(':checked'); saveSettings(); if (settings.pluginOn) { startPolling(); compact.setPluginEnabled(true); } else { stopPolling(); compact.setPluginEnabled(false); } });
-  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); jQuery('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); saveSettings(); });
+  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); jQuery('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); jQuery('#sl_minimax_h3_card').toggle(settings.modelType === 'minimax_h3_image'); saveSettings(); refreshCoopCards(); checkLastMessage(); });
   b.off('change', '#sl_image_mode').on('change', '#sl_image_mode', function () { settings.imageMode = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_img_width').on('change', '#sl_img_width', function () { settings.imgBlockWidth = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_director_cast').on('change', '#sl_director_cast', function () { settings.directorCastImport = jQuery(this).is(':checked'); saveSettings(); try { refreshCoopCards(); } catch (e) {} toast('success', settings.directorCastImport !== false ? '已开启：卡库档案导入人物表' : '已关闭：扫描仅用于立绘/档案，人物表只留占位符收集'); });
@@ -362,7 +363,7 @@ function buildPortraitPrompt(ent, view, bm) {
     if (!anchor) return '';
     body = atomValues(anchor, bm) + _portraitTail(v, bm, underage);
   }
-  if (isEnglishMode(bm)) body = cleanAnimePrompt(body);
+  if (isEnglishMode(bm)) body = cleanPromptForMode(body, bm);
   // v1.8.3：走与 generateImage 完全同源的组装（画风预设 / 艺术家标签）
   return composeFinalPrompt(body);
 }

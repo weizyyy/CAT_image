@@ -97,6 +97,22 @@ export function cleanAnimePrompt(prompt) {
     return t;
 }
 
+// H3 can render literal non-English lettering inside an English caption.
+// Keep quoted text exact through language cleanup and character-name filtering.
+export function preserveQuotedText(prompt, transform) {
+    const text = String(prompt || ''), quotes = [];
+    let prefix = '⟦SLQ_';
+    while (text.includes(prefix)) prefix += '_';
+    const protectedText = text.replace(/"(?:\\.|[^"\\])*"|“[^”]*”/g, quote => {
+        quotes.push(quote); return prefix + (quotes.length - 1) + '⟧';
+    });
+    return transform(protectedText).replace(new RegExp(prefix + '(\\d+)⟧', 'g'), (_match, i) => quotes[Number(i)]);
+}
+
+export function cleanPromptForMode(prompt, mode) {
+    return mode === 'minimax_h3_image' ? preserveQuotedText(prompt, cleanAnimePrompt) : cleanAnimePrompt(prompt);
+}
+
 // ══════════════════════════════
 // ── v2.4 占位符协议：[img:…] 解析 ──
 // 语法（酒馆AI模式，主LLM写入）：

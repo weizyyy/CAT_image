@@ -199,3 +199,69 @@ test('cancel image queue aborts active request, drops waiting/portrait tasks and
     enqueueGen(jQuery('.sl_img_btn').first(), '手动继续'); assert.equal(requests, 2);
     clearQueue(); release(); await new Promise(r => setTimeout(r, 0)); settings.autoGen = 0;
 });
+
+test('H3 uses its own English overlay, preserves quoted lettering end to end, and keeps workflow geometry exact', async () => {
+    const { MODES, isEnglishMode, isEnglishProseMode } = await import('../modules/settings.js');
+    const { cleanPromptForMode } = await import('../modules/text-utils.js');
+    const { extractImgBlocksFromEnhanced } = await import('../modules/render.js');
+    const { generateImage, composeFinalPrompt } = await import('../modules/comfyui.js');
+    const savedMode = settings.modelType; settings.modelType = 'minimax_h3_image';
+    try {
+        assert.equal(MODES.filter(m => m.id === settings.modelType).length, 1);
+        assert.equal(isEnglishMode(), true); assert.equal(isEnglishProseMode(), true);
+        const caption = 'A painted sign reads "Tester的茶铺" above the door. Her left hand supports the parcel while her right hand rests on its side.';
+        let request;
+        fetch = async (_url, options) => { request = JSON.parse(options.body); return response(caption); };
+        const result = await runRosterPipeline('[img:茶铺|要点:手托包裹，招牌文字Tester的茶铺]', 'h3');
+        const system = request.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+        assert.ok(system.includes('【模式：MiniMax-H3-Image'));
+        assert.ok(system.includes('每条可见肢体'));
+        assert.equal(system.includes('【模式：Krea 2'), false);
+        assert.ok(request.messages.at(-1).content.includes('slightly taller-than-wide'));
+        const block = extractImgBlocksFromEnhanced(result.enhanced, 'h3')[0];
+        assert.ok(block.prompt.includes('"Tester的茶铺"'));
+        const cleaned = cleanPromptForMode(block.prompt, settings.modelType);
+        assert.ok(composeFinalPrompt(cleaned).includes('"Tester的茶铺"'));
+        const workflow = '{"text":{"inputs":{"text":"%prompt%"}},"canvas":{"inputs":{"width":1152,"height":1280}},"untouched":"%negative_prompt%"}';
+        let sent;
+        fetch = async (url, options) => {
+            if (String(url).endsWith('/generate')) { sent = JSON.parse(JSON.parse(options.body).prompt); return { ok: true, json: async () => ({ data: 'AA==' }) }; }
+            return { ok: true, json: async () => ({ path: '/h3-fixture.png' }) };
+        };
+        await generateImage(workflow, cleaned);
+        assert.ok(sent.prompt.text.inputs.text.includes('"Tester的茶铺"'));
+        assert.deepEqual(sent.prompt.canvas.inputs, { width: 1152, height: 1280 });
+        assert.equal(sent.prompt.untouched, '%negative_prompt%');
+    } finally { settings.modelType = savedMode; }
+});
+
+test('H3 retries caption JSON wrappers instead of forwarding them as image prompts', async () => {
+    const savedMode = settings.modelType; settings.modelType = 'minimax_h3_image'; let calls = 0;
+    try {
+        fetch = async () => response(++calls === 1 ? '{"expanded_caption":"A natural portrait.","aspect_ratio":"1:1"}' : 'A natural portrait in a compact frame.');
+        const result = await runRosterPipeline('[img:人像]', 'h3-json');
+        assert.equal(result.ok, true); assert.equal(calls, 2);
+        assert.ok(result.enhanced.includes('A natural portrait in a compact frame.'));
+        assert.equal(result.enhanced.includes('aspect_ratio'), false);
+    } finally { settings.modelType = savedMode; }
+});
+
+test('H3 mode cannot reuse another model prompt; edits within H3 still reuse unchanged slots', async () => {
+    const savedMode = settings.modelType; settings.modelType = 'zit'; settings.msgMap = {}; settings.msgMapTs = {};
+    let calls = 0; fetch = async () => response('Independent image caption ' + ++calls);
+    show('[img:甲][img:乙]'); scanner.startPolling();
+    try {
+        await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
+        const oldId = document.querySelector('.sl_img_btn').dataset.slid;
+        settings.modelType = 'minimax_h3_image';
+        await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
+        const h3Id = document.querySelector('.sl_img_btn').dataset.slid;
+        assert.equal(calls, 4); assert.notEqual(h3Id, oldId);
+        ctx.chat[0].mes = '[img:甲][img:丙]'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+        await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
+        assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, h3Id);
+        settings.modelType = 'zit'; ctx.chat[0].mes = '[img:甲][img:乙]'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+        await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
+        assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
+    } finally { scanner.stopPolling(); settings.modelType = savedMode; }
+});
