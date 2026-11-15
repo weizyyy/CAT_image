@@ -15,7 +15,7 @@ export async function runBrowserFixture() {
         eventSource, eventTypes, getRequestHeaders: () => ({}), setExtensionPrompt() {} };
     initSettings(() => ctx, {});
     Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'https://fixture.invalid', auxModel: 'fixture', autoGen: 0, storyLib: false });
-    const { loadPrompts } = await import('../prompts/loader.js');
+    const { loadPrompts, getPrompt } = await import('../prompts/loader.js');
     await loadPrompts(new URL('../prompts/', import.meta.url).href);
     const scanner = await import('../modules/scanner.js');
     const bridge = await import('../modules/frontend-bridge.js');
@@ -136,6 +136,7 @@ export async function runBrowserFixture() {
         await wait(() => !!root.querySelector('.sl_img_block img') && !scanner.scanCoordinator.running);
         const h3System = lastAnalysis.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
         checks.push({ name: 'webview-h3-overlay-reaches-analysis-and-keeps-quoted-lettering', ok: h3System.includes('【模式：MiniMax-H3-Image') &&
+            h3System.includes(getPrompt('pipeline/minimax-h3-image-overlay.txt').trim()) &&
             !h3System.includes('【模式：Krea 2') && root.querySelector('.sl_img_btn').dataset.prompt.includes('"Fixture的茶铺"') });
         checks.push({ name: 'webview-h3-plain-caption-to-comfy-with-unchanged-canvas', ok: lastWorkflow.native.inputs.text.includes('"Fixture的茶铺"') &&
             lastWorkflow.canvas.inputs.width === 1152 && lastWorkflow.canvas.inputs.height === 1280 && !lastWorkflow.native.inputs.text.includes('expanded_caption') });

@@ -215,7 +215,8 @@ test('H3 uses its own English overlay, preserves quoted lettering end to end, an
         const result = await runRosterPipeline('[img:茶铺|要点:手托包裹，招牌文字Tester的茶铺]', 'h3');
         const system = request.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
         assert.ok(system.includes('【模式：MiniMax-H3-Image'));
-        assert.ok(system.includes('每条可见肢体'));
+        const { getPrompt } = await import('../prompts/loader.js');
+        assert.ok(system.includes(getPrompt('pipeline/minimax-h3-image-overlay.txt').trim()));
         assert.equal(system.includes('【模式：Krea 2'), false);
         assert.ok(request.messages.at(-1).content.includes('slightly taller-than-wide'));
         const block = extractImgBlocksFromEnhanced(result.enhanced, 'h3')[0];

@@ -546,7 +546,11 @@ export function rosterDataTextFor(nameList) {
                         // v1.15.0：锚点里缺【美学基调 aura】→ 点名要回来（老档案都是 v1.14 前建的，全都没有）
                         // 没有 aura 的后果：皮相只能按模型先验补 = 画出来是"真实路人脸"（丑的根源）
                         if (!/(^|\|\s*)(aura|气质)\s*[:：]/i.test(String(_atom))) {
-                            nmLines.push('   ⭐ 这位的锚点里还缺【美学基调 aura】（v1.15 新增 · 必须是锚点第一个维度）—— 本轮请按种子补上：'
+                            if (_m === 'minimax_h3_image') {
+                                nmLines.push('   ⭐ 这位的锚点还缺 aura：本轮按种子补美学方向，例如 cool and restrained / warm and inviting；'
+                                    + '不写肤色、肤质、气色、场景光线或五官改造词。保留旧 anchor 全部已有值，追加 aura 后回传完整 anchor；'
+                                    + '提示词在人物身份句中自然复用该方向，不为补调性重写脸。');
+                            } else nmLines.push('   ⭐ 这位的锚点里还缺【美学基调 aura】（v1.15 新增 · 必须是锚点第一个维度）—— 本轮请按种子补上：'
                                 + '取「她美在哪 / 皮相往哪个方向」，**只用光学与肤质词**（如 aura:natural supple skin, healthy complexion, soft even skin），'
                                 + '⛔ 严禁 refined features / delicate features / 骨相精致 这类骨相词（会让五官偏移），'
                                 + '并以「**旧文原样 + aura:…**」的形式回传 anchor，**其余维度一个字不许改**。'
@@ -555,6 +559,7 @@ export function rosterDataTextFor(nameList) {
                         // v1.15.1：立绘还是旧版（含丑化词）→ 点名要求重写（立绘是缓存，改 prompt 不会自动更新）
                         (function () {
                             try {
+                                if (_m === 'minimax_h3_image') return; // Existing portraits are frozen reference prompts.
                                 var _pp = e.portraitPrompts;
                                 if (!_pp) return;
                                 var _t = String(_pp.front || '') + String(_pp.left || '') + String(_pp.right || '') + String(_pp.back || '');

@@ -204,8 +204,8 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
     var lines = [];
     lines.push('【任务】为每个 [img:] 占位符输出 1 条提示词，按【占位符】编号一一对应。人物外貌必须引用【人物档案】，禁止用名字代替外貌。禁止偷懒：每一幅图都要写完整详情（人物当前状态+衣着发型+表情+动作+场景+光影），不允许省略/概括/一句话带过。');
     if (getActiveMode() === 'minimax_h3_image') {
-        lines.push('【MiniMax-H3-Image】本图提示词写成连贯英文。先解决主体数量、相机视角、人物朝向和单一瞬间的接触关系，再补入镜身份与场景细节；不把所有肢体同时写成多个动作，不额外堆皮肤纹理。');
-        lines.push('【默认构图】用户未指定构图时采用 near-square, slightly taller-than-wide composition（宽略小于高）；保留明确指定的景别、方向与取景。不输出比例建议或尺寸，工作流画布由用户控制。');
+        lines.push('【MiniMax-H3-Image】本图写成独立完整的英文段落。已解析英文 anchor 与造型 detail 的入镜特征逐字复用；首次补全通过 PROFILE / WARDROBE 保存。种子只补未定维度，衣着、发型状态、表情与动作取本轮要点；不以角色名或 same person 省略外貌。构图、人物朝向与接触支撑保持一个瞬间，肤质结构与临时汗红分别处理。');
+        lines.push('【默认构图】未指定构图时采用 near-square, slightly taller-than-wide composition（宽略小于高）；保留明确指定的景别、方向与取景。只写画面，不输出比例建议或尺寸。');
     }
     // v1.28.0：Krea 2 风格锁定 —— 风格句由插件统一前置（跨轮稳定），这里告诉模型"别再自己写媒介"
     if (getActiveMode() === 'krea2') {
@@ -247,7 +247,9 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
         lines.push(wardrobeInfo.text);
         lines.push('· ✅ 已解析：**逐字写进提示词，禁止改写、禁止同义替换** —— 它就是生图语言，改了就会和上一张不一致');
         lines.push('· ⚠️ 待具象化：按 wardrobe-vocab.txt 的维度逐项取词，写进提示词，并通过 ---WARDROBE--- 回传');
-        lines.push('· 造型详情属于**结构**（服装/发型是什么），放在提示词的标签区；**「怎么穿」**（滑落/卷袖/湿透）仍写要点');
+        lines.push(getActiveMode() === 'minimax_h3_image'
+            ? '· 造型 detail 保存固定结构，入镜特征词逐字嵌入英文句子，不写标签区；「怎么穿」（滑落/卷袖/湿透）按本轮要点另写，不存进 detail'
+            : '· 造型详情属于**结构**（服装/发型是什么），放在提示词的标签区；**「怎么穿」**（滑落/卷袖/湿透）仍写要点');
         lines.push('· 禁止把造型详情写进氛围段；禁止把「怎么穿」写进 ---WARDROBE--- 回传');
         lines.push('');
     }
