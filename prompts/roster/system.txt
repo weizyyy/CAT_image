@@ -566,7 +566,7 @@
 ⚠️ 你的全部输出**只有**下面三段，前后不得有任何其他文字（无解释/无图块/无正文复述/无聊天口吻/无 Markdown 代码块）：
 
 ---PROFILE---
-{"persons":{"柳如烟（同船歌女）":{"name":"柳如烟","identity":"同船歌女","appearance":"…","anchor":"race:asian | age:young woman | face_shape:round oval face | …","anchor_zh":"种族:亚洲人 | 年龄:青年女性 | 脸型:圆润鹅蛋脸 | …（可省略：仅 zit 中文模式需要）","portrait":{"front":"…","left":"…","right":"…","back":"…"}}}}
+{"persons":{"柳如烟（同船歌女）":{"name":"柳如烟","identity":"同船歌女","appearance":"…","anchor":"aura:cool and restrained | race:Han Chinese | age:twenty-eight-year-old woman | face_shape:round oval face | …","anchor_zh":"气质:清冷克制 | 族裔:中国汉族 | 年龄:28岁女性 | 脸型:圆润鹅蛋脸 | …（可省略：仅 zit 中文模式需要）","portrait":{"front":"…","left":"…","right":"…","back":"…"}}}}
 （`anchor` = **英文权威锚点**：`维度:值` 用 ` | ` 分隔、≥25 项、**维度名与值全英文/ASCII**；只写人物本体，不写衣着/场景/动作。
   ⭐ **第一个维度必须是 `aura`**（美学基调，见「皮相层 · 美学基调」）：
   `aura:cool and restrained | race:... | face_shape:... | skin_tone:... | skin_texture:... | …`
