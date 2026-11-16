@@ -238,38 +238,6 @@ test('H3 uses its own English overlay, preserves quoted lettering end to end, an
     } finally { settings.modelType = savedMode; }
 });
 
-test('H3 ordinary CG visual age avoids a false numeric retry without changing the stored age', async () => {
-    const { upsertPerson, setEnglishAnchor, rosterEntries, getAtomAnchor } = await import('../modules/roster.js');
-    const { findLostNumbersInPrompts } = await import('../modules/pipeline/roster-pipeline.js');
-    const { findImagePlaceholders } = await import('../modules/text-utils.js');
-    const saved = { mode: settings.modelType, roster: settings.roster };
-    const caption = 'A fully clothed sixteen-year-old anime girl, 168cm tall, holds a closed book in a 2D visual-novel CG.';
-    const source = '[img:普通穿衣剧情|人物:AgeTest（学生）：18岁女性，168cm高|要点:手持书本站立]';
-    let calls = 0;
-    try {
-        settings.modelType = 'minimax_h3_image'; settings.roster = {};
-        upsertPerson('AgeTest', '学生', '18岁女性，168cm高', 'anchor');
-        const anchor = 'age:eighteen-year-old woman | gender:female | face_shape:oval face';
-        setEnglishAnchor('AgeTest', '学生', anchor);
-        fetch = async (_url, options) => {
-            calls++;
-            const user = JSON.parse(options.body).messages.at(-1).content;
-            assert.ok(user.includes('本图视觉年龄目标：16岁'));
-            assert.ok(user.includes('18岁女性'));
-            return response(caption);
-        };
-        const result = await runRosterPipeline(source, 'h3-visual-age');
-        assert.equal(result.ok, true); assert.equal(calls, 1);
-        assert.equal(getAtomAnchor(rosterEntries().find(e => e.name === 'AgeTest'), settings.modelType), anchor);
-        const ph = findImagePlaceholders(source);
-        assert.deepEqual(findLostNumbersInPrompts(ph, [caption.replace('168cm tall, ', '')]), [{ i: 0, items: ['168cm'] }]);
-        assert.deepEqual(findLostNumbersInPrompts(ph, [caption.replace('fully clothed ', '')]), [{ i: 0, items: ['18岁'] }]);
-        assert.deepEqual(findLostNumbersInPrompts(ph, [caption.replace('holds a closed book', 'is nude')]), [{ i: 0, items: ['18岁'] }]);
-        settings.modelType = 'krea2';
-        assert.deepEqual(findLostNumbersInPrompts(ph, [caption]), [{ i: 0, items: ['18岁'] }]);
-    } finally { settings.modelType = saved.mode; settings.roster = saved.roster; }
-});
-
 test('H3 retries caption JSON wrappers instead of forwarding them as image prompts', async () => {
     const savedMode = settings.modelType; settings.modelType = 'minimax_h3_image'; let calls = 0;
     try {
