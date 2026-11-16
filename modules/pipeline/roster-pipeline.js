@@ -68,6 +68,18 @@ function _missingHint(expectCount, gotCount) {
 
 // ── v1.13.6 数字保真：逐条对比"主模型给的数字"与"输出提示词里剩下的数字" ──
 // 返回 [{ i: 0, items: ['14岁'] }]（i = 占位符下标，0-based）
+function usesH3ClothedVisualAge(ph, prompt) {
+    // H3's explicit ordinary-CG age treatment changes the image caption only.
+    // Keep the exception narrow; preserve numeric checks for other facts.
+    if (getActiveMode() !== 'minimax_h3_image' || ph.personSegments?.length !== 1) return false;
+    const appearance = String(ph.personSegments[0].appearance || '');
+    if (!/(?:女性|女子|少女|\bfemale\b|\bwoman\b|\bgirl\b)/i.test(appearance)) return false;
+    const text = String(prompt || '');
+    return /\bfully[ -]clothed\b/i.test(text) &&
+        /\b(?:15|16|fifteen|sixteen)[ -]+years?[ -]+old\b[^.!?]{0,60}\b(?:girl|female|woman)\b/i.test(text) &&
+        !/\b(?:nude|naked|nipples?|areolae?|genitals?|vulva|penis|vagina|intercourse|erotic|sexual|sexualized)\b/i.test(text);
+}
+
 export function findLostNumbersInPrompts(placeholders, prompts) {
     var misses = [];
     if (!placeholders || !prompts) return misses;
@@ -78,6 +90,7 @@ export function findLostNumbersInPrompts(placeholders, prompts) {
         var src = [ph.scene || '', ph.topic || ''];
         for (var j = 0; j < segs.length; j++) src.push(segs[j].appearance || '');
         var lost = findLostNumbers(src.join(' '), prompts[i] || '');
+        if (usesH3ClothedVisualAge(ph, prompts[i])) lost = lost.filter(item => !/^(?:1[89]|2[0-5])(?:岁|周岁)$/.test(item));
         if (lost.length) misses.push({ i: i, items: lost });
     }
     return misses;

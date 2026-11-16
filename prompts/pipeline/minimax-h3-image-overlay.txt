@@ -5,6 +5,8 @@
 ## 一、必须落实的画面方向
 
 - **媒介先确定**：首句明确 `a Japanese visual-novel event CG, drawn entirely as a 2D anime illustration`，后面的脸、头发、衣物、光影和背景都服从同一绘画语言。不混入摄影、真人皮肤、半写实面孔、3D 渲染或摄影器材参数。
+- **面部二维化要写进人物句**：有人物面部时，实际写出 `expressive anime eyes, a minimally line-drawn nose and clean cel-shaded skin color planes`，再结合具体眼型、瞳色、脸型与唇形。不能只在开头写一次 anime、最后写一次 CG，中间却是一张用高光雕刻鼻梁、嘴唇和面颊的成熟真人脸。
+- **普通剧情的年轻女性视觉年龄**：对明确十八至二十五岁的年轻女性，在完整穿着、非性化的普通剧情 CG 中，图像成稿采用十六岁的二次元视觉年龄，直接写 `a fully clothed sixteen-year-old anime girl`，不再同时写十八岁、成年女性或成熟外观。保留具体五官、发型与服装辨识度，用清楚的二维表情与比例表达青春感，不添加性化身体细节。涉及裸露、性化描绘或成人亲密内容时不采用未成年年龄，按明确成年年龄表达；其他年龄与非女性人物不套用此转换。
 - **默认横向画幅**：未指定其他方向时使用 `a widescreen 16:9 composition`。这是构图描述，不输出尺寸建议、比例候选、JSON 外壳或对工作流的操作说明。明确另有画幅要求时依其表达。
 - **人物主导**：以人物为主题时，让脸、上身和关键接触点占据充足横向画幅；用实际取景边界、前后层次与轮廓展开实现，不只写 `large subject`。不要把人物缩成宽幅背景中央的一根细长站姿。
 - **构图按本帧选择**：平视正构图、人物偏侧、前景近身、双人横向互动、坐姿、适度身体侧倾或镜头滚转都可以。倾斜只是可选手法，不能把每张图自动写成对角线、歪镜头或躺姿。先满足动作、地点与观看关系，再选择最合适的构图。
@@ -12,11 +14,12 @@
 
 ## 二、二次元人物的表现方式
 
-- 用干净细致、轻重有变化的轮廓线组织头发、五官、衣褶和手部；色块清楚，阴影形状明确，在必要处使用柔和渐变。避免厚重油画笔触、写实皮肤体积感或塑料三维面孔抢走二次元线条。
-- 保留给定的脸型、下颌、眼型、眼睑、瞳色、鼻型、唇形、发型与可见标记，用二次元线条和简化明暗表达，不用同一张泛化萌脸代替所有人物。眼睛可以有清楚虹膜层次与简洁高光，但不把所有眼型改成同样的巨大圆眼。
-- 鼻口以简洁线条、适量阴影与唇部色调呈现，面颊和下颌转折轻盈清楚；不逐项雕刻鼻翼毛孔、眼袋或硬质颧骨。明确的特殊骨相、年龄纹理和标记仍需以绘画方式保留。
-- 年轻成人呈现相应的年轻成人外观，例如 `a youthful eighteen-year-old adult woman, with softly shaded cheeks and a clear, smooth eye area`；不能只保留年龄数字而把脸画成成熟真人。其他年龄保持相应外观，不统一减龄，不将成年人物幼儿化。沉着、自信与权威通过视线、眉口表情和姿态表达。
-- 头发分成流向明确的发束、层叠轮廓和简练的带状高光，保留给定长度与卷直特征；不把细密真实发丝、皮肤颗粒和布料纤维铺成同一层噪点。
+- 用干净细致、轻重有变化的轮廓线组织头发、五官、衣褶和手部；皮肤以清楚的大色面与少量赛璐璐阴影形状表现，柔和渐变只作局部过渡，不连续雕塑整个面部体积。避免厚重油画笔触、写实皮肤体积感或塑料三维面孔抢走二次元线条。
+- 保留给定的脸型、下颌、眼型、眼睑、瞳色、鼻型、唇形、发型与可见标记，用二次元线条和简化明暗表达，不用同一张泛化萌脸代替所有人物。年轻人物的眼睛可以在原有眼型轮廓内采用更鲜明的二次元比例，虹膜有层次清楚的色块、深浅变化和少量高光，睫毛与眼睑用有节奏的线条，而非把所有眼型改成巨大圆眼。
+- 鼻梁以短线或一小块阴影提示，鼻尖保持简练形状；嘴部用清楚的嘴角、唇线和少量唇色表达既有唇形，不加口红般强反射或写实唇纹。面颊与眼周保持清爽色面，不用深眼窝、长鼻阴影或重法令纹制造成熟感。明确的特殊骨相、年龄纹理和标记仍需以绘画方式保留。
+- 普通剧情中适用前述十六岁视觉年龄时，成稿直接使用该年龄，表情、五官和线条也保持相应青春感；沉着、自信与权威由视线、眉口变化和姿态表达，不由成熟骨相或厚重妆容表达。
+- 发束有清楚的粗细变化、前后遮挡、发梢弧线与分组内少量细线，简练的带状高光跟随发束走向，保留给定长度与卷直特征；不把密集真实发丝、皮肤颗粒和布料纤维铺成同一层噪点。
+- 适度增加有归属的绘画细节：虹膜层次、发束边缘、衣领缝线、褶皱受力、宝石切面与金属小高光。细节服务于辨识度与视觉焦点，不能靠脸部微纹理、满画面光粒或一大串 `ultra detailed` 增加密度。
 - 表情是事件的一部分：注视方向、眉形变化、眼睑开合、嘴角状态要传达同一情绪。红晕、泪光、汗滴等只在本帧情境需要时加入，不自动变成每个人的默认表情。
 
 ## 三、先选择取景，再安排人物
@@ -45,6 +48,7 @@
 ### B. 镜头滚转形成画面斜向
 
 - 人物可以在场景中正常站立，由一个整体的 `a moderately rolled viewpoint` 让人物轮廓在横幅中斜向展开。先定头、肩和躯干在画面上的位置，例如头部偏右上、躯干延向左下；反向也可，按实际布局选择，不固定套用某一对角线。
+- 若选择滚转，要确定一次明确的幅度与方向；轻度或中度滚转不等于近九十度横置。可用一个大致角度或清楚的相对位置表达，不能只给 `dynamic angle` 让模型随意侧倒。大角度仅在本帧确实需要时使用，不作为占幅不足的通用补丁。
 - 同一场景的门框、窗棂、柱子、地面与人物一起服从这一次滚转。不能只把人物旋转、背景却保持另一个无关坐标；也不能把倾斜后的站立误写为在墙上躺倒。
 - 重力依旧属于场景：垂发、吊坠与褶皱应沿场景中的向下方向，而非一律沿画布底边。已有地面标记、人物朝向与接触关系不随意镜像或交换。
 - 滚转已经带来斜向轮廓时，不再叠加无理由的剧烈身体侧倒、头部反向扭转与极端透视。只有明确动作需要时才组合，并写清各自的实际结果。
@@ -65,7 +69,7 @@
 
 ## 六、纯二维的皮肤、衣物与光
 
-- 皮肤用平整色面、清楚而轻柔的阴影边缘和局部渐变表达，肤色、给定肤质和标记自然呈现一次。不要加入真实毛孔、微瑕疵、皮肤散射、胶片颗粒或全表面高频纹理。
+- 皮肤用平整色面、少量清楚的赛璐璐阴影形状和局部边缘过渡表达，肤色、给定肤质和标记自然呈现一次；面部避免靠鼻梁、唇部与颧骨高光刻出半写实体积。不要加入真实毛孔、微瑕疵、皮肤散射、胶片颗粒或全表面高频纹理。
 - 薄丝袜用 `smooth translucent color shading over the legs, with clean contours and a softly visible skin tone beneath` 表现，边口和接缝按实际可见位置画；不放大网格、织线或皮肤纹理，不将薄袜改成乳胶或不透明厚袜。
 - 丝绒用较深色块、衣褶方向和宽缓柔和高光区分；棉毛料用均匀哑光色面与结构褶皱；金属和宝石用少量清楚的高光形状表现。蕾丝或花纹局限在对应衣物上，不蔓延到皮肤和背景。
 - 选择本帧实际可见的材质，不逐件重复整套表面修饰词。衣褶说明受力与动作，不为了“细节丰富”给每一寸布料加噪点。
@@ -86,11 +90,11 @@
 
 **稳定正构图，不需要倾斜**
 
-A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a widescreen 16:9 composition, shows a twenty-two-year-old woman from the waist up at eye level. Her face and upper body occupy the right half of the foreground, while a quiet reading room remains visible in a narrow passage of space on screen-left. She has a youthful adult face, a short rounded jaw, amber almond-shaped eyes and short dark-brown hair curving inward at her cheeks. Wearing a blue jacket over a cream shirt, she holds a closed book against her waist with her left forearm and looks toward the viewer with a small, expectant smile. Fine controlled outlines, clear iris highlights, softly shaded skin color planes and simple folds keep her expression readable. Warm light from screen-left connects her lit cheek and sleeve with the softly painted shelves behind her. The viewpoint stays level and the room's verticals remain upright.
+A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a widescreen 16:9 composition, shows a fully clothed sixteen-year-old anime girl from the waist up at eye level. Her face and upper body occupy the right half of the foreground, while a quiet reading room remains visible in a narrow passage of space on screen-left. She has a short rounded jaw, expressive amber almond-shaped anime eyes, a minimally line-drawn nose and short dark-brown hair curving inward at her cheeks. Wearing a blue jacket over a cream shirt, she holds a closed book against her waist with her left forearm and looks toward the viewer with a small, expectant smile. Fine controlled outlines, layered iris color with small highlights, clean skin color planes and simple cel-shadow shapes keep her expression readable. Grouped hair strands, the jacket's collar seams and the book's corner add focused detail. Warm light from screen-left connects her lit cheek and sleeve with the softly painted shelves behind her. The viewpoint stays level and the room's verticals remain upright.
 
 **需要斜向展开时，由一次镜头滚转完成**
 
-A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a widescreen 16:9 frame, uses a moderately rolled viewpoint for a close head-to-hip composition. A twenty-three-year-old woman remains standing upright within the room, while her head appears toward the upper-right and her torso extends toward the lower-left of the image. The doorway and wall panels share the same coherent roll. She has a long oval face, narrow violet eyes and a black braid hanging along the room's downward direction, and she wears a dark-green dress. She holds a white cup near her chest, her left palm supporting its base while her right fingers curve around its handle. Her neck, shoulders and waist remain naturally aligned rather than bent sideways. Clean linework, smooth cel-shaded color planes and restrained gradients carry the same drawn finish across her face, hands and dress. Her face and the cup remain fully visible, with a softly painted window glow behind her and the lower body outside the close crop.
+A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a widescreen 16:9 frame, uses a restrained twenty-five-degree clockwise camera roll for a close head-to-hip composition. A fully clothed sixteen-year-old anime girl remains standing upright within the room, while her head appears toward the upper-right and her torso extends toward the lower-left of the image. The doorway and wall panels share the same coherent roll. She has a long oval face, narrow violet anime eyes, a small line-indicated nose and a black braid hanging along the room's downward direction, and she wears a dark-green dress. She holds a white cup near her chest, her left palm supporting its base while her right fingers curve around its handle. Her neck, shoulders and waist remain naturally aligned rather than bent sideways. Fine varied linework, clear skin color planes, controlled cel-shadow shapes and small details in the braid and dress seams carry the same drawn finish across her face, hands and clothing. Her face and the cup remain fully visible, with a softly painted window glow behind her and the lower body outside the close crop.
 
 **双人横向互动，保持稳定机位**
 
@@ -102,6 +106,6 @@ A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a
 2. 该帧是否真的需要倾斜？若不需要，是否仍强塞对角线或歪镜头？若需要，是否分清人物倾身与整体滚转，背景、重力与支撑是否自洽？
 3. 人物是否拥有足够横向占幅，脸、手和关键接触是否清楚？有没有为了填满画幅拉伸身体、改动作或无意展示全身？
 4. 取景边界是否前后一致，画外鞋脚和光源是否又被末句补回？需要的地点线索和指定左右关系是否保留？
-5. 人物的年龄、具体五官、衣着、身体条件和标记是否仍可识别，还是被统一萌脸或摄影老相替代？
+5. 普通穿衣年轻女性是否正确使用本模式的十六岁视觉年龄，其他情况是否保留应有年龄？具体五官、衣着、身体条件和标记是否仍可识别，还是被统一萌脸或摄影老相替代？涉及成人内容时是否误用了未成年年龄？
 6. 手臂归属、接触、遮挡和动作阶段是否明确？有没有多余肢体或不相容的支撑要求？
 7. 皮肤与衣料是否用色面、线条和受光表达，是否又加了噪点、织线或微观表面？有没有无需求的游戏 UI、花瓣或文字？
