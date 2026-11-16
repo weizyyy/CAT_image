@@ -1,120 +1,107 @@
-【模式：MiniMax-H3-Image · 英文自然语言画面描述】
+【模式：MiniMax-H3-Image · 纯二次元 Galgame CG】
 
-把画面写成连贯英文：主体、动作、接触关系、空间位置、材质与光照共同描述同一个瞬间。用具体可见的关系控制画面，不用标签或质量口号代替描述。
+把本帧写成完整的英文画面描述，绘制为纯二维日本视觉小说的事件 CG。重点是人物表情、轮廓、动作与画幅内的关系，不是把真人照片加上动漫滤镜，也不是站姿立绘贴在背景上。
 
-## 本模式必须落实到成稿的画面选择
+## 一、必须落实的画面方向
 
-以下是生成英文时要实际完成的选择，不是只供参考的风格建议。按本帧内容选用，不把条件或规则本身写给生图模型：
+- **媒介先确定**：首句明确 `a Japanese visual-novel event CG, drawn entirely as a 2D anime illustration`，后面的脸、头发、衣物、光影和背景都服从同一绘画语言。不混入摄影、真人皮肤、半写实面孔、3D 渲染或摄影器材参数。
+- **默认横向画幅**：未指定其他方向时使用 `a widescreen 16:9 composition`。这是构图描述，不输出尺寸建议、比例候选、JSON 外壳或对工作流的操作说明。明确另有画幅要求时依其表达。
+- **人物主导**：以人物为主题时，让脸、上身和关键接触点占据充足横向画幅；用实际取景边界、前后层次与轮廓展开实现，不只写 `large subject`。不要把人物缩成宽幅背景中央的一根细长站姿。
+- **构图按本帧选择**：平视正构图、人物偏侧、前景近身、双人横向互动、坐姿、适度身体侧倾或镜头滚转都可以。倾斜只是可选手法，不能把每张图自动写成对角线、歪镜头或躺姿。先满足动作、地点与观看关系，再选择最合适的构图。
+- **事件 CG 的完整性**：一张连续画面、一个瞬间、一个观察位置。除非明确要求，不出现对话框、选项框、游戏 HUD、人物资料栏、边框、拼图或多视图；不为 `galgame` 自行增加校服、校园、花瓣或某一固定人物。
 
-- **人物主题**：首句同时交代人物主导占幅、一个机位和裁切边界。例如 `A tight low-angle, waist-up view shows ... with her face and upper body prominent in the foreground, filling most of the image width, and only a narrow strip of ... behind her on screen-left.` 占幅同时考虑横向宽度，不能用“全身很高但很窄”冒充人物主导。明确环境主导、留白或远景时按原要求。
-- **指定年轻成人**：不能只保留数字年龄就算完成年轻外观。成稿除数字外还要有一次正向年轻成人外观表达，例如十八岁写成 `a youthful eighteen-year-old adult woman`，或在面部句写一次 `a youthful adult face`；两者选一，不反复强调。这是年龄的可见表现，不是改写脸型或五官。沉着与权威落在表情、视线和姿态上。其他年龄按实际值表达，不套用十八岁。
-- **细腻皮肤与薄织物**：已有平滑肤质时写一次连续柔和明暗；出现薄丝袜时写清均匀半透明贴合与平滑腿部明暗，出现丝绒时写清柔和绒面与宽缓高光。只报材质名而没有对应的表面观感，不算完成这一步。
-- **裁切一致**：确定头到膝盖后，不在末句又展示短靴周围地面；确定胸像后，不再补整条腿。画外地面法阵、低处灯具也能照亮画内主体，光源无需完整入镜。确实必须入镜的地面互动优先确定可见边界，再在该边界内让人物占足画幅。
-- **已有中近景**：光线照到双腿、出现鞋袜材质，不等于必须展示完整双腿与鞋。需要兼顾腿部时，尽量紧凑地裁到大腿或膝部，只描述画内的一段；脸与上身在前景清楚突出。没有明确要求脚部或完整地面互动时，成稿不写可见短靴、双脚和脚边地面，来自画外的法阵光仍可保留。
+## 二、二次元人物的表现方式
 
-## 一、语言与句子组织
+- 用干净细致、轻重有变化的轮廓线组织头发、五官、衣褶和手部；色块清楚，阴影形状明确，在必要处使用柔和渐变。避免厚重油画笔触、写实皮肤体积感或塑料三维面孔抢走二次元线条。
+- 保留给定的脸型、下颌、眼型、眼睑、瞳色、鼻型、唇形、发型与可见标记，用二次元线条和简化明暗表达，不用同一张泛化萌脸代替所有人物。眼睛可以有清楚虹膜层次与简洁高光，但不把所有眼型改成同样的巨大圆眼。
+- 鼻口以简洁线条、适量阴影与唇部色调呈现，面颊和下颌转折轻盈清楚；不逐项雕刻鼻翼毛孔、眼袋或硬质颧骨。明确的特殊骨相、年龄纹理和标记仍需以绘画方式保留。
+- 年轻成人呈现相应的年轻成人外观，例如 `a youthful eighteen-year-old adult woman, with softly shaded cheeks and a clear, smooth eye area`；不能只保留年龄数字而把脸画成成熟真人。其他年龄保持相应外观，不统一减龄，不将成年人物幼儿化。沉着、自信与权威通过视线、眉口表情和姿态表达。
+- 头发分成流向明确的发束、层叠轮廓和简练的带状高光，保留给定长度与卷直特征；不把细密真实发丝、皮肤颗粒和布料纤维铺成同一层噪点。
+- 表情是事件的一部分：注视方向、眉形变化、眼睑开合、嘴角状态要传达同一情绪。红晕、泪光、汗滴等只在本帧情境需要时加入，不自动变成每个人的默认表情。
 
-- 一幅图写成一段完整英文，可按句子自然换行；不写分栏、编号、小标题或提示词之外的解释。
-- 用主语、动词和连接词组织现有特征词组。`She has long almond-shaped eyes with amber-brown irises.` 是句子；`1girl, almond eyes, brown eyes, best quality` 是堆词。
-- 句式可以调整，具体特征不能被泛称吞掉。眼型、眼睑、瞳色、鼻型、唇形各有自己的表达位置，不能合成 `beautiful features` 或 `pretty eyes`。
-- 多人画面按位置逐人描述外观与动作，再用一句话连接互动；不要连续使用含糊的 `she / her`，让衣服、手臂或动作失去归属。
-- 不使用 Danbooru 缩写、`score_*`、下划线标签或 `(word:1.2)` 权重语法。需要强调的特征直接写清位置、形态及其与主体的关系。
-- 不堆 `masterpiece`、`best quality`、`8k`、`ultra detailed`、`hyper-realistic`。篇幅用于实际画面信息，不设固定句数，也不为写长而同义反复。
+## 三、先选择取景，再安排人物
 
-## 二、段落中的信息顺序
+1. 确定谁是视觉焦点、人物正在做什么，哪些手、脸或道具必须看清。
+2. 决定实际裁切，如胸部以上、腰部以上、头到大腿或完整全身。景别名称必须与这个边界一致。
+3. 按动作分配横向空间：单人可以用肩臂、伸向前景的动作、头发或衣摆形成有节奏的轮廓；双人可以靠位置、视线和接触横向连接。不能为了填满画幅新增动作、拉宽躯干、放大胸部或伸长肢体。
+4. 仅在动作与观看关系允许时考虑侧倾或镜头滚转。正常站立、安静对视和横向递物都可以保持稳定正构图，无需倾斜。
+5. 在人物轮廓之间或一侧保留必要的地点线索，背景的透视、明度与细节密度服务于主体。明确的远景、环境主导或留白要求仍优先。
 
-1. **先定这一帧**：主体、景别、一个机位、明确的取景边界与主体占幅、主体正在做什么；背景只先带出必要的位置关系。
-2. **描述主体**：明确的人数、年龄、外观与当前可见衣着；用具体词组保持各主体的区别。
-3. **展开动作与接触**：身体朝向、视线、重心、哪只手接触什么、物件由哪里支撑。
-4. **补充看得见的细节**：表情、衣料状态、必要的面部或手部细节；远景不塞微观皮肤描写。
-5. **收束环境与质感**：前后景层次、具体地点、材质、明暗与色调，使整段描述落在同一幅画面中。
+- 脸与关键手部留在清楚可读的位置，不被发束、画框边缘或巨大前景道具无意挡住；也不要求所有手指在握持和遮挡时全部露出。
+- 中近景提到腿部受光，只需描绘裁切内的一段腿；画外的法阵或低处光源仍能提供光。不因一件画外鞋子而将整张 CG 拉成全身远景。
+- 仰视、俯视与滚转是不同选择：仰视说明从下方观察，俯视说明从上方观察，滚转说明整幅观察坐标倾斜；不能用一句 `dynamic angle` 含糊代替三者。
+- 不自加极端广角透视。近处手略大、远处肩略小可以成立，但不能让前景手变成主体数倍大或让躯干被压缩成不连续的短块。
 
-不要把几十个五官形容词挤在第一句，再到结尾才交代主体正在做什么；也不要为了精简动作，漏掉本来必须呈现的外观信息。主体先于建筑陈设展开，次要环境不与人物争夺同等篇幅。
+## 四、可选倾斜：身体姿势与镜头滚转分开处理
 
-## 三、先统一空间，再描述姿态
+先判断本帧是否需要倾斜；不需要时跳过本节的倾斜手法，正常组织画面。
 
-- 固定一个观察位置，分清 screen-left / screen-right、前景 / 背景、近处 / 远处。左右位置不能在后面的句子里互换。
-- 相机看见的身体面与动作方向一致：远离镜头时呈现后脑、背部或后侧肩；朝镜头接近时呈现正面；侧向动作呈现相应侧面。不能写背身远去又同时正面展示整张脸和胸口。
-- 头、肩、躯干、骨盆、支撑脚与视线应组成同一个姿态，不把“看向门口”“转身离开”和“面对观众”机械拼在一起。
-- 明确方向的实际结果。与其只写 `high viewpoint`，可以写观众从上方向下看、地面占据大部分画面、主体头顶与肩部可见；不能只罗列机位术语。
-- 带地面标记、台阶、路径或明确目标的动作，先保持场地布局和前后关系，再确定人物朝向；不为凑正脸移动目标或镜像场地。
-- 一张图只截取一个动作阶段。拿起、递出、接住不能同时发生；不把前后两帧叠成多只手、两套肩膀或重影身体。
+### A. 人物自身侧倾或前倾
 
-## 四、手、物件与身体接触
+- 建筑与地面保持原有观察方向，人物确实在世界中倾身。写清她朝谁或什么倾近，由双脚、座位、墙面或明确接触支撑身体；不凭空增加扶墙或倚靠动作来凑姿势。
+- 肩、胸廓、脊柱、骨盆的方向连贯，腰部有自然连接；轻微头倾不能代替整个躯干倾斜，也不能把肩和骨盆反向拧成折断的姿态。
+- 头发、衣摆和悬垂配饰按场景重力下落；运动中的飘动按本帧动作说明，不因为人物画面上倾斜就把所有东西横向吹起。
 
-- 先用一句清楚的互动说明“谁在对谁做什么”，再补真正决定画面的接触点，不逐个关节堆满整段。
-- 使用人物自身的左手 / 右手说明执行者，使用 screen-left / screen-right 说明画面位置；两套坐标分开表达。
-- 每条可见肢体只承担相容的任务：托住底部、握住把手、扶住肩膀等。托物的手不能同时垂在身体旁，支撑脚不能同时离地。
-- 写清物件与手掌、手指或承托面的关系。杯柄与手指、碗沿与手掌、衣袖与手腕之间保留可辨认的轮廓，避免把接触写成相互穿透。
-- 手部是焦点时，可简短说明手腕与前臂自然连接、手指顺着握持方向弯曲、拇指与其余手指的作用相容。不要求握拳或遮挡中的五根手指全部露出。
-- 两人接触时逐一说明手臂归属、谁在前谁在后、哪只手位于另一人的哪一侧；不要留下“多出一只手但不知道属于谁”的描述。
-- 特殊物种、义肢、缺肢或明确身体条件按给定形态处理，不用“标准人体”补出不存在的肢体，也不强迫所有对象使用相同手指数。
-- 手脸互动是主体、且没有明确景别要求时，可选能看清接触的中近景。已有全身或远景要求则保留，通过清楚的层次和支撑关系表达动作，不靠藏手、删人或取消动作避开难点。
-- 不追加 `perfect anatomy`、`perfect hands`、`bad hands`、`extra fingers` 等口号或缺陷词串；用短而具体的正向关系说明实际要画的结构。
+### B. 镜头滚转形成画面斜向
 
-## 五、皮肤与面部表现
+- 人物可以在场景中正常站立，由一个整体的 `a moderately rolled viewpoint` 让人物轮廓在横幅中斜向展开。先定头、肩和躯干在画面上的位置，例如头部偏右上、躯干延向左下；反向也可，按实际布局选择，不固定套用某一对角线。
+- 同一场景的门框、窗棂、柱子、地面与人物一起服从这一次滚转。不能只把人物旋转、背景却保持另一个无关坐标；也不能把倾斜后的站立误写为在墙上躺倒。
+- 重力依旧属于场景：垂发、吊坠与褶皱应沿场景中的向下方向，而非一律沿画布底边。已有地面标记、人物朝向与接触关系不随意镜像或交换。
+- 滚转已经带来斜向轮廓时，不再叠加无理由的剧烈身体侧倒、头部反向扭转与极端透视。只有明确动作需要时才组合，并写清各自的实际结果。
 
-- 明确年龄不仅是数字，也要在相容的外观中可见。已指定十八至二十多岁的年轻成人时，可用一次 `a youthful adult face` 配合原有脸型、平顺眼周和柔和面颊转折；不靠幼态大眼、儿童比例或浓重磨皮表达年轻。其他年龄仍按原年龄呈现，不给所有人物统一减龄。
-- 沉着、自信、威严或职业身份用视线、表情与姿态表达；不能顺手译成 `mature-looking`、`weathered`、深眼窝、硬刻颧骨、重法令纹或厚重妆容。低机位也不等于夸大下颌和眼下阴影。明确已有的骨相、皱纹或特殊标记照常保留。
-- 皮肤表现克制：给定的肤色、肤质与明确标记各自然表达一次，不反复叠加同义的“真实皮肤”句。
-- 给定细腻平滑肤质时，正向写成 `fine, smooth skin with soft, even tonal transitions`；肤色与结构保持清楚，面颊、额头和四肢用连续柔和的明暗塑形，不把清晰度写成颗粒或每一寸皮肤的微观细节。
-- 不主动追加 `visible pores`、`micro-imperfections`、`peach fuzz`、`hyper-detailed skin`、`gritty texture`、强锐化或皮肤散射效果。明确要求的伤疤、年龄纹理、粗糙或特殊肤质仍须呈现。
-- 不用 `perfect face`、`refined features`、`delicate features` 把具体脸型和眼鼻唇改成标准美；也不为了修饰肤质把成熟人物画年轻、抹掉明确标记。
-- 不用 `glass skin`、`glowing skin`、`luminous`、油亮高光或极端锐化表达清晰度。皮肤光泽、汗、湿润和红晕以本帧明确要求为准，不因“写实”自动增加。
-- 真人画面用相容的表面质感与明暗过渡表达皮肤；动漫、水彩和绘画则遵守色块、轮廓和笔触，不额外加入摄影毛孔。
-- 远景中的脸不写成微距皮肤特写；背景空镜不附加人体、皮肤或手指约束。
+### C. 坐卧与本身的斜向姿势
 
-## 六、衣料、薄袜与表面尺度
+- 只有本帧确实要求坐、卧、靠或跌落时才使用对应姿态，写清承托面与重心。不能为了在横幅里塞下全身，把站立伸手改成躺卧展示。
 
-- 区分“衣物结构可辨”与“每根纤维放大”。颜色、剪裁、边饰、接缝和实际褶皱负责识别衣物；正常人物景别下，织物表面应连续、均匀，不主动增加砂砾、粗纤维、胶片颗粒、磨损或全画面微纹理。
-- 薄丝袜保留给定颜色、厚度与长短；如 `sheer black 20-denier stockings`，再用一次 `an even, close-fitting translucent layer, with the skin tone softly visible beneath and smooth shading along the legs` 说明观感。边口、接缝按实际可见位置呈现，腿部主体是均匀半透明薄层，不把薄袜写成大网眼、可数的织线、斑驳皮肤或粗糙毛面。
-- 不为修饰薄袜改成不透明裤袜、裸腿、乳胶或强镜面高光；明确给出的渔网、粗针织、破损和花纹仍按要求表达。近距离确需织纹时也只在对应局部描述，不能铺满整条腿或皮肤。
-- 丝绒可用 `a soft, dense velvet surface with broad, subdued directional highlights`，靠绒面方向与衣褶表现明暗；羊毛或棉料用均匀哑光表面与结构性褶皱。蕾丝的花纹局限在蕾丝部位，不蔓延到裸露皮肤或其他布料。
-- 材质短语按本帧可见物体选择，不把本节串成通用词包，也不让每件衣物都带一长串表面形容词。
+无论选择哪一种，都先保住完整可读的脸、必要的接触点与连贯身体。倾斜不是把人体拉长、横向压扁或随意切掉手脚，也不是为了多展示身体而扩大本来不需要的可见范围。
 
-## 七、光照与媒介
+## 五、手部、遮挡与单一瞬间
 
-- 光照写成看得见的结果：从哪侧来、哪些表面更亮、阴影落向哪里、背景清楚还是虚化。不要用焦距、光圈、ISO 或色温数值替代画面关系。
-- 未指定光线时可用有方向的柔和照明帮助五官与手部易读；已有烛光、深夜、逆光、硬光或特殊色光时照其表达，不能一律改成明亮影棚。
-- 地面法阵、屏幕或水面从下方照明时，说明其在下颌、手或衣料上的局部补光。没有明确强光要求时，使用柔和反光和连续明暗，不自行增加刺眼轮廓、硬刻面部阴影或强化毛孔与织纹的掠射效果；保留给定光源方向和色彩。
-- 明确给出的摄影、动漫、油画、水彩等媒介优先；没有具体媒介时保持中性描述，不自行叠加相互冲突的摄影、油画、动漫和 3D 词。
-- 材质对应具体物体：棉布的褶皱、木桌的纹理、陶器的表面各有归属，不把“细节丰富”当成所有表面的同一层噪点。
+- 先用一句话交代谁对谁做什么，再写决定画面的手部归属和接触。人物自身的左手 / 右手与 screen-left / screen-right 分开使用；倾斜后画面左右仍按成稿画面判断，不再交换一次。
+- 每条可见手臂沿肩、上臂、前臂、手腕自然连接。握杯柄、托底、扶肩或牵手各有明确接触位置，手指按实际动作弯曲，不列一串关节要求，也不堆 `perfect hands`、`perfect anatomy`。
+- 多人互动的手臂和道具按前后关系交叠，轮廓在关键接触处可辨；同一条手臂不同时承担互不相容的两个动作。
+- 只绘制动作中的一个阶段，不同时拿起、递出、接住；不把连续动作画成多套肩臂或重影。
+- 特殊物种、义肢、缺肢等按给定身体条件表现，不补出不存在的肢体。
 
-## 八、构图与文字
+## 六、纯二维的皮肤、衣物与光
 
-- 未指定方向时采用 `near-square, slightly taller-than-wide composition`，宽略小于高，主体紧凑、关键接触点留有空间。
-- 以人物或互动为主题且未指定远景、环境主导或大留白时，默认人物主导取景：`the subject fills most of the frame, with tight margins around the visible figure`。多人则由互动中的人物整体占据主要画幅，不把每个人单独放大到挤掉其他人。
-- 不只报 `medium close shot` 等术语，要写清裁切：例如 `framed from the head to just below the chest`、`waist-up` 或 `framed from the head to the knees`。构图需要的脸、手和接触点完整可读，头顶与身体两侧不留无目的的大块空间。
-- 景别名称要与裁切相符：头到膝盖可写 `a tight three-quarter view`，不能又称胸像式 `medium close-up`。选定裁切后，画外衣物、脚和光源不另行补成可见内容；可以交代来自画外的光。
-- 先满足明确必须看见的动作与部位，再选能容纳它们的最紧凑景别。提到身体部位不等于展示该部位的全长；已有中近景而又描述腿部受光时，可以只呈现下边缘入镜的局部腿部。只有明确要求完整双腿、鞋脚或完整地面互动才扩大相应边界，不同时保留互相冲突的胸像和全身要求。
-- 仰视控制观察方向，不要求把相机拉远；伸向前景的手清楚、比例自然，仍为脸和躯干留足画幅，不能让前景手单独吞掉主体。明确要求广角夸张时才采用相应透视。
-- 左侧留窗、远处塔楼等环境要点可以是主体旁的窄带背景与较小轮廓；保留指定左右关系和可辨线索，不为展示整栋建筑缩小人物。不主动补入一串讲台、墙面纹章、地砖、家具或不可见的空气感受。
-- 明确给定的方向、景别与取景优先。不写数字比例或尺寸建议，不因增加背景而扩成宽幅全景。
-- 需要实际画出的文字用英文双引号标出原文，说明承载表面与位置；中文文字保持原文，不翻译、不拆字、不换顺序。
-- 没有文字要求时，不自加招牌、字幕、标题、标志或水印。只有明确要求海报、卡面、图表、设计板等成品时才组织信息层级；普通插图不改成多视图或资料卡。
+- 皮肤用平整色面、清楚而轻柔的阴影边缘和局部渐变表达，肤色、给定肤质和标记自然呈现一次。不要加入真实毛孔、微瑕疵、皮肤散射、胶片颗粒或全表面高频纹理。
+- 薄丝袜用 `smooth translucent color shading over the legs, with clean contours and a softly visible skin tone beneath` 表现，边口和接缝按实际可见位置画；不放大网格、织线或皮肤纹理，不将薄袜改成乳胶或不透明厚袜。
+- 丝绒用较深色块、衣褶方向和宽缓柔和高光区分；棉毛料用均匀哑光色面与结构褶皱；金属和宝石用少量清楚的高光形状表现。蕾丝或花纹局限在对应衣物上，不蔓延到皮肤和背景。
+- 选择本帧实际可见的材质，不逐件重复整套表面修饰词。衣褶说明受力与动作，不为了“细节丰富”给每一寸布料加噪点。
+- 光照服务于二次元色块与情绪：写清来源、受光侧、阴影侧和前后层次，必要时使用柔和边缘光与小范围辉光。保持原有昼夜、冷暖与光源方向，不统一改成晴天或明亮影棚。
+- 人物与背景共享光向、色彩和透视。背景可以有更柔和的绘画层次，人物线条与表情保持清楚；不把主体也一起糊成一片，不自动加入樱花、光粒或过量散景。
 
-## 九、画面示例
+## 七、英文组织与画中文字
 
-以下只示范英文组织、接触与光照，不能当成每张图都要套用的人物或道具模板。
+- 一幅图是一段连贯英文，可自然换行；不写编号、小标题、标签区或画外解释。先写媒介、画幅、取景与主体动作，再描述外观、衣物、接触、环境与光。
+- 用具体句子连接给定特征，不能用 `beautiful anime girl` 吞掉眼型、瞳色和脸型，也不把人物变成 `1girl, masterpiece, best quality, 8k` 标签串。
+- 不使用权重括号、下划线标签、摄影设备参数或互相冲突的画风词。CG 在这里指完整的二维事件插画，不代表三维计算机渲染。
+- 需要实际绘出的文字用英文双引号包住原文，并说明承载表面与位置。中文保持原文，不翻译、不拆字。没有明确文字要求就不新增标题、字幕、标志或水印。
+- 不写“参考图中的人”“如上图”之类依赖未知图片的措辞；只写当前成稿真正需要呈现的可见内容。
 
-**中景、双手持物**
+## 八、画面示例
 
-A waist-up photograph in a compact, slightly taller-than-wide frame shows a forty-two-year-old woman seated at a wooden table, looking down at a ceramic bowl. She has a broad oval face, dark brown eyes, a low nose bridge, thin lips and warm brown skin, with short black hair tucked behind her ears. Her left palm supports the bowl from underneath while her right hand steadies its near rim; the fingers curve along the bowl's surface and both wrists continue naturally from the sleeves of her blue cotton shirt. The bowl remains above the tabletop, and her shoulders settle into the same slight forward lean. Light from screen-left reveals the curve of the bowl and the lit cheek, while the far side of the room recedes softly into shadow.
+以下示范不同构图的选择，不是每张图都要套用的人物、道具或动作。
 
-**插画、两人递物**
+**稳定正构图，不需要倾斜**
 
-A waist-up painted illustration shows a short-haired adult in a cream jacket on screen-left and a silver-haired adult in a green coat on screen-right. The person on the left holds a small closed parcel with both palms beneath its base. The person on the right places a right palm against the parcel's near side while the left arm rests beside the coat. Their forearms remain distinct on either side of the parcel, and both look at the same contact point. Broad areas of muted color and restrained brushwork continue across faces, hands and clothing, with a quiet interior behind them.
+A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a widescreen 16:9 composition, shows a twenty-two-year-old woman from the waist up at eye level. Her face and upper body occupy the right half of the foreground, while a quiet reading room remains visible in a narrow passage of space on screen-left. She has a youthful adult face, a short rounded jaw, amber almond-shaped eyes and short dark-brown hair curving inward at her cheeks. Wearing a blue jacket over a cream shirt, she holds a closed book against her waist with her left forearm and looks toward the viewer with a small, expectant smile. Fine controlled outlines, clear iris highlights, softly shaded skin color planes and simple folds keep her expression readable. Warm light from screen-left connects her lit cheek and sleeve with the softly painted shelves behind her. The viewpoint stays level and the room's verticals remain upright.
 
-**人物主导、低机位与薄织物**
+**需要斜向展开时，由一次镜头滚转完成**
 
-A tight low-angle view is cropped from the head to just above the knees, with a twenty-one-year-old woman's face and upper body prominent in the foreground, filling most of the image width. Only a narrow band of a window appears behind her on screen-left. Her youthful adult face has a rounded jaw, brown almond-shaped eyes and fine, smooth olive skin with soft, even tonal transitions. Her quiet confidence appears in her steady gaze and relaxed mouth. Her right palm reaches toward the viewer, fingers gently curved, with the wrist following the forearm naturally. She wears a charcoal velvet jacket with a soft, dense surface and broad, subdued highlights, a burgundy skirt and sheer black 20-denier stockings. The visible upper sections of the stockings form an even, close-fitting translucent layer, the skin tone softly visible beneath with smooth shading. Soft window light shapes her cheek and sleeve, and reflected light from below gently illuminates her jaw and the visible thighs. Her feet and the light source lie beyond the lower edge of this close framing.
+A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a widescreen 16:9 frame, uses a moderately rolled viewpoint for a close head-to-hip composition. A twenty-three-year-old woman remains standing upright within the room, while her head appears toward the upper-right and her torso extends toward the lower-left of the image. The doorway and wall panels share the same coherent roll. She has a long oval face, narrow violet eyes and a black braid hanging along the room's downward direction, and she wears a dark-green dress. She holds a white cup near her chest, her left palm supporting its base while her right fingers curve around its handle. Her neck, shoulders and waist remain naturally aligned rather than bent sideways. Clean linework, smooth cel-shaded color planes and restrained gradients carry the same drawn finish across her face, hands and dress. Her face and the cup remain fully visible, with a softly painted window glow behind her and the lower body outside the close crop.
 
-## 十、静默检查画面表达
+**双人横向互动，保持稳定机位**
 
-1. 英文是完整句子，还是标签、提纲或质量词串？
-2. 是否只有一个瞬间、一个视点，身体可见面、视线和动作方向是否一致？
-3. 每条关键手臂属于谁，接触哪里，由哪里支撑，前后遮挡是否明确？
-4. 有没有为了减少畸形而删掉指定人物、动作或必须入镜的手？
-5. 指定年龄是否通过相容的面部表现呈现？是否把自信与稳重误写成成熟老相，或改掉了明确年龄与骨相？
-6. 平滑皮肤、薄袜与绒面的明暗是否连续、材质归属明确？是否额外堆了微纹理、颗粒、强反射、锐化或与媒介冲突的词？
-7. 逐句对照首句裁切：头到膝盖的画面中若又写了可见短靴、双脚或脚边地面，删去这些越界内容；法阵可只在画内留下光，不能为光源拉远镜头。若明确要求完整法阵与脚，则先把首句改为相容的全身取景，人物仍主导占幅。其他裁切同理。环境是否抢走主体空间，光源、人数与需要渲染的文字是否仍符合给定画面？
+A Japanese visual-novel event CG, drawn entirely as a 2D anime illustration in a widescreen 16:9 composition, places two adults in a close waist-up view across the foreground. A silver-haired woman in a burgundy coat stands on screen-left and a dark-haired man in a pale shirt stands on screen-right. She offers a small closed parcel with both palms beneath it; his left hand touches the parcel's near side while his right arm stays beside him. Their distinct forearms lead the eye toward the shared contact point, and their faces turn toward each other. The level viewpoint and upright courtyard posts support a quiet exchange. Fine outlines, smooth skin color planes and restrained cel shading keep both expressions clear, while the painted courtyard recedes in softer greens and warm stone tones.
+
+## 九、交稿前静默检查
+
+1. 是否始终是纯二维视觉小说事件 CG，默认横向 16:9？有没有真人、半写实、三维或摄影质感混入？
+2. 该帧是否真的需要倾斜？若不需要，是否仍强塞对角线或歪镜头？若需要，是否分清人物倾身与整体滚转，背景、重力与支撑是否自洽？
+3. 人物是否拥有足够横向占幅，脸、手和关键接触是否清楚？有没有为了填满画幅拉伸身体、改动作或无意展示全身？
+4. 取景边界是否前后一致，画外鞋脚和光源是否又被末句补回？需要的地点线索和指定左右关系是否保留？
+5. 人物的年龄、具体五官、衣着、身体条件和标记是否仍可识别，还是被统一萌脸或摄影老相替代？
+6. 手臂归属、接触、遮挡和动作阶段是否明确？有没有多余肢体或不相容的支撑要求？
+7. 皮肤与衣料是否用色面、线条和受光表达，是否又加了噪点、织线或微观表面？有没有无需求的游戏 UI、花瓣或文字？

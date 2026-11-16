@@ -1,11 +1,11 @@
 {
-  "display_name": "小猫的生图插件 v1.30.3",
+  "display_name": "小猫的生图插件 v1.31.0",
   "loading_order": 10,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "author": "cPPPa1022",
-  "version": "1.30.3",
+  "version": "1.31.0",
   "homePage": "https://github.com/weizyyy/CAT_image",
   "auto_update": false
 }

@@ -173,7 +173,7 @@ export var MODES = [
     { id: 'anime',     label: 'Anime（纯英文描述）',                                        short: 'Anime（纯英文描述）',          badge: '🎬 Anime' },
     { id: 'anime_tag', label: 'Anime Tag（纯英文标签）',                                    short: 'Anime Tag（纯英文标签）',      badge: '🎬 Tag' },
     { id: 'krea2',     label: '🎬 Krea 2（英文自然语言段落）★ Krea 2 / 通用基座模型推荐',      short: 'Krea 2（英文自然语言段落）',   badge: '🎬 Krea2' },
-    { id: 'minimax_h3_image', label: '🎬 MiniMax-H3-Image（英文自然语言 · 构图与接触关系）', short: 'MiniMax-H3-Image（英文自然语言）', badge: '🎬 H3 Image' },
+    { id: 'minimax_h3_image', label: '🎬 MiniMax-H3-Image（纯二次元 · Galgame CG）', short: 'MiniMax-H3-Image（Galgame CG）', badge: '🎬 H3 CG' },
 ];
 
 export function modeLabel(id) {

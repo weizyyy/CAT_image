@@ -218,8 +218,9 @@ test('H3 uses its own English overlay, preserves quoted lettering end to end, an
         const { getPrompt } = await import('../prompts/loader.js');
         assert.ok(system.includes(getPrompt('pipeline/minimax-h3-image-overlay.txt').trim()));
         assert.equal(system.includes('【模式：Krea 2'), false);
-        assert.ok(system.includes('slightly taller-than-wide'));
-        assert.equal(request.messages.at(-1).content.includes('slightly taller-than-wide'), false);
+        assert.ok(system.includes('a widescreen 16:9 composition'));
+        assert.equal(system.includes('slightly taller-than-wide'), false);
+        assert.equal(request.messages.at(-1).content.includes('a widescreen 16:9 composition'), false);
         const block = extractImgBlocksFromEnhanced(result.enhanced, 'h3')[0];
         assert.ok(block.prompt.includes('"Tester的茶铺"'));
         const cleaned = cleanPromptForMode(block.prompt, settings.modelType);
