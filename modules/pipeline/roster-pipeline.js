@@ -68,6 +68,16 @@ function _missingHint(expectCount, gotCount) {
 
 // ── v1.13.6 数字保真：逐条对比"主模型给的数字"与"输出提示词里剩下的数字" ──
 // 返回 [{ i: 0, items: ['14岁'] }]（i = 占位符下标，0-based）
+function h3VisualAgeTarget(ph) {
+    if (getActiveMode() !== 'minimax_h3_image' || ph.personSegments?.length !== 1) return null;
+    const appearance = String(ph.personSegments[0].appearance || '');
+    if (!/(?:女性|女子|少女|\bfemale\b|\bwoman\b|\bgirl\b)/i.test(appearance) || !/(?:^|[^\d])(?:1[89]|2[0-5])\s*(?:岁|周岁)/.test(appearance)) return null;
+    const scene = [ph.scene, ph.topic, appearance].join(' ');
+    if (!/(?:完整穿着|完整着装|完整穿衣|普通穿衣|衣着完整|\bfully[ -]clothed\b)/i.test(scene) ||
+        /(?:性爱|性交|自慰|性行为|裸露|裸体|露乳|乳头|乳晕|阴道|阴部|美乳|\b(?:nude|naked|intercourse|erotic|nipples?|genitals?)\b)/i.test(scene)) return null;
+    return 16;
+}
+
 function usesH3ClothedVisualAge(ph, prompt) {
     // H3's explicit ordinary-CG age treatment changes the image caption only.
     // Keep the exception narrow; preserve numeric checks for other facts.
@@ -288,6 +298,8 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
             }
             if (ph.seed) lines.push('   种子：' + ph.seed);
             if (ph.topic) lines.push('   要点：' + ph.topic.replace(/\n/g, '；'));
+            const visualAge = h3VisualAgeTarget(ph);
+            if (visualAge) lines.push('   本图视觉年龄目标：' + visualAge + '岁，完整穿衣的普通二次元剧情 CG；本图英文成稿写 "a fully clothed sixteen-year-old anime girl"。这是当张渲染目标，人物事实年龄仍按上方资料保存。');
             // v1.21：这一条占位符里的状态事实（怀孕/绷带/纹身…）→ 点名要求出现事实词
             if (ph.facts && ph.facts.length) lines.push('   事实（⛔ 必须原词写进本条提示词的主体句，不许省略/改写/换成体征；插件不会替你补）：' + ph.facts.join('；'));
             // [Fix] 动态要素保真：酒馆AI写的本轮可变内容（衣着/发型/表情/光线/氛围/动作）逐项列出，

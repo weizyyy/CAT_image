@@ -251,7 +251,13 @@ test('H3 ordinary CG visual age avoids a false numeric retry without changing th
         upsertPerson('AgeTest', '学生', '18岁女性，168cm高', 'anchor');
         const anchor = 'age:eighteen-year-old woman | gender:female | face_shape:oval face';
         setEnglishAnchor('AgeTest', '学生', anchor);
-        fetch = async () => { calls++; return response(caption); };
+        fetch = async (_url, options) => {
+            calls++;
+            const user = JSON.parse(options.body).messages.at(-1).content;
+            assert.ok(user.includes('本图视觉年龄目标：16岁'));
+            assert.ok(user.includes('18岁女性'));
+            return response(caption);
+        };
         const result = await runRosterPipeline(source, 'h3-visual-age');
         assert.equal(result.ok, true); assert.equal(calls, 1);
         assert.equal(getAtomAnchor(rosterEntries().find(e => e.name === 'AgeTest'), settings.modelType), anchor);
