@@ -9,7 +9,7 @@ import { extractImagePrompt, cleanPromptForMode, imgBlockHead } from './text-uti
 import { resolveFacePrompt } from './pipeline/profile.js';
 
 // ── 构造 img 卡片 HTML ──
-export function buildImgCard(scene, fullPrompt, cachedImage, blockId) {
+export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
     // [Fix] 短标题：详细字段只走生成链（【提示词】/data属性/缓存），不外显——
     // 标题取场景首句(≤14字)，提示词小字默认隐藏（设置 showGenPrompt 可开，调试用）
     var shortTitle = String(scene || '');
@@ -21,7 +21,8 @@ export function buildImgCard(scene, fullPrompt, cachedImage, blockId) {
     return '<div class="sl_img_block" style="margin:8px 0;padding:10px 12px;border-radius:10px;background:' + COLORS.card + ';border:1px solid ' + COLORS.line + ';" title="' + escapeHtml(titleText) + '">' +
         '<div style="font-size:11px;color:' + COLORS.sub + ';margin-bottom:4px;">🖼️ ' + escapeHtml(titleText) + '</div>' +
         (cachedImage ? '<img src="' + escapeHtml(cachedImage) + '" style="max-width:' + (settings.imgBlockWidth || '55%') + ';border-radius:12px;margin-top:6px;display:block;">' : '') +
-        '<span class="sl_img_btn" data-prompt="' + escapeHtml(fullPrompt) + '"' + (blockId ? ' data-slid="' + escapeHtml(blockId) + '"' : '') + ' style="display:inline-block;padding:5px 14px;margin-top:4px;background:' + (cachedImage ? COLORS.card : COLORS.blue) + ';color:' + (cachedImage ? COLORS.text : '#fff') + ';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;">' + (cachedImage ? '\u21bb \u91cd\u65b0\u751f\u6210' : '\u2726 \u751f\u6210\u56fe\u7247') + '</span>' +
+        '<span class="sl_img_btn" data-prompt="' + escapeHtml(fullPrompt) + '"' + (blockId ? ' data-slid="' + escapeHtml(blockId) + '"' : '') + (mode ? ' data-sl-mode="' + escapeHtml(mode) + '"' : '') + ' style="display:inline-block;padding:5px 14px;margin-top:4px;background:' + (cachedImage ? COLORS.card : COLORS.blue) + ';color:' + (cachedImage ? COLORS.text : '#fff') + ';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;">' + (cachedImage ? '\u21bb \u91cd\u65b0\u751f\u6210' : '\u2726 \u751f\u6210\u56fe\u7247') + '</span>' +
+        (blockId ? '<button type="button" class="sl_img_reanalyze" style="margin:4px 0 0 6px;padding:4px 8px;border-radius:8px;font-size:11px;">重新解析</button>' : '') +
         (settings.showGenPrompt && fullPrompt !== scene ? '<div style="font-size:10px;color:#aeaeb2;font-family:Consolas,monospace;line-height:1.4;margin-top:6px;padding-top:4px;border-top:1px dotted ' + COLORS.line + ';word-break:break-all;">🐱 ' + escapeHtml(fullPrompt) + '</div>' : '') +
         '</div>';
 }
@@ -33,9 +34,21 @@ export function buildImgCard(scene, fullPrompt, cachedImage, blockId) {
 // ── 绑定生图按钮（事件委托：绑定一次永久有效，不受 DOM 重建影响） ──
 // [v1.1.2 前端卡桥] 图卡可能落在酒馆助手的 iframe 文档里（重前端卡），
 // 顶层 document 的委托收不到那里的 click → 按文档分别绑定。
+const reanalysisHandlers = new WeakMap();
+
 export function bindImageButtonsIn(doc) {
     if (!doc || doc.__sl_imgbtn_bound) return;
     doc.__sl_imgbtn_bound = true;
+    jQuery(doc).on('click', '.sl_img_reanalyze', function () {
+        const slot = this.closest('[data-sl-slot]');
+        for (let root = slot?.parentElement; root; root = root.parentElement) {
+            const handler = reanalysisHandlers.get(root);
+            if (handler) {
+                handler(Number(slot.dataset.slSlot.slice(slot.dataset.slSlot.lastIndexOf('#') + 1)), this);
+                return;
+            }
+        }
+    });
     jQuery(doc).on('click', '.sl_img_btn', async function() {
         var btn = jQuery(this), prompt = btn.data('prompt');
         if (btn.text() === '排队中…') return;
@@ -83,22 +96,23 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
         // [Fix] 旧缓存 key 兼容（644d40c 前缓存 key=scene+', '+prompt），否则刷新后需重新生成
         var bid = blockIds?.[blockIdx] || (blockKey ? blockKey + '#' + blockIdx : '');
         blockIdx++;
-        blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, (bid ? imgCacheGetById(bid) : imgCacheGet(fullPrompt)), bid) });
+        blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, (bid ? imgCacheGetById(bid) : imgCacheGet(fullPrompt)), bid, mode) });
     }
     return blocks;
 }
 
-export function renderEnhancedLite(element, enhancedText, blockKey, sourceText, autoGenerate = true) {
+export function renderEnhancedLite(element, enhancedText, blockKey, sourceText, autoGenerate = false, onReanalyze, resolvedOnly = false) {
     const root = element?.[0];
     if (!root) return;
+    if (onReanalyze) reanalysisHandlers.set(root, onReanalyze);
     const tokens = tokenizePlaceholders(sourceText ?? root.textContent);
     const blocks = Array.isArray(enhancedText) ? enhancedText : enhancedText ? extractImgBlocksFromEnhanced(enhancedText, blockKey) : null;
-    mountSlots(root, tokens, blockKey, blocks);
+    mountSlots(root, tokens, blockKey, blocks, resolvedOnly);
     bindImageButtonsIn(root.ownerDocument);
     if (blocks) updateSlots(root, blockKey, blocks);
     if (autoGenerate && blocks && settings.autoGen === 1 && settings.pluginOn !== false) {
         for (const btn of root.querySelectorAll('.sl_img_btn')) {
-            if (btn.textContent.includes('生成图片')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'), { automatic: true });
+            if (btn.textContent.includes('生成图片') && !btn.closest('.sl_img_block')?.querySelector('img')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'), { automatic: true });
         }
     }
     return Array.from(root.querySelectorAll('[data-sl-slot]')).some(n => n.dataset.slSlot.startsWith(blockKey + '#'));

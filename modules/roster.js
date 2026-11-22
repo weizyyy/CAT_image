@@ -674,6 +674,44 @@ export function splitKnownPersonSegments(segments, knownNames) {
 }
 
 // ── 人物表全部条目（供管线判断已建档） ──
+export function editRosterAnchor(chatId, key, text) {
+    const entry = settings.roster?.[getCharacterName()]?.[chatId]?.[key];
+    const anchor = String(text || '').trim();
+    if (!entry || !isEnglishAnchor(anchor)) return false;
+    if (getEnglishAnchor(entry) === anchor) return true;
+    entry.anchor = anchor;
+    if (entry.atoms) delete entry.atoms.zit;
+    // Portrait captions from before the edit still describe the previous appearance.
+    delete entry.portraitPrompts;
+    saveSettings();
+    if (chatId === getChatId()) refreshCoopCards();
+    return true;
+}
+
+export function deleteRosterPerson(chatId, key) {
+    const list = settings.roster?.[getCharacterName()]?.[chatId];
+    if (!list || !Object.hasOwn(list, key)) return false;
+    delete list[key];
+    saveSettings();
+    if (chatId === getChatId()) refreshCoopCards();
+    return true;
+}
+
+export function copyRosterToCurrent(sourceId) {
+    const roster = settings.roster?.[getCharacterName()];
+    const source = roster?.[sourceId], current = getChatId();
+    if (!source || sourceId === current) return 0;
+    const target = roster[current] ||= {};
+    let copied = 0;
+    for (const [key, entry] of Object.entries(source)) {
+        if (Object.hasOwn(target, key)) continue;
+        target[key] = JSON.parse(JSON.stringify(entry));
+        copied++;
+    }
+    if (copied) { saveSettings(); refreshCoopCards(); }
+    return copied;
+}
+
 export function rosterEntries() {
     try {
         var r = ensureRoster();

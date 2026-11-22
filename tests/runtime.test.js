@@ -44,6 +44,134 @@ test('real pipeline isolates identical scenes and preserves multiline prompt par
     assert.equal(parseRosterImages('---IMAGES---\na long first line\na long second line\n---END---', 1).length, 1);
 });
 
+test('switching to automatic queues only the new last assistant floor', async () => {
+    const { setEnqueueGen } = await import('../modules/render.js');
+    const { enqueueGen } = await import('../modules/queue.js');
+    const queued = [];
+    const saved = { auto: settings.autoGen, map: settings.msgMap };
+    try {
+        settings.autoGen = 0; settings.msgMap = {};
+        setEnqueueGen(btn => { queued.push(btn.closest('.mes').attr('mesid')); btn.text('排队中…'); });
+        show('[img:积压图]'); scanner.startPolling();
+        fetch = async () => response('A scene.');
+        await scanner.runAuxImageScan(jQuery('.mes_text'));
+        await waitUntil(() => !!document.querySelector('.sl_img_btn'));
+        settings.autoGen = 1; scanner.resetAutomaticBacklog(); scanner.scanAllMsgs();
+        assert.deepEqual(queued, []);
+        ctx.chat.push({ mes: '[img:新楼层]', is_user: false });
+        document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">[img:新楼层]</div></div>');
+        await scanner.runAuxImageScan(jQuery('.mes[mesid="1"] .mes_text'));
+        await waitUntil(() => queued.length > 0);
+        assert.deepEqual(queued, ['1']);
+    } finally {
+        scanner.stopPolling(); setEnqueueGen(enqueueGen);
+        settings.autoGen = saved.auto; settings.msgMap = saved.map;
+    }
+});
+
+test('TavernHelper visible streaming sibling restores finished slots and reanalyzes only the clicked marker', async () => {
+    const saved = settings.msgMap; settings.msgMap = {};
+    const source = '开头[img:第一处]中间[img:第二处]结尾';
+    show(source); scanner.startPolling();
+    const parent = document.querySelector('.mes');
+    const original = parent.querySelector('.mes_text');
+    original.classList.add('hidden!');
+    const streamed = document.createElement('div');
+    streamed.className = 'TH-streaming';
+    streamed.innerHTML = '开头[img:<em>第一处</em>]中间[img:第二处]结尾';
+    parent.append(streamed);
+    let requests = 0;
+    fetch = async () => response('Scene number ' + ++requests + '.');
+    try {
+        eventSource.emit(types.GENERATION_STARTED, 'normal', {}, false);
+        await scanner.runAuxImageScan(jQuery(streamed));
+        assert.equal(requests, 0);
+        assert.equal(streamed.querySelectorAll('.sl_img_block').length, 0);
+        eventSource.emit(types.GENERATION_ENDED);
+        await scanner.runAuxImageScan(jQuery(streamed));
+        await waitUntil(() => streamed.querySelectorAll('.sl_img_block').length === 2 && !scanner.scanCoordinator.running);
+        assert.equal(original.textContent, source);
+        streamed.textContent = source;
+        scanner.scanAllMsgs();
+        const ids = [...streamed.querySelectorAll('.sl_img_btn')].map(btn => btn.dataset.slid);
+        streamed.querySelectorAll('.sl_img_reanalyze')[1].click();
+        await waitUntil(() => streamed.querySelectorAll('.sl_img_btn')[1].dataset.prompt === 'Scene number 3.');
+        assert.equal(requests, 3);
+        assert.equal(streamed.querySelectorAll('.sl_img_btn')[0].dataset.slid, ids[0]);
+        assert.notEqual(streamed.querySelectorAll('.sl_img_btn')[1].dataset.slid, ids[1]);
+    } finally { scanner.stopPolling(); settings.msgMap = saved; }
+});
+
+test('a branch uses only its selected gallery for exact marker matches', async () => {
+    const { imgCacheSetById } = await import('../modules/cache.js');
+    const { setGalleryCacheSource, galleryCacheSource, galleryAdd } = await import('../modules/gallery.js');
+    const original = { map: settings.msgMap, gallery: settings.gallery, chat: ctx.chatId, sources: settings.galleryCacheSources };
+    settings.msgMap = {}; settings.gallery = {}; settings.galleryCacheSources = {};
+    const marker = '[img:会话复用测试]';
+    const source = marker + ' 中间 ' + marker;
+    let calls = 0;
+    fetch = async () => response('Prompt ' + ++calls + '.');
+    try {
+        show(source); scanner.startPolling();
+        await scanner.runAuxImageScan(jQuery('.mes_text'));
+        await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 2);
+        const ids = [...document.querySelectorAll('.sl_img_btn')].map(btn => btn.dataset.slid);
+        imgCacheSetById(ids[0], '/branch-a.png'); imgCacheSetById(ids[1], '/branch-b.png');
+        galleryAdd('/branch-a.png', { kind: 'chat' }); galleryAdd('/branch-b.png', { kind: 'chat' });
+        ctx.chatId = 'another'; show(source);
+        eventSource.emit(types.CHAT_CHANGED);
+        await scanner.runAuxImageScan(jQuery('.mes_text'));
+        await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 2 && !scanner.scanCoordinator.running);
+        imgCacheSetById(document.querySelector('.sl_img_btn').dataset.slid, '/unselected.png');
+        galleryAdd('/unselected.png', { kind: 'chat' });
+        ctx.chatId = 'branch'; show('分支正文 ' + source);
+        eventSource.emit(types.CHAT_CHANGED);
+        scanner.scanAllMsgs();
+        assert.equal(galleryCacheSource(), '');
+        assert.equal(document.querySelectorAll('.sl_img_block img').length, 0);
+        assert.equal(setGalleryCacheSource('Tester_test'), true);
+        scanner.scanAllMsgs();
+        assert.deepEqual([...document.querySelectorAll('.sl_img_block img')].map(img => img.getAttribute('src')), ['/branch-a.png', '/branch-b.png']);
+        const branchIds = [...document.querySelectorAll('.sl_img_btn')].map(btn => btn.dataset.slid);
+        assert.ok(branchIds.every(id => !ids.includes(id)));
+        assert.equal(calls, 4);
+        assert.deepEqual(Object.keys(settings.gallery.Tester.Tester_branch), ['branch-a.png', 'branch-b.png']);
+        document.querySelector('.sl_img_reanalyze').click();
+        await waitUntil(() => document.querySelector('.sl_img_btn').dataset.prompt === 'Prompt 5.');
+        scanner.scanAllMsgs();
+        assert.equal(document.querySelectorAll('.sl_img_block img').length, 1);
+        assert.equal(document.querySelector('.sl_img_block img').getAttribute('src'), '/branch-b.png');
+    } finally {
+        scanner.stopPolling(); ctx.chatId = original.chat; settings.msgMap = original.map;
+        settings.gallery = original.gallery; settings.galleryCacheSources = original.sources;
+    }
+});
+
+test('chat filenames switch without normalization and roster copies can be edited or deleted independently', async () => {
+    const { listCharacterChats, openCharacterSession } = await import('../modules/chat-sessions.js');
+    const { copyRosterToCurrent, editRosterAnchor, deleteRosterPerson } = await import('../modules/roster.js');
+    const saved = settings.roster, character = ctx.characters[0], oldOpen = ctx.openCharacterChat;
+    const sourceKey = 'Tester_Tester-2026-11-23T100000';
+    const file = 'Tester - 2026-11-23 @ T10:00:00';
+    try {
+        character.avatar = 'tester.png';
+        settings.roster = { Tester: { [sourceKey]: { Person: { anchor: 'eyes:green' } } } };
+        fetch = async () => ({ ok: true, json: async () => [{ file_name: file + '.jsonl' }] });
+        let opened;
+        ctx.openCharacterChat = async name => { opened = name; };
+        const chats = await listCharacterChats();
+        assert.equal(chats.find(chat => chat.key === sourceKey).label, file);
+        assert.equal(await openCharacterSession(chats.find(chat => chat.key === sourceKey).file), true);
+        assert.equal(opened, file);
+        assert.equal(copyRosterToCurrent(sourceKey), 1);
+        assert.equal(editRosterAnchor('Tester_test', 'Person', 'eyes:blue'), true);
+        assert.equal(settings.roster.Tester.Tester_test.Person.anchor, 'eyes:blue');
+        assert.equal(settings.roster.Tester[sourceKey].Person.anchor, 'eyes:green');
+        assert.equal(deleteRosterPerson('Tester_test', 'Person'), true);
+        assert.ok(settings.roster.Tester[sourceKey].Person);
+    } finally { settings.roster = saved; delete character.avatar; ctx.openCharacterChat = oldOpen; }
+});
+
 for (const style of ['eventTypes', 'event_types']) test(style + ': generation lifecycle, late edits, swipe cache and rerender restoration', async () => {
     delete ctx.eventTypes; delete ctx.event_types; ctx[style] = types;
     settings.msgMap = {};
@@ -186,14 +314,14 @@ test('cancel image queue aborts active request, drops waiting/portrait tasks and
         assert.fail('a cancelled result must not be uploaded');
     };
     const blocks = '[image:甲]【提示词】甲画面【/提示词】[image:乙]【提示词】乙画面【/提示词】';
-    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes);
+    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, true);
     enqueueTask('portrait-cancel', '立绘', () => assert.fail('cancelled portrait succeeded'), error => portraitError = error);
     assert.deepEqual(getQueueStatus(), { queued: 2, running: true });
     assert.equal(clearQueue(), 3); assert.equal(abortSignal.aborted, true); assert.equal(portraitError.name, 'AbortError');
     // Simulate a server ignoring the disconnect and returning late.
     release(); await waitUntil(() => !getQueueStatus().running);
     await new Promise(r => setTimeout(r, 0));
-    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes);
+    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, true);
     assert.equal(requests, 1); assert.equal(imgCacheGetById('cancel-image-test#0'), undefined);
     assert.equal(document.querySelectorAll('.sl_img_block img').length, 0);
     enqueueGen(jQuery('.sl_img_btn').first(), '手动继续'); assert.equal(requests, 2);

@@ -6,13 +6,14 @@ import { toast, esc, escAttr, fi, chkProf } from './utils.js';
 import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge } from '../settings.js';
 import { KREA2_STYLES, krea2StyleById } from '../style-presets.js';
 import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
-import { getProfiles, getCharacterName } from '../pipeline/profile.js';
-import { startPolling, stopPolling, getScannerStatus, checkLastMessage } from '../scanner.js';
+import { getProfiles, getCharacterName, getChatId } from '../pipeline/profile.js';
+import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, scanAllMsgs } from '../scanner.js';
 import { getQueueLength, enqueueTask } from '../queue.js';
 import { cleanPromptForMode } from '../text-utils.js';
-import { rosterEntries, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry } from '../roster.js';
+import { rosterEntries, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry, getEnglishAnchor, editRosterAnchor, deleteRosterPerson, copyRosterToCurrent } from '../roster.js';
+import { listCharacterChats, openCharacterSession } from '../chat-sessions.js';
 import { composeFinalPrompt } from '../comfyui.js';
-import { galleryList, galleryCount, galleryRemove, galleryClearChat, galleryPrune } from '../gallery.js';
+import { galleryList, galleryCount, galleryRemove, galleryClearChat, galleryPrune, galleryCacheSource, setGalleryCacheSource } from '../gallery.js';
 import { openSubPanel } from './sub-panels.js';
 import * as panel from './panel.js';
 var pushPage = panel.pushPage;
@@ -263,10 +264,10 @@ var PORTRAIT_VIEW_SPEC_EN = {
 
 // ── 人物列表 = 本聊天的人物表（档案跟着聊天走）──
 // 主模型每轮 [img:] 里写到的人物：有则沿用、无则建档，全都记在这次聊天的人物表里
-function collectArchivePeople() {
+function collectArchivePeople(chatId = getChatId()) {
   var out = [];
   try {
-    var re = rosterEntries();
+    var re = Object.values(settings.roster?.[getCharacterName()]?.[chatId] || {});
     for (var i = 0; i < re.length; i++) {
       var e = re[i];
       if (!e || !e.key) continue;
@@ -276,43 +277,82 @@ function collectArchivePeople() {
   return out;
 }
 
-function renderArchiveInto(body) {
+const chatViewTokens = new WeakMap();
+
+function bindChatSwitch(body, sessions, render) {
+  const byKey = new Map(sessions.map(session => [session.key, session]));
+  const character = getCharacterName();
+  body.off('click.slChat', '.sl_chat_switch').on('click.slChat', '.sl_chat_switch', async function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const session = byKey.get(this.dataset.chat);
+    if (generationBusy()) { toast('warning', '请等回复结束后切换聊天'); return; }
+    if (!session || character !== getCharacterName() || session.key === getChatId()) return;
+    this.disabled = true;
+    try {
+      if (await openCharacterSession(session.file)) render(body);
+      else toast('warning', '无法打开该聊天，请从酒馆聊天列表打开');
+    } catch (error) { toast('error', '切换聊天失败'); }
+    finally { this.disabled = false; }
+  });
+}
+
+function chatSwitchButton(session) {
+  return session.file && !session.current
+    ? '<button type="button" class="sl_chat_switch" data-chat="' + escAttr(session.key) + '" style="' + btnSm() + '">切换聊天</button>'
+    : '';
+}
+
+function renderArchiveInto(body, sessions) {
   var pf = getProfiles();
   if (!pf || !pf.charName) { body.html(empty('还没进入聊天，去左边找你的猫猫角色', '🐱')); return; }
-  var cast = pf.root[pf.charName].cast || {};
-  var meta = pf.root[pf.charName].meta || {};
-  var dynamics = pf.chat.dynamics || {};
-  var npcs = pf.chat.npcs || {};
-  var hasCast = Object.keys(cast).length > 0;
-  var isWorld = meta.cardType === '世界观卡' || meta.cardType === '混合型卡';
-  var people = collectArchivePeople();
+  if (!sessions) {
+    const node = body[0], token = {}, character = getCharacterName(), current = getChatId();
+    chatViewTokens.set(node, token);
+    renderArchiveInto(body, [{ key: current, label: current, current: true }]);
+    void listCharacterChats().then(list => {
+      if (node.isConnected && chatViewTokens.get(node) === token && getCharacterName() === character && getChatId() === current)
+        renderArchiveInto(body, list);
+    });
+    return;
+  }
   var h = '';
   // 当前角色卡（只显示卡名）
   h += '<div style="' + card() + ';padding:11px 14px;margin-bottom:10px;"><span style="font-weight:700;font-size:13.5px;color:' + CAT.text + ';">🐾 ' + esc(pf.charName) + '</span></div>';
-  if (!people.length) {
-    h += '<div style="' + card() + '">' + cardHead('🐾', '还没有人物档案', '聊着聊着就有了');
-    h += '<div style="font-size:10.5px;color:' + CAT.sub + ';line-height:1.7;">正常聊天即可 —— 主模型在正文里写 <b>[img:…|人物:名字（标签）：外貌]</b> 占位符时，插件会为该人物自动建档，之后每轮沿用同一套外貌锚点。</div></div>';
-    h += userCardInto(); h += storyCardInto();
-    body.html(h); bindArchiveEvents(body); bindStoryEvents(body);
-    return;
+  for (const session of sessions) {
+    const people = collectArchivePeople(session.key);
+    h += '<details style="' + card() + '" data-chat="' + escAttr(session.key) + '"' + (session.current ? ' open' : '') + '>';
+    h += '<summary style="cursor:pointer;padding:8px;">' + esc(session.label) + ' · ' + people.length + ' 人' +
+        (session.current ? ' · 当前聊天' : '') + '</summary>';
+    h += chatSwitchButton(session);
+    if (!session.current && people.length) h += '<button type="button" class="sl_roster_copy" data-chat="' + escAttr(session.key) +
+        '" style="' + btnSm() + '">复制档案到当前聊天</button>';
+    if (!people.length) h += empty('此聊天暂无人物档案', '🐾');
+    // 人物卡片：点击查看该聊天中的完整档案。
+    for (const ppl of people) {
+      var ck = ppl.key, purl = getPortraitUrl(ppl.ent);
+      h += '<div class="sl_pcard" data-char="' + escAttr(ck) + '" style="' + card() + 'padding:10px;display:flex;gap:12px;align-items:center;cursor:pointer;">';
+      h += '<div style="display:flex;gap:12px;align-items:center;flex:1;min-width:0;">';
+      h += '<div id="sl_port_' + escAttr(ck).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_') + '" style="width:78px;height:126px;border-radius:10px;background:' + CAT.bg + ';display:flex;align-items:center;justify-content:center;border:1.5px dashed ' + CAT.line + ';font-size:9px;color:' + CAT.sub + ';text-align:center;flex-shrink:0;' + (purl ? 'background-image:url(' + purl + ');background-size:cover;background-position:top center;border:1.5px solid ' + CAT.accent + ';color:transparent;' : '') + '">' + (purl ? '' : '🐱\n立绘') + '</div>';
+      h += '<div style="flex:1;min-width:0;">';
+      h += '<div style="font-weight:700;font-size:13px;color:' + CAT.text + ';margin-bottom:3px;">' + esc(ppl.name || ck) + '</div>';
+      h += '<div style="font-size:10.5px;color:' + CAT.sub + ';">' + esc(ppl.identity || '（无标签）') + '</div>';
+      // [v2.0] 立绘按钮上移到列表卡片（第2层）——不用点进详情页就能出图
+      if (session.current) h += '<button class="sl_port_btn" data-char="' + escAttr(ck) + '" data-view="front" style="' + btnSm() + 'font-size:10px;padding:5px 11px;margin-top:8px;">生成立绘</button>';
+      h += '</div>';
+      h += '<div style="color:' + CAT.mute + ';font-size:15px;padding-right:2px;">›</div>';
+      h += '</div></div>';
+    }
+    h += '</details>';
   }
-  // 人物卡片：立绘（黄金比 1:1.618）+ 名字 + 标签，点进去看完整档案
-  for (var pi = 0; pi < people.length; pi++) {
-    var ppl = people[pi];
-    var ck = ppl.key, purl = getPortraitUrl(ppl.ent);
-    h += '<div class="sl_pcard" data-char="' + escAttr(ck) + '" style="' + card() + 'padding:10px;display:flex;gap:12px;align-items:center;cursor:pointer;">';
-    h += '<div style="display:flex;gap:12px;align-items:center;flex:1;min-width:0;">';
-    h += '<div id="sl_port_' + escAttr(ck).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_') + '" style="width:78px;height:126px;border-radius:10px;background:' + CAT.bg + ';display:flex;align-items:center;justify-content:center;border:1.5px dashed ' + CAT.line + ';font-size:9px;color:' + CAT.sub + ';text-align:center;flex-shrink:0;' + (purl ? 'background-image:url(' + purl + ');background-size:cover;background-position:top center;border:1.5px solid ' + CAT.accent + ';color:transparent;' : '') + '">' + (purl ? '' : '🐱\n立绘') + '</div>';
-    h += '<div style="flex:1;min-width:0;">';
-    h += '<div style="font-weight:700;font-size:13px;color:' + CAT.text + ';margin-bottom:3px;">' + esc(ppl.name || ck) + '</div>';
-    h += '<div style="font-size:10.5px;color:' + CAT.sub + ';">' + esc(ppl.identity || '（无标签）') + '</div>';
-    // [v2.0] 立绘按钮上移到列表卡片（第2层）——不用点进详情页就能出图
-    h += '<button class="sl_port_btn" data-char="' + escAttr(ck) + '" data-view="front" style="' + btnSm() + 'font-size:10px;padding:5px 11px;margin-top:8px;">生成立绘</button>';
-    h += '</div>';
-    h += '<div style="color:' + CAT.mute + ';font-size:15px;padding-right:2px;">›</div>';
-    h += '</div></div>';
-  }
-  body.html(h); bindArchiveEvents(body);
+  h += userCardInto() + storyCardInto();
+  body.html(h); bindArchiveEvents(body); bindStoryEvents(body);
+  bindChatSwitch(body, sessions, renderArchiveInto);
+  body.off('click.slRosterCopy', '.sl_roster_copy').on('click.slRosterCopy', '.sl_roster_copy', function () {
+    const count = copyRosterToCurrent(this.dataset.chat);
+    toast('info', count ? '已复制 ' + count + ' 份档案' : '当前聊天已有这些人物');
+    renderArchiveInto(body, sessions);
+  });
 }
 
 // ── v1.13.8 立绘提示词 ──
@@ -369,9 +409,9 @@ function buildPortraitPrompt(ent, view, bm) {
 }
 
 // ── 人物详情页（第3层）：完整档案（锚点）+ 提示词 ──
-// 立绘按钮在列表卡片（第2层）；锚点只读，不做手工编辑 ──
-function renderPersonDetail(body, key) {
-  var people = collectArchivePeople(), ppl = null;
+function renderPersonDetail(body, key, chatId = getChatId()) {
+  if (body[0]) chatViewTokens.delete(body[0]);
+  var people = collectArchivePeople(chatId), ppl = null;
   for (var i = 0; i < people.length; i++) { if (people[i].key === key) { ppl = people[i]; break; } }
   if (!ppl) { renderArchiveInto(body); return; }
   var bm = getActiveMode() || 'zit';
@@ -402,13 +442,16 @@ function renderPersonDetail(body, key) {
     var _vurl = getPortraitUrl(ppl.ent, _vv);
     h += '<div style="text-align:center;">';
     h += '<div id="sl_portv_' + safe + '_' + _vv + '" style="width:58px;height:94px;border-radius:8px;background:' + CAT.bg + ';border:1.5px ' + (_vurl ? 'solid ' + CAT.accent : 'dashed ' + CAT.line) + ';background-size:cover;background-position:top center;display:flex;align-items:center;justify-content:center;font-size:9px;color:' + CAT.sub + ';' + (_vurl ? 'background-image:url(' + _vurl + ');color:transparent;' : '') + '">' + (_vurl ? '' : '—') + '</div>';
-    h += '<button class="sl_port_btn" data-char="' + escAttr(ppl.key) + '" data-view="' + _vv + '" style="' + btnSm() + 'font-size:9.5px;padding:4px 8px;margin-top:4px;">' + _vlist[_vi][1] + '</button>';
+    if (chatId === getChatId()) h += '<button class="sl_port_btn" data-char="' + escAttr(ppl.key) + '" data-view="' + _vv + '" style="' + btnSm() + 'font-size:9.5px;padding:4px 8px;margin-top:4px;">' + _vlist[_vi][1] + '</button>';
     h += '</div>';
   }
   h += '</div>';
-  // [v2.0] 立绘按钮在列表卡片上（第2层）；「编辑锚点」已移除 —— 锚点只由辅助 AI 产出，手工改的口子关掉
+  h += '<details style="margin-top:11px;"><summary style="cursor:pointer;">编辑英文锚点</summary>';
+  h += '<textarea class="sl_anchor_input" style="width:100%;min-height:105px;' + fi() + '">' + esc(getEnglishAnchor(ppl.ent)) + '</textarea>';
+  h += '<button type="button" class="sl_anchor_save" style="' + btnSm() + '">保存英文锚点</button></details>';
+  h += '<button type="button" class="sl_person_delete" style="' + btnDanger() + ';margin-top:8px;">删除人物</button>';
   h += '<div style="display:flex;gap:6px;margin-top:11px;flex-wrap:wrap;">';
-  h += '<button class="sl_prompt_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnGhost() + 'font-size:10.5px;padding:6px 13px;">提示词</button>';
+  if (chatId === getChatId()) h += '<button class="sl_prompt_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnGhost() + 'font-size:10.5px;padding:6px 13px;">提示词</button>';
   h += '</div>';
   h += '<div class="sl_prompt_box" data-char="' + escAttr(ppl.key) + '" style="display:none;margin-top:10px;">';
   h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-bottom:4px;">下方就是**实际发给 ComfyUI 的那一条**（含画风预设 / 艺术家标签）</div>';
@@ -416,13 +459,25 @@ function renderPersonDetail(body, key) {
   h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><button class="sl_copy_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnSm() + 'font-size:10px;">复制提示词</button></div></div>';
   h += '</div></div></div>';
   body.html(h); bindArchiveEvents(body);
+  const character = getCharacterName();
+  body.find('.sl_anchor_save').on('click', () => {
+    if (character !== getCharacterName() || !editRosterAnchor(chatId, key, body.find('.sl_anchor_input').val())) {
+      toast('warning', '请输入有效的英文锚点'); return;
+    }
+    toast('success', '英文锚点已保存');
+    renderPersonDetail(body, key, chatId);
+  });
+  body.find('.sl_person_delete').on('click', () => {
+    if (character !== getCharacterName() || !confirm('删除此聊天中的人物档案「' + ppl.name + '」？')) return;
+    if (deleteRosterPerson(chatId, key)) renderArchiveInto(body);
+  });
 }
 export function bindArchiveEvents(b) {
   b.off('change input', '#sl_user_name,#sl_user_desc').on('change input', '#sl_user_name,#sl_user_desc', function () { settings.userName = b.find('#sl_user_name').val(); settings.userDesc = b.find('#sl_user_desc').val(); saveSettings(); });
   b.off('change input', '#sl_specialization').on('change input', '#sl_specialization', function () { var pf = getProfiles(); if (pf && pf.root[pf.charName] && pf.root[pf.charName].meta) { pf.root[pf.charName].meta.specialization = jQuery(this).val(); saveSettings(); } });
   b.off('click', '.sl_arch_st').on('click', '.sl_arch_st', function () { var st = parseInt(jQuery(this).data('ast')); b.find('.sl_arch_st').css({ background: 'transparent', color: CAT.sub, fontWeight: '600' }); jQuery(this).css({ background: CAT.accent, color: '#fff', fontWeight: '700' }); b.find('#sl_arch_static').toggle(st === 0); b.find('#sl_arch_dynamic').toggle(st === 1); });
   // 卡片 → 详情页；返回
-  b.off('click', '.sl_pcard').on('click', '.sl_pcard', function () { renderPersonDetail(b, jQuery(this).data('char')); });
+  b.off('click', '.sl_pcard').on('click', '.sl_pcard', function () { renderPersonDetail(b, this.dataset.char, this.closest('details[data-chat]')?.dataset.chat); });
   b.off('click', '.sl_pback').on('click', '.sl_pback', function () { renderArchiveInto(b); });
   // 提示词：打开时按最新锚点重新生成
   b.off('click', '.sl_prompt_btn').on('click', '.sl_prompt_btn', function () {
@@ -603,7 +658,20 @@ export function renderGalleryPage() {
   pushPage(function (body) { renderGalleryInto(body); }, '图库', { key: '图库' });
 }
 
-function renderGalleryInto(body) {
+function renderGalleryInto(body, sessions) {
+  if (!sessions) {
+    const node = body[0], token = {}, character = getCharacterName(), current = getChatId();
+    chatViewTokens.set(node, token);
+    renderGalleryInto(body, []);
+    void listCharacterChats().then(list => {
+      if (node.isConnected && chatViewTokens.get(node) === token && getCharacterName() === character && getChatId() === current)
+        renderGalleryInto(body, list);
+    });
+    return;
+  }
+  const sessionByKey = new Map(sessions.map(session => [session.key, session]));
+  const source = galleryCacheSource();
+  const character = getCharacterName(), current = getChatId();
   var list = [], total = 0;
   try { list = galleryList(); } catch (e) {}
   for (var i = 0; i < list.length; i++) total += list[i].items.length;
@@ -613,14 +681,23 @@ function renderGalleryInto(body) {
   h += '<button id="sl_gal_prune" style="' + btnSm() + 'font-size:10px;padding:6px 12px;">清理已删聊天</button>';
   h += '</div>';
   h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-top:4px;line-height:1.5;">按聊天归档：删掉聊天文件后点「清理已删聊天」，那场聊天的图账与消息图缓存会一起清掉（png 文件本身不删）</div>';
+  h += '<div style="font-size:10px;margin-top:5px;color:' + CAT.sub + ';">缓存来源：' +
+       esc(source ? sessionByKey.get(source)?.label || list.find(item => item.chatKey === source)?.label || source : '未选择') + '</div>';
   if (!total) {
     h += empty('还没有出过图，出图后会自动进这里', '🖼️');
   } else {
     for (var g = 0; g < list.length; g++) {
       var grp = list[g];
-      h += '<div style="margin-top:14px;">';
+      const session = sessionByKey.get(grp.chatKey);
+      h += '<details style="margin-top:14px;"' + (grp.current || grp.chatKey === source ? ' open' : '') + '>';
+      h += '<summary style="cursor:pointer;margin-bottom:6px;">' + esc(session?.label || grp.label) + '</summary>';
       h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">';
-      h += '<span style="font-size:11px;font-weight:700;color:' + CAT.text + ';">' + esc(grp.label) + '</span>';
+      if (!grp.current) {
+        const selected = grp.chatKey === source;
+        h += '<button type="button" class="sl_gallery_source" data-chat="' + escAttr(grp.chatKey) +
+          '" aria-pressed="' + selected + '" style="' + btnSm() + '">' +
+          (selected ? '取消使用此图库' : '使用此图库缓存') + '</button>';
+      }
       h += '<span style="' + chip(CAT.bg, CAT.sub) + '">' + grp.items.length + ' 张</span>';
       if (grp.current) h += '<span style="' + chip(CAT.accent + '1F', CAT.accent) + '">当前</span>';
       h += '<span style="flex:1;"></span><button class="sl_gal_clear" data-chat="' + escAttr(grp.chatKey) + '" style="font-size:9.5px;border:none;background:none;color:' + CAT.red + ';cursor:pointer;padding:2px 4px;">清空</button>';
@@ -634,11 +711,18 @@ function renderGalleryInto(body) {
         h += '<button class="sl_gal_del" data-chat="' + escAttr(grp.chatKey) + '" data-file="' + escAttr(it.file) + '" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border:none;border-radius:9px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;line-height:18px;padding:0;cursor:pointer;">✕</button>';
         h += '</div>';
       }
-      h += '</div></div>';
+      h += '</div></details>';
     }
   }
   h += '</div>';
   body.html(h);
+  body.off('click.slGallerySource', '.sl_gallery_source').on('click.slGallerySource', '.sl_gallery_source', function () {
+    if (getCharacterName() !== character || getChatId() !== current) { renderGalleryInto(body); return; }
+    const selected = this.dataset.chat;
+    if (!setGalleryCacheSource(selected === source ? '' : selected)) return;
+    scanAllMsgs();
+    renderGalleryInto(body, sessions);
+  });
   body.off('click', '.sl_gal_img').on('click', '.sl_gal_img', function () {
     var u = jQuery(this).data('url'); if (u) window.open(u, '_blank');
   });

@@ -31,7 +31,7 @@ export class ScanCoordinator {
                 const job = Array.from(this.jobs.values()).find(j => j.state === 'queued');
                 if (!job) break;
                 const current = () => !job.cancelled && job.snapshot.isCurrent();
-                if (!current()) { job.state = 'stale'; continue; }
+                if (!current()) { job.state = 'stale'; job.snapshot.onSettled?.(); continue; }
                 job.state = 'running'; job.attempts++;
                 try {
                     const result = await this.run(job.snapshot, current, job.controller.signal);
@@ -43,7 +43,7 @@ export class ScanCoordinator {
                     job.state = current() ? 'failed' : job.cancelled ? 'cancelled' : 'stale';
                     job.retryAt = Date.now() + 10000 * job.attempts;
                     if (current()) this.onError(error, job.snapshot);
-                }
+                } finally { job.snapshot.onSettled?.(); }
             }
         } finally { this.running = false; }
         // Retain a bounded set of completion/retry records, never queued work.

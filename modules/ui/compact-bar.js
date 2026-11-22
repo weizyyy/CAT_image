@@ -7,7 +7,8 @@ import { setHeadStatus } from './panel.js';
 import { toast, chkProf } from './utils.js';
 import { settings, saveSettings, getActiveMode, modeBadge } from '../settings.js';
 import { getCharacterName } from '../pipeline/profile.js';
-import { getScannerStatus, cancelPendingScans } from '../scanner.js';
+import { getScannerStatus, cancelPendingScans, resetAutomaticBacklog } from '../scanner.js';
+import { resetFrontendAutomaticBacklog } from '../frontend-bridge.js';
 import { getQueueLength, clearQueue } from '../queue.js';
 import * as panel from './panel.js';  // 循环依赖：仅函数体内引用，运行时安全
 
@@ -70,7 +71,7 @@ export function createCompactBar() {
     e.stopPropagation(); const count = cancelPendingScans() + clearQueue();
     refreshCompactBar(); toast('info', count ? '已取消全部排图，可点击图位或排图按钮继续' : '当前没有待取消的排图');
   });
-  jQuery('#sl_comp_auto').on('click', function (e) { e.stopPropagation(); settings.autoGen = settings.autoGen === 1 ? 0 : 1; saveSettings(); refreshCompactBar(); });
+  jQuery('#sl_comp_auto').on('click', function (e) { e.stopPropagation(); settings.autoGen = settings.autoGen === 1 ? 0 : 1; resetAutomaticBacklog(); resetFrontendAutomaticBacklog(); saveSettings(); refreshCompactBar(); });
   _compactTimer = setInterval(refreshCompactBar, 3000); refreshCompactBar();
 }
 export function refreshCompactBar() {

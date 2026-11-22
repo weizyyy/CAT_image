@@ -4,16 +4,18 @@ import { settings, getSTContext, getActiveMode } from './settings.js';
 import { slLog, slErr } from './log.js';
 import { getChatId } from './pipeline/profile.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
-import { scanCoordinator, generationBusy } from './scanner.js';
+import { scanCoordinator, generationBusy, reanalyzeSlot, getMsgKey, reuseGalleryImages, saveImageRevision } from './scanner.js';
 import { renderEnhancedLite, extractImgBlocksFromEnhanced, buildImgCard, bindImageButtonsIn } from './render.js';
-import { fingerprint, tokenizePlaceholders } from './placeholders.js';
+import { fingerprint, tokenizePlaceholders, replaceTokens } from './placeholders.js';
 import { locateMarkers } from './dom-placeholders.js';
 import { getPrompt } from '../prompts/loader.js';
 
 let running = false, timer, serial = 0, chatId = '', observer;
 const hooks = [], records = new Map(), frameIds = new WeakMap();
 const rootOwners = new WeakMap(), inflight = new WeakMap(), latestCalls = new WeakMap(), holdUntil = new WeakMap();
-let frameSerial = 0;
+let frameSerial = 0, autoAfterCall = 0, newestRecord;
+
+export function resetFrontendAutomaticBacklog() { autoAfterCall = serial; }
 
 function eachWindow(fn, win = window, depth = 0) {
     if (depth > 4) return;
@@ -85,6 +87,41 @@ function visibleRecord(record) {
                 findTarget(record.win, record.text) === record.root);
     } catch { return false; }
 }
+function renderRecord(record) {
+    const ids = record.slots.map(slot => slot.id);
+    const blocks = record.slots.map((slot, index) => slot.enhanced && extractImgBlocksFromEnhanced(
+        slot.enhanced, record.key, index, ids, record.mode)[0]);
+    return renderEnhancedLite(jQuery(record.root), blocks || null, record.key, record.text,
+        record === newestRecord && record.callId > autoAfterCall && record.autoEligible,
+        (index, button) => retryFrontendSlot(record, index, button));
+}
+
+function retryFrontendSlot(record, index, button) {
+    const token = tokenizePlaceholders(record.text)[index];
+    const block = record.slots[index];
+    if (!token || !block?.enhanced || !record.enhanced || !settings.auxUrl || !settings.auxModel || generationBusy()) return;
+    const restore = label => { button.disabled = false; button.textContent = label; };
+    button.disabled = true; button.textContent = '重新解析中…';
+    const job = reanalyzeSlot({
+        id: block.id, source: token.text, origin: record.key,
+        isCurrent: () => running && settings.feBridge !== false && settings.pluginOn !== false &&
+            getChatId() === record.chatId && getActiveMode() === record.mode && !generationBusy() &&
+            rootOwners.get(record.root) === record.key && !inflight.get(record.win) && visibleRecord(record) &&
+            record.slots[index] === block,
+        onSuccess(enhanced) {
+            record.results.set(index, { ok: true, enhanced });
+            record.slots[index] = { id: globalThis.crypto.randomUUID(), enhanced, skipSharedCache: true };
+            record.enhanced = replaceTokens(record.text, tokenizePlaceholders(record.text), record.slots.map(slot => slot.enhanced));
+            saveImageRevision(record);
+            renderRecord(record);
+        },
+        onError: () => restore('重新解析失败 · 重试'),
+        onCancel: () => restore('重新解析'),
+        onSettled: () => { if (button.disabled) restore('重新解析'); },
+    });
+    if (!job) restore('重新解析');
+}
+
 function submitRecord(record) {
     if (record.cancelled) return;
     if (record.mode !== getActiveMode()) return;
@@ -97,7 +134,9 @@ function submitRecord(record) {
         if (record.root) rootOwners.set(record.root, record.key);
     }
     if (!record.root) return;
-    renderEnhancedLite(jQuery(record.root), record.enhanced || record.blocks || null, record.key, record.text);
+    if (reuseGalleryImages(record) && record.slots.every(slot => slot.enhanced))
+        record.enhanced = replaceTokens(record.text, tokenizePlaceholders(record.text), record.slots.map(slot => slot.enhanced));
+    renderRecord(record);
     if (record.enhanced) return;
     scanCoordinator.submit({ owner: record.key, key: record.key, source: record.text,
         isCurrent: () => running && settings.feBridge !== false && settings.pluginOn !== false &&
@@ -106,13 +145,13 @@ function submitRecord(record) {
         run: (isCurrent, signal) => runRosterPipeline(record.text, record.key, { isCurrent, signal, results: record.results,
             onSlot(index, enhanced) {
                 if (!isCurrent()) return;
-                record.blocks ||= [];
-                record.blocks[index] = extractImgBlocksFromEnhanced(enhanced, record.key, index)[0];
-                renderEnhancedLite(jQuery(record.root), record.blocks, record.key, record.text);
+                record.slots[index].enhanced = enhanced;
+                saveImageRevision(record);
+                renderRecord(record);
             } }),
         commit(result) {
             record.enhanced = result.enhanced;
-            renderEnhancedLite(jQuery(record.root), result.enhanced, record.key, record.text);
+            renderRecord(record);
         },
         onError() {
             record.root.querySelectorAll('[role="status"]').forEach(n => { n.textContent = '🐱 分析失败，稍后重试'; });
@@ -133,8 +172,14 @@ function receive(win, raw, capturedChat, callId) {
     if (getSTContext()?.chat?.some(message => !message.is_user && extractNarrativeText(message.mes) === text)) return;
     const signature = capturedChat + ':' + frameId(win) + ':' + callId + ':' + fingerprint(text);
     if (records.has(signature)) return;
-    const record = { key: 'fe_v2_' + signature, chatId: capturedChat, callId, mode: getActiveMode(), win, text, results: new Map(), root: null };
+    const mode = getActiveMode(), tokens = tokenizePlaceholders(text);
+    const id = 'fe-' + globalThis.crypto.randomUUID().replace(/-/g, '');
+    const key = getMsgKey(capturedChat, id, text, 0, mode);
+    const record = { key, chatId: capturedChat, callId, mode, win, text, source: text, swipe: 0, results: new Map(), root: null,
+        slots: tokens.map(token => ({ id: key + '#' + token.index })) };
+    record.autoEligible = settings.autoGen === 1;
     records.set(signature, record);
+    if (!newestRecord || callId > newestRecord.callId) newestRecord = record;
     if (records.size > 100) records.delete(records.keys().next().value);
     // Let the card's own Promise continuation commit its final response first.
     setTimeout(() => { if (running) submitRecord(record); }, 150);
@@ -174,7 +219,7 @@ export function installFrontendHook() {
 }
 function sweep() {
     if (!running || settings.feBridge === false) return;
-    if (chatId !== getChatId()) { records.clear(); chatId = getChatId(); }
+    if (chatId !== getChatId()) { records.clear(); newestRecord = undefined; chatId = getChatId(); }
     installFrontendHook();
     for (const record of records.values()) submitRecord(record);
 }
@@ -193,7 +238,7 @@ export function initFrontendBridge() {
 }
 export function stopFrontendBridge() {
     running = false; clearInterval(timer); clearTimeout(initFrontendBridge._debounce); observer?.disconnect();
-    document.removeEventListener('load', sweep, true); hooks.splice(0).forEach(undo => undo()); records.clear();
+    document.removeEventListener('load', sweep, true); hooks.splice(0).forEach(undo => undo()); records.clear(); newestRecord = undefined;
 }
 export function getFeBridgeStatus() {
     return settings.feBridge === false ? '已关闭' : '前端桥 v2 · 已挂钩 ' + hooks.length + ' 个入口 · 回复 ' + records.size + ' 组';

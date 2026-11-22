@@ -8,10 +8,11 @@
 //   v1.22 起它已经搬进 IndexedDB（不再受 50 条上限约束），但"这张图属于哪场聊天"仍然只有图库知道。
 //   图库是另一层账：不参与消息缓存的生命周期，删聊天时按聊天级联清理。
 
-import { settings, getSTContext } from './settings.js';
+import { settings, saveSettings } from './settings.js';
 import { getCharacterName, getChatId } from './pipeline/profile.js';
+import { fetchCharacterChats, characterChatKey, characterChatKeys, cachedChatKey } from './chat-sessions.js';
 import { slLog } from './log.js';
-import { imgStoreDeletePrefix, imgStoreDeleteKeys } from './imgstore.js';
+import { imgStoreDeleteKeys } from './imgstore.js';
 
 function _char() {
     try { return getCharacterName() || ''; } catch (e) { return ''; }
@@ -80,6 +81,21 @@ export function galleryList() {
     } catch (e) { return []; }
 }
 
+export function galleryCacheSource(charName = _char(), chatKey = getChatId()) {
+    const source = settings.galleryCacheSources?.[charName]?.[chatKey];
+    return source && source !== chatKey && settings.gallery?.[charName]?.[source] ? source : '';
+}
+
+export function setGalleryCacheSource(source, charName = _char(), chatKey = getChatId()) {
+    if (!charName || !chatKey || source === chatKey || (source && !settings.gallery?.[charName]?.[source])) return false;
+    const sources = (settings.galleryCacheSources ||= {});
+    const byChat = (sources[charName] ||= {});
+    if (source) byChat[chatKey] = source;
+    else delete byChat[chatKey];
+    saveSettings();
+    return true;
+}
+
 export function galleryCount() {
     try {
         var n = 0, list = galleryList();
@@ -114,73 +130,31 @@ export function galleryClearChat(chatKey) {
     } catch (e) { return 0; }
 }
 
-// 归一化聊天名（与 getChatId 同规则）
-function _normChatName(name) {
-    return String(name || '').replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '');
-}
-
-// 拉当前角色卡的聊天文件列表（ST 接口，失败返回 null）
-function _fetchChatNames() {
-    try {
-        if (typeof window === 'undefined' || typeof window.fetch !== 'function') return Promise.resolve(null);
-        var ctx = getSTContext();
-        var ch = (ctx.characters || {})[ctx.characterId];
-        if (!ch || !ch.avatar) return Promise.resolve(null);
-        var headers = (typeof window.getRequestHeaders === 'function')
-            ? window.getRequestHeaders()
-            : { 'Content-Type': 'application/json' };
-        return window.fetch('/api/characters/chats', {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({ avatar_url: ch.avatar, simple: true })
-        }).then(function (r) { return r.ok ? r.json() : null; }).then(function (list) {
-            if (!Array.isArray(list)) return null;
-            return list.map(function (x) { return String((x && x.file_name) || '').replace(/\.jsonl$/i, ''); });
-        }).catch(function () { return null; });
-    } catch (e) { return Promise.resolve(null); }
-}
-
 // 级联清理：聊天文件已经不在了 → 删它的图账 + 该聊天的 msgMap 图片缓存
 // 返回 { ok, removedChats, removedImages, removedCaches } ；拿不到聊天列表时 ok=false（本轮不动手）
 export function galleryPrune() {
-    return _fetchChatNames().then(function (names) {
+    const character = _char();
+    return fetchCharacterChats().catch(() => null).then(function (names) {
         if (!names) return { ok: false, removedChats: 0, removedImages: 0, removedCaches: 0 };
         var charName = _char();
-        if (!charName) return { ok: false, removedChats: 0, removedImages: 0, removedCaches: 0 };
-        var alive = {};
-        for (var i = 0; i < names.length; i++) alive[charName + '_' + _normChatName(names[i])] = true;
-        // 保险：当前聊天永远算活着（接口在 db 模式下可能给不出同名文件，不能把正在玩的这场删了）
-        try { var _cur = getChatId(); if (_cur) alive[_cur] = true; } catch (eCur) {}
-        var aliveKeys = Object.keys(alive);
-        var removedChats = 0, removedImages = 0, removedCaches = 0;
-        var bag = (settings.gallery && settings.gallery[charName]) || {};
-        var deadChats = [];
-        for (var chatKey in bag) {
-            if (alive[chatKey]) continue;
+        if (!charName || charName !== character) return { ok: false, removedChats: 0, removedImages: 0, removedCaches: 0 };
+        const alive = new Set(names.map(name => characterChatKey(charName, name)));
+        alive.add(getChatId());
+        const known = characterChatKeys(charName);
+        const bag = settings.gallery?.[charName] || {};
+        let removedChats = 0, removedImages = 0;
+        for (const chatKey of Object.keys(bag)) {
+            if (alive.has(chatKey)) continue;
             removedImages += Object.keys(bag[chatKey] || {}).length;
-            deadChats.push(chatKey);
             delete bag[chatKey];
             removedChats++;
         }
-        // 级联：msgMap（内存 + IndexedDB）里属于"已不存在的聊天"的图缓存
-        var deadKeys = [];
-        var mm = settings.msgMap || {};
-        for (var k in mm) {
-            if (k.indexOf(charName + '_') !== 0) continue;
-            var live = false;
-            for (var a = 0; a < aliveKeys.length; a++) {
-                if (k.indexOf(aliveKeys[a] + '_') === 0) { live = true; break; }
-            }
-            if (!live) { deadKeys.push(k); removedCaches++; }
-        }
-        if (deadKeys.length) {
-            try { imgStoreDeleteKeys(deadKeys); } catch (eDK) { slLog('图片仓清理跳过: ' + eDK.message); }
-            for (var dk = 0; dk < deadKeys.length; dk++) delete mm[deadKeys[dk]];
-        }
-        // 图库里已经判定死亡的聊天，也按前缀把 IDB 里可能残留的条目清掉
-        for (var dc = 0; dc < deadChats.length; dc++) {
-            try { imgStoreDeletePrefix(deadChats[dc] + '_'); } catch (eDP) {}
-        }
+        const deadKeys = Object.keys(settings.msgMap || {}).filter(key => {
+            const chatKey = cachedChatKey(key);
+            return known.has(chatKey) && !alive.has(chatKey);
+        });
+        const removedCaches = deadKeys.length;
+        if (removedCaches) imgStoreDeleteKeys(deadKeys);
         slLog('图库级联清理: 聊天 ' + removedChats + ' 场 / 图 ' + removedImages + ' 张 / 消息缓存 ' + removedCaches + ' 条');
         return { ok: true, removedChats: removedChats, removedImages: removedImages, removedCaches: removedCaches };
     });

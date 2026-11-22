@@ -1,6 +1,6 @@
 // ── SillyImage Lab 生图排队 ──
 import { slLog } from './log.js';
-import { settings, COLORS, getSTContext, getActiveMode, isEnglishMode, escapeHtml } from './settings.js';
+import { settings, COLORS, getSTContext, getActiveMode, isEnglishMode, escapeHtml, saveSettings } from './settings.js';
 import { imgCacheGetById, imgCacheSetById } from './cache.js';
 import { generateImage } from './comfyui.js';
 import { cleanPromptForMode } from './text-utils.js';
@@ -63,12 +63,13 @@ async function processImageQueue() {
         if (task.cancelled) return;
         // v1.21 图库：每张产出的图都记一笔（独立账本，不受 msgMap 50 条上限影响）
         try {
-            galleryAdd(result.url, {
+            const entry = galleryAdd(result.url, {
                 kind: task.custom ? 'portrait' : 'chat',
                 scene: task.scene || (task.custom ? String(task.id || '').replace(/^portrait_/, '立绘_') : ''),
                 charName: task.charName,
                 chatKey: task.chatKey
             });
+            if (entry) saveSettings();
         } catch (eG) { slLog('图库记录跳过: ' + eG.message); }
         // [Fix] 图块精确缓存：按块标识（消息key#序号）记录，同一提示词内容不再互相覆盖
         var _slid = task.blockId;
@@ -80,7 +81,7 @@ async function processImageQueue() {
             // [Fix] 通用任务（如生成立绘）：由调用方回调处理结果
             task.custom.onSuccess(result);
             slLog('排队完成(任务):', task.id);
-        } else {
+        } else if (task.btn[0]?.isConnected) {
             task.btn.text('\u21bb \u91cd\u65b0\u751f\u6210').css({ background: COLORS.card, color: COLORS.text });
             task.btn.siblings('img').remove();
             // [v1.1.2 前端卡桥] 按钮可能位于酒馆助手的 iframe 文档中：
@@ -120,7 +121,7 @@ export function enqueueGen(btn, prompt, { automatic = false } = {}) {
     btn.text('排队中\u2026').css({ background: COLORS.orange, color: '#fff' }).off('click');
     var _own = _genOwner(), _scene = '';
     try { _scene = String(btn.closest('.sl_img_block').find('div').first().text() || '').replace(/^🖼️\s*/, '').slice(0, 60); } catch (eS) {}
-    const task = { id: id, btn: btn, blockId, prompt: prompt, mode: getActiveMode(), workflow: settings.cWf, scene: _scene, charName: _own.charName, chatKey: _own.chatKey };
+    const task = { id: id, btn: btn, blockId, prompt: prompt, mode: btn.attr('data-sl-mode') || getActiveMode(), workflow: settings.cWf, scene: _scene, charName: _own.charName, chatKey: _own.chatKey };
     if (blockId) pendingBlocks.set(blockId, task);
     imageQueue.push(task);
     slLog('入队:', id, '队列长度:', imageQueue.length);
@@ -134,6 +135,8 @@ export function enqueueTask(id, prompt, onSuccess, onFail) {
     slLog('入队(任务):', id, '队列长度:', imageQueue.length);
     processImageQueue();
 }
+
+export function isImagePending(blockId) { return pendingBlocks.has(blockId); }
 
 export function getQueueLength() {
     return imageQueue.length;

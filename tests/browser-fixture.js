@@ -45,8 +45,8 @@ export async function runBrowserFixture() {
     const source = '前[img:同一场景|要点:红衣]中[img:同一场景|要点:蓝衣]后';
     document.body.innerHTML = '<div id="chat"><div class="mes" mesid="0"><div class="mes_text"></div></div></div>';
     const root = document.querySelector('.mes_text'); root.textContent = source;
-    ctx.chat = [{ mes: source, is_user: false, swipe_id: 0 }];
     scanner.startPolling();
+    ctx.chat = [{ mes: source, is_user: false, swipe_id: 0 }];
     try {
         eventSource.emit('GENERATION_STARTED', 'normal', {}, false);
         await scanner.runAuxImageScan(jQuery(root));

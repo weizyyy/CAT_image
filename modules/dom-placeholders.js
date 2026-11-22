@@ -33,7 +33,7 @@ export function locateMarkers(root) {
     }).filter(Boolean);
 }
 
-export function mountSlots(root, tokens, key, blocks) {
+export function mountSlots(root, tokens, key, blocks, resolvedOnly = false) {
     const doc = root.ownerDocument;
     const markers = locateMarkers(root);
     // Match exact source tokens in DOM order. Never attach unmatched images to
@@ -50,6 +50,7 @@ export function mountSlots(root, tokens, key, blocks) {
         }
         if (at < 0) continue;
         cursor = at + 1;
+        if (resolvedOnly && !blocks?.[token.index]) continue;
         matches.push({ token, marker: markers[at], id });
     }
     for (const { token, marker, id } of matches.reverse()) {
