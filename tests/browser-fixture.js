@@ -11,10 +11,10 @@ export async function runBrowserFixture() {
     const eventSource = { on(name, fn) { if (!handlers.has(name)) handlers.set(name, new Set()); handlers.get(name).add(fn); },
         off(name, fn) { handlers.get(name)?.delete(fn); }, emit(name, ...args) { for (const fn of handlers.get(name) || []) fn(...args); } };
     const eventTypes = Object.fromEntries(['GENERATION_STARTED','GENERATION_ENDED','MESSAGE_UPDATED','MESSAGE_RECEIVED','MESSAGE_EDITED','MESSAGE_SWIPED','CHAT_CHANGED'].map(x => [x, x]));
-    const ctx = { chatId: 'fixture', chat: [], characterId: 0, characters: [{ data: { name: 'Fixture' } }],
+    const ctx = { chatId: 'fixture', chat: [], characterId: 0, characters: [{ avatar: 'fixture.png', data: { name: 'Fixture' } }],
         eventSource, eventTypes, getRequestHeaders: () => ({}), setExtensionPrompt() {} };
     initSettings(() => ctx, {});
-    Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'https://fixture.invalid', auxModel: 'fixture', autoGen: 0, storyLib: false });
+    Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'https://fixture.invalid', auxModel: 'fixture', autoGen: 0 });
     const { loadPrompts, getPrompt } = await import('../prompts/loader.js');
     await loadPrompts(new URL('../prompts/', import.meta.url).href);
     const scanner = await import('../modules/scanner.js');

@@ -1,15 +1,13 @@
 import { slLog, slErr } from './log.js';
-import { settings, getSTContext, getActiveMode, saveSettings } from './settings.js';
-import { getProfiles, getChatId, getCharacterName } from './pipeline/profile.js';
+import { settings, getSTContext, getActiveMode } from './settings.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
 import { refreshCoopCards } from './sync-cards.js';
-import { imgStorePut, imgStoreDeletePrefix } from './imgstore.js';
-import { renderEnhancedLite, extractImgBlocksFromEnhanced, setRestoreDeps } from './render.js';
-import { fingerprint, messageKey, tokenizePlaceholders, replaceTokens } from './placeholders.js';
+import { getChatId, sessionData, saveArchive } from './archive.js';
+import { renderEnhancedLite, extractImgBlocksFromEnhanced } from './render.js';
+import { messageKey, tokenizePlaceholders } from './placeholders.js';
 import { reconcileSlots } from './slot-revisions.js';
 import { resetSlots } from './dom-placeholders.js';
-import { imgCacheGetById, imgCacheSetById } from './cache.js';
-import { cachedChatKey } from './chat-sessions.js';
+import { imgCacheGetById } from './cache.js';
 import { isImagePending } from './queue.js';
 import { galleryAdd, galleryCacheSource } from './gallery.js';
 import { ScanCoordinator } from './scan-coordinator.js';
@@ -18,7 +16,6 @@ let observedLatest, automaticLatest;
 let galleryIndexMemo;
 let active = false, generating = false, epoch = 0, timer, fallback, observer;
 const handlers = [], observations = new Map(), revisions = new Map();
-setRestoreDeps(getChatId, getSTContext);
 
 export function generationBusy() {
     const stream = getSTContext()?.streamingProcessor;
@@ -33,6 +30,7 @@ export function readSnapshot(messageId) {
     const message = getSTContext()?.chat?.[Number(messageId)];
     if (!message || message.is_user || message.is_system || typeof message.mes !== 'string') return null;
     const source = message.mes, chatId = getChatId(), swipe = message.swipe_id ?? 0, mode = getActiveMode();
+    if (!chatId) return null;
     const key = getMsgKey(chatId, messageId, source, swipe, mode), version = epoch;
     return { owner: chatId + ':' + messageId, chatId, messageId: String(messageId),
         source, swipe, mode, key, results: new Map(),
@@ -177,49 +175,35 @@ export const scanCoordinator = new ScanCoordinator({
     }
 });
 export function saveImageRevision(snapshot) {
-    const values = snapshot.slots.map(s => s.enhanced);
-    imgStorePut(snapshot.key, JSON.stringify({ version: 3, source: snapshot.source, swipe: snapshot.swipe, mode: snapshot.mode,
-        chatId: snapshot.chatId, slots: snapshot.slots, enhanced: replaceTokens(snapshot.source, tokenizePlaceholders(snapshot.source), values) }), Date.now());
+    const session = sessionData(snapshot.chatId, true);
+    if (!session) return;
+    session.revisions[snapshot.key] = {
+        source: snapshot.source, messageId: snapshot.messageId, swipe: snapshot.swipe,
+        mode: snapshot.mode, slots: structuredClone(snapshot.slots), ts: Date.now(),
+    };
+    void saveArchive();
 }
-function readRecord(key, mode = getActiveMode()) {
-    try {
-        const record = JSON.parse(settings.msgMap?.[key]);
-        if (![2, 3].includes(record.version) || typeof record.source !== 'string') return null;
-        if ((mode === 'minimax_h3_image') !== (record.mode === 'minimax_h3_image')) return null;
-        const tokens = tokenizePlaceholders(record.source);
-        if (record.version === 2) {
-            const values = Array.from(String(record.enhanced || '').matchAll(/\[image:\s*[\s\S]*?\]\s*【提示词】[\s\S]*?【\/提示词】/g), m => m[0]);
-            if (values.length !== tokens.length) return null;
-            record.slots = values.map((enhanced, i) => ({ id: key + '#' + i, enhanced }));
-        }
-        if (!Array.isArray(record.slots) || record.slots.length !== tokens.length || record.slots.some(s => !s || typeof s.id !== 'string')) return null;
-        return record;
-    } catch { return null; }
-}
+
 function cacheReuse(chatId, mode) {
-    const charName = getCharacterName();
-    const source = galleryCacheSource(charName, chatId);
+    const source = galleryCacheSource(chatId);
     if (!source) return null;
-    const galleryUrls = new Set(Object.values(settings.gallery[charName][source])
-        .filter(entry => entry?.kind === 'chat').map(entry => entry.url));
-    if (!galleryUrls.size) return null;
+    const session = sessionData(source);
     let index;
     return snapshot => {
         const job = scanCoordinator.jobs.get(snapshot.key);
-        const canReuse = slot => !slot.skipSharedCache && !imgCacheGetById(slot.id) && !isImagePending(slot.id);
+        const canReuse = slot => !slot.skipSharedCache && !imgCacheGetById(slot.id, chatId) && !isImagePending(slot.id);
         if (job && ['queued', 'running'].includes(job.state)) return false;
         if (!snapshot.slots.some(canReuse)) return false;
         if (!index) {
-            const keys = Object.keys(settings.msgMap || {}).filter(key => cachedChatKey(key) === source);
-            const records = keys.map(key => settings.msgMap[key]);
+            const records = Object.values(session.revisions);
+            const urls = Object.keys(session.gallery);
             const memo = galleryIndexMemo;
-            if (memo?.charName === charName && memo.source === source && memo.mode === mode &&
-                galleryUrls.size === memo.urls.size && [...galleryUrls].every(url => memo.urls.has(url)) &&
-                records.length === memo.records.length && records.every((record, i) => record === memo.records[i] && keys[i] === memo.keys[i])) {
-                index = memo.index;
-            } else {
-                index = indexGalleryRecords(keys, source, mode, galleryUrls);
-                galleryIndexMemo = { charName, source, mode, urls: galleryUrls, records, keys, index };
+            if (memo?.source === source && memo.mode === mode && memo.images === session.images && urls.length === memo.urls.size &&
+                urls.every(url => memo.urls.has(url)) && records.length === memo.records.length &&
+                records.every((record, i) => record === memo.records[i])) index = memo.index;
+            else {
+                index = indexGalleryRecords(records, session, mode);
+                galleryIndexMemo = { source, mode, index, records, images: session.images, urls: new Set(urls) };
             }
         }
         let reused = false;
@@ -230,25 +214,22 @@ function cacheReuse(chatId, mode) {
             if (!hit) continue;
             slot.enhanced = hit.enhanced;
             snapshot.results.set(token.index, { ok: true, enhanced: hit.enhanced });
-            imgCacheSetById(slot.id, hit.url);
-            galleryAdd(hit.url, { charName, chatKey: chatId, kind: 'chat', scene: token.content.split('|')[0] });
+            galleryAdd(hit.url, { chatKey: chatId, blockId: slot.id, scene: token.content.split('|')[0] });
             reused = true;
         }
-        if (reused) { saveImageRevision(snapshot); saveSettings(); }
+        if (reused) saveImageRevision(snapshot);
         return reused;
     };
 }
 
-function indexGalleryRecords(keys, source, mode, galleryUrls) {
+function indexGalleryRecords(records, session, mode) {
     const index = new Map();
-    const newestFirst = keys.slice().sort((a, b) => (settings.msgMapTs?.[b] || 0) - (settings.msgMapTs?.[a] || 0));
-    for (const key of newestFirst) {
-        const record = readRecord(key, mode);
-        if (!record || record.mode !== mode || (record.chatId && record.chatId !== source)) continue;
+    for (const record of records.slice().sort((a, b) => b.ts - a.ts)) {
         for (const token of markerOccurrences(record.source)) {
             const slot = record.slots[token.index];
-            const url = slot.enhanced && imgCacheGetById(slot.id);
-            if (!url || !galleryUrls.has(url) || (slot.mode && slot.mode !== mode)) continue;
+            if (!slot?.enhanced || (slot.mode || record.mode) !== mode) continue;
+            const url = session.images[slot.id];
+            if (!url || session.gallery[url]?.kind !== 'chat') continue;
             if (!index.has(token.occurrence)) index.set(token.occurrence, { enhanced: slot.enhanced, url });
         }
     }
@@ -275,36 +256,46 @@ function prepareRevision(snapshot) {
         snapshot.slots = previous.slots; snapshot.results = previous.results;
         revisions.set(owner, snapshot); return snapshot;
     }
-    previous = readRecord(snapshot.key, snapshot.mode) || previous;
-    if (!previous) {
-        const prefix = snapshot.chatId + '_' + snapshot.messageId + '_v2_' + snapshot.swipe + '_';
-        const keys = Object.keys(settings.msgMap || {}).filter(k => k.startsWith(prefix))
-            .sort((a, b) => (settings.msgMapTs?.[b] || 0) - (settings.msgMapTs?.[a] || 0));
-        for (const key of keys) { previous = readRecord(key, snapshot.mode); if (previous) break; }
-    }
+    const saved = sessionData(snapshot.chatId)?.revisions || {};
+    previous = saved[snapshot.key] || previous;
+    if (!previous) previous = Object.values(saved).filter(record => record.messageId === snapshot.messageId &&
+        record.swipe === snapshot.swipe && record.mode === snapshot.mode).sort((a, b) => b.ts - a.ts)[0];
     snapshot.slots = reconcileSlots(snapshot.source, snapshot.key, previous);
     for (const [i, slot] of snapshot.slots.entries()) if (slot.enhanced) snapshot.results.set(i, { ok: true, enhanced: slot.enhanced });
     revisions.delete(owner); revisions.set(owner, snapshot);
     if (revisions.size > 200) revisions.delete(revisions.keys().next().value);
     return snapshot;
 }
-export function getMsgFingerprint(text) { return fingerprint(text); }
-export function getMsgKey(chid, mesid, text, swipe = 0, mode = getActiveMode()) {
-    // Preserve existing cache IDs; the new mode gets its own prompt/image lineage.
-    return messageKey(chid, mesid, text, swipe) + (mode === 'minimax_h3_image' ? '_minimax_h3_image' : '');
+export function getMsgKey(chatId, messageId, source, swipe = 0, mode = getActiveMode()) {
+    return messageKey(chatId, messageId, source, swipe, mode);
 }
-export function findBestCachedEntry(chid, mesid, text, swipe = 0) {
-    const key = getMsgKey(chid, mesid, text, swipe), record = readRecord(key);
-    if (record?.source === text && record.swipe === swipe)
-        return { key, value: record.enhanced, slots: record.slots, complete: record.slots.every(s => s.enhanced) };
-    return null;
+
+function findBestCachedEntry(chatId, messageId, source, swipe, mode = getActiveMode()) {
+    const key = getMsgKey(chatId, messageId, source, swipe, mode);
+    const record = sessionData(chatId)?.revisions[key];
+    if (record?.source !== source) return null;
+    return { ...record, key, complete: record.slots.every(slot => slot.enhanced) };
 }
-export function findBestCached(chid, mesid, text, swipe = 0) { return findBestCachedEntry(chid, mesid, text, swipe)?.value || null; }
-export function clearMsgCache(chid, mesid) {
-    const prefix = chid + '_' + mesid + '_';
-    for (const key of Object.keys(settings.msgMap || {})) if (key.startsWith(prefix)) delete settings.msgMap[key];
-    imgStoreDeletePrefix(prefix);
-    for (const [owner, revision] of revisions) if (revision.chatId === chid && revision.messageId === String(mesid)) revisions.delete(owner);
+
+export function clearMsgCache(chatId, messageId) {
+    const session = sessionData(chatId);
+    const id = String(messageId);
+    if (session) {
+        const removed = new Set();
+        for (const [key, revision] of Object.entries(session.revisions)) {
+            if (revision.messageId !== id) continue;
+            for (const slot of revision.slots) removed.add(slot.id);
+            delete session.revisions[key];
+        }
+        for (const revision of Object.values(session.revisions)) for (const slot of revision.slots) removed.delete(slot.id);
+        if (removed.size) {
+            const images = { ...session.images };
+            for (const slotId of removed) delete images[slotId];
+            session.images = images;
+        }
+        if (removed.size) void saveArchive();
+    }
+    for (const [owner, revision] of revisions) if (revision.chatId === chatId && revision.messageId === id) revisions.delete(owner);
 }
 export function scanAllMsgs() {
     if (!active || settings.pluginOn === false || generationBusy()) return;
@@ -317,14 +308,17 @@ export function scanAllMsgs() {
         const cached = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
         const revision = cached || (reuse && tokenizePlaceholders(snapshot.source).length) ? prepareRevision(snapshot) : null;
         const reused = revision && reuse?.(revision);
-        if (cached || reused) renderSnapshot(revision, cached?.value, Number(id) === latest, Number(id) !== latest);
+        if (cached || reused) renderSnapshot(revision, null, Number(id) === latest, Number(id) !== latest);
         else if (Number(id) !== latest) {
-            // Model selection changes new work, not the visibility of old images.
-            // Restore historical results from the other mode without auto-generating.
-            const otherMode = snapshot.mode === 'minimax_h3_image' ? 'zit' : 'minimax_h3_image';
-            const key = getMsgKey(snapshot.chatId, id, snapshot.source, snapshot.swipe, otherMode), record = readRecord(key, otherMode);
-            if (record?.source === snapshot.source && record.swipe === snapshot.swipe)
-                renderSnapshot({ ...snapshot, key, mode: record.mode || otherMode, slots: record.slots }, record.enhanced, false, true);
+            const saved = sessionData(snapshot.chatId)?.revisions || {};
+            const historical = Object.entries(saved)
+                .filter(([, record]) => record.messageId === snapshot.messageId && record.swipe === snapshot.swipe &&
+                    record.source === snapshot.source && record.slots.some(slot => slot.enhanced))
+                .sort(([, a], [, b]) => b.ts - a.ts)[0];
+            if (historical) {
+                const [key, record] = historical;
+                renderSnapshot({ ...snapshot, key, mode: record.mode, slots: record.slots }, null, false, true);
+            }
         }
     }
 }
@@ -348,7 +342,7 @@ function scheduleMessage(id, immediate = false) {
         return;
     }
     const cache = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
-    if (cache?.complete) { renderSnapshot(prepareRevision(snapshot), cache.value); return; }
+    if (cache?.complete) { renderSnapshot(prepareRevision(snapshot), null); return; }
     if (!settings.cWf || !settings.auxUrl || !settings.auxModel) return;
     const observation = observations.get(snapshot.owner);
     if (!observation || observation.key !== snapshot.key) {
@@ -409,7 +403,7 @@ export function startPolling() {
     if (chatRoot) { observer.observe(chatRoot, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] }); chatRoot.addEventListener('load', onFrameLoad, true); }
     jQuery(document).off('click.slScan', '.sl_scan_retry').on('click.slScan', '.sl_scan_retry', function () { runAuxImageScan(jQuery(this).closest('.mes_text')); });
     fallback = setInterval(() => requestCheck(), 3000); requestCheck(500);
-    slLog('扫描器 v2：完整回复版本 + 生成生命周期 + 独立图位');
+    slLog('占位符扫描器已启动');
 }
 function onFrameLoad() { requestCheck(200); }
 export function stopPolling() {
@@ -417,7 +411,6 @@ export function stopPolling() {
     document.querySelector('#chat')?.removeEventListener('load', onFrameLoad, true);
     handlers.splice(0).forEach(off => off()); observations.clear(); revisions.clear(); scanCoordinator.clear(); jQuery(document).off('click.slScan');
 }
-export function hasCastCache() { const pf = getProfiles(); return !!(pf && Object.keys(pf.root[pf.charName].cast || {}).length); }
 export function getScannerStatus() {
     if (settings.pluginOn === false) return 'off';
     if (generationBusy()) return 'waiting_end';

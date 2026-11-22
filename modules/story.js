@@ -1,16 +1,14 @@
 // ── SillyImage Lab 剧情库（长期记忆：存档 + 标签 + 滚动总结 + 归档） ──
-// 设计文档：sillycat-story-lib-design.md v0.3
-// 存储：data/<user>/user/files/sillyCAT_story_<hash>_<seq>.json（ST files API，扁平文件名）
+// 设计文档：sillycat-story-lib-design.md // 存储：data/<user>/user/files/sillyCAT_story_<hash>_<seq>.json（ST files API，扁平文件名）
 // 说明：files API 的 validateAssetFileName 仅允许 [a-zA-Z0-9_\-.]，不支持子目录，故用扁平前缀命名。
 import { slLog, slErr } from './log.js';
 import { settings, getSTHeaders } from './settings.js';
-import { getChatId, getProfiles } from './pipeline/profile.js';
+import { currentSession } from './archive.js';
+import { rosterEntries } from './roster.js';
 import { auxApiCall } from './pipeline/api.js';
 import { isPromptsLoaded, getPrompt } from '../prompts/loader.js';
 
 // ── 常量 ──
-var SLICE_SIZE = 100;        // 每条分片最多 100 条
-var MAX_BODY = 600;          // 单条正文上限（与历史正文一致）
 var MAX_PROBE = 300;         // 分片探测上限
 var CACHE_TTL = 30000;       // 最后分片内存缓存 30s
 var MAX_COVERED = 500;       // coveredMesids 保留上限
@@ -19,8 +17,6 @@ var MAX_COVERED = 500;       // coveredMesids 保留上限
 var _cache = { lastSeq: 0, data: null, ts: 0, initialized: false };
 var _coveredMesids = [];
 var _lastSummary = null;
-var _writeChain = Promise.resolve();
-var _summarizing = false;
 
 // 总结模板（loader 加载 prompts/pipeline/summary.txt 优先，加载失败用此兜底）
 var SUMMARIZE_FALLBACK = [
@@ -50,7 +46,9 @@ function hash16(str) {
     return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
 }
 function storyKey() {
-    try { return hash16(getChatId()); } catch (e) { return 'unknown'; }
+    const { card, file } = currentSession();
+    const clean = value => value.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '');
+    return hash16(clean(card.name) + '_' + clean(file));
 }
 function sliceFileName(seq) { return 'sillyCAT_story_' + storyKey() + '_' + seq + '.json'; }
 function summaryFileName() { return 'sillyCAT_story_' + storyKey() + '_summary.json'; }
@@ -128,53 +126,9 @@ async function readAllEntries() {
 }
 
 // ── 追加条目（写队列串行，不阻塞主流程） ──
-export function appendEntry(entry) {
-    if (settings.storyLib === false) return;
-    if (!entry || !entry.body) return;
-    var body = String(entry.body).slice(0, MAX_BODY);
-    _writeChain = _writeChain.then(async function () {
-        try {
-            await ensureInit();
-            var seq = _cache.lastSeq || 1;
-            var slice = await readSlice(seq);
-            var list = (slice && Array.isArray(slice.entries)) ? slice.entries : [];
-            // 去重：同 round / 同 mesid / 已被总结归档
-            for (var i = 0; i < list.length; i++) if (list[i].round === entry.round || (entry.mesid && list[i].mesid === entry.mesid)) return;
-            if (entry.mesid && _coveredMesids.indexOf(entry.mesid) >= 0) return;
-            list.push({ mesid: entry.mesid || '', round: entry.round || 0, time: Date.now(), scene: entry.scene || '', tags: Array.isArray(entry.tags) ? entry.tags.slice(0, 5) : [], body: body });
-            if (list.length > SLICE_SIZE) {
-                seq = seq + 1;
-                _cache.lastSeq = seq;
-                await writeFile(sliceFileName(seq), { chatId: getChatId(), slice: seq, updatedAt: Date.now(), entries: [list[list.length - 1]] });
-            } else {
-                await writeFile(sliceFileName(seq), { chatId: getChatId(), slice: seq, updatedAt: Date.now(), entries: list });
-            }
-            _cache.data = null; _cache.ts = 0;
-            slLog('剧情库: 已存 第' + (entry.round || 0) + '轮 (' + body.length + '字, 片#' + seq + ')');
-        } catch (e) { slLog('剧情库写入失败: ' + e.message); }
-    });
-}
-
-// ── 滚动总结 ──
-export function maybeSummarize() {
-    if (settings.storyLib === false || _summarizing) return;
-    try {
-        var prof = getProfiles();
-        if (!prof || !prof.chat) return;
-        var currentRound = (prof.chat._round || 0) + 1;
-        var since = _lastSummary ? (_lastSummary.toRound || 0) : 0;
-        var gap = parseInt(settings.summaryGap, 10) || 15;
-        if (currentRound - since < gap) return;
-        _summarizing = true;
-        summarize().catch(function (e) { slLog('剧情总结失败: ' + e.message); })
-            .then(function () { _summarizing = false; });
-    } catch (e) { slLog('剧情总结触发异常: ' + e.message); }
-}
-
 export async function summarize(force) {
     await ensureInit();
-    var prof = getProfiles();
-    if (!prof || !prof.chat) return false;
+    if (!currentSession().key) return false;
     var since = _lastSummary ? (_lastSummary.toRound || 0) : 0;
     var all = await readAllEntries();
     var pending = all.filter(function (en) { return en.round > since; });
@@ -193,13 +147,8 @@ export async function summarize(force) {
     // 剧情永久丢失（A3）。
     var recent = pending.slice(0, 15);
     input.push('【新增剧情】\n' + recent.map(function (en) { return '【第' + en.round + '轮】' + en.body; }).join('\n\n'));
-    var npcNames = Object.keys(prof.chat.npcs || {});
-    if (npcNames.length) {
-        input.push('【NPC名单】（必须逐人交代）\n' + npcNames.map(function (n) {
-            var x = prof.chat.npcs[n];
-            return n + (x && x.identity ? '[' + x.identity + ']' : '') + (x && x.sleep ? '(休眠)' : '');
-        }).join('、'));
-    }
+    const people = rosterEntries();
+    if (people.length) input.push('【人物名单】' + people.map(person => person.name).join('、'));
     var sysPrompt = (isPromptsLoaded() && getPrompt('pipeline/summary.txt')) || SUMMARIZE_FALLBACK;
     var output = await auxApiCall(sysPrompt, input.join('\n\n'), 2048, 0.3);
     if (!output) { slLog('剧情总结: LLM 返回空'); return false; }
@@ -231,29 +180,6 @@ export async function summarize(force) {
 }
 
 // ── 检索：按标签找早期相关剧情（v2） ──
-export async function searchByTags(tags, limit) {
-    if (!tags || !tags.length) return [];
-    try {
-        await ensureInit();
-        var all = await readAllEntries();
-        var hits = [];
-        for (var i = 0; i < all.length; i++) {
-            var en = all[i], et = en.tags || [];
-            for (var j = 0; j < tags.length; j++) {
-                if (et.indexOf(tags[j]) >= 0) { hits.push(en); break; }
-            }
-        }
-        hits.sort(function (a, b) { return (b.round || 0) - (a.round || 0); });
-        return hits.slice(0, limit || 2);
-    } catch (e) { slLog('剧情库检索失败: ' + e.message); return []; }
-}
-
-export async function getSummary() {
-    try { await ensureInit(); return _lastSummary ? (_lastSummary.summary || '') : ''; }
-    catch (e) { return ''; }
-}
-
-// ── UI 概览 ──
 export async function getOverview() {
     try {
         await ensureInit();

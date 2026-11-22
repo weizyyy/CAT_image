@@ -38,8 +38,8 @@ export function fingerprint(source) {
     return text.length + '-' + (a >>> 0).toString(36) + '-' + (b >>> 0).toString(36);
 }
 
-export function messageKey(chatId, messageId, source, swipe = 0) {
-    return chatId + '_' + messageId + '_v2_' + swipe + '_' + fingerprint(source);
+export function messageKey(chatId, messageId, source, swipe, mode) {
+    return JSON.stringify([chatId, String(messageId), swipe, mode, fingerprint(source)]);
 }
 
 export function replaceTokens(source, tokens, values) {

@@ -4,9 +4,8 @@ import { mountSlots, updateSlots } from './dom-placeholders.js';
 import { slLog, slErr } from './log.js';
 import { settings, COLORS, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
 
-import { imgCacheGet, imgCacheGetById } from './cache.js';
-import { extractImagePrompt, cleanPromptForMode, imgBlockHead } from './text-utils.js';
-import { resolveFacePrompt } from './pipeline/profile.js';
+import { imgCacheGetById } from './cache.js';
+import { extractImagePrompt, cleanPromptForMode } from './text-utils.js';
 
 const imageActionStyle = 'display:inline-block;appearance:none;border:0;box-shadow:none;vertical-align:middle;padding:5px 14px;margin:4px 0 0;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px;line-height:inherit;font-weight:600;';
 
@@ -29,12 +28,8 @@ export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
         '</div>';
 }
 
-// ── 已移除（v1.2）：renderEnhancedBodyHtml / renderBodyEnhanced / renderEnhanced ──
-// 这三个是「画师模式」专用的标记式(正文###…结尾###)渲染器，全量重建消息 HTML。
-// 导演模式只需原地替换 [img:] 占位符 → 统一走 renderEnhancedLite()，不再重建消息。
-
 // ── 绑定生图按钮（事件委托：绑定一次永久有效，不受 DOM 重建影响） ──
-// [v1.1.2 前端卡桥] 图卡可能落在酒馆助手的 iframe 文档里（重前端卡），
+// [前端卡桥] 图卡可能落在酒馆助手的 iframe 文档里（重前端卡），
 // 顶层 document 的委托收不到那里的 click → 按文档分别绑定。
 const reanalysisHandlers = new WeakMap();
 
@@ -69,18 +64,6 @@ var _enqueueGen = null;
 export function setEnqueueGen(fn) { _enqueueGen = fn; }
 function enqueueGen(btn, prompt, options) { if (_enqueueGen) _enqueueGen(btn, prompt, options); else { slErr('enqueueGen 未初始化'); } }
 
-// ── 恢复图片块（编辑后） ──
-var _getChatId, _getSTContext, _restoringBlocks = false; // 从外部注入的函数
-export function setRestoreDeps(getChatIdFn, getContextFn) { _getChatId = getChatIdFn; _getSTContext = getContextFn; }
-
-export function restoreImageBlocks() {
-    // Defer module lookup to avoid a scanner/render initialization cycle.
-    return import('./scanner.js').then(m => m.scanAllMsgs()).catch(e => slErr('恢复图片失败: ' + e.message));
-}
-
-// ══════════════════════════════
-// ── v2.4 轻量渲染（酒馆AI模式）：只替换 [img:…] 占位符为图卡，正文/状态栏原文 HTML 全部保留 ──
-// 修复：旧 renderEnhanced 全量重建（escape+<br>）→ 文字挤成一坨、原文 HTML 结构（状态栏等）丢失
 export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex = 0, blockIds, mode = getActiveMode()) {
     var blocks = [];
     if (!enhancedText) return blocks;
@@ -91,14 +74,13 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
         var scene = (m[1] || '').trim();
         // [Fix] 用正则匹配位置定位提示词（同场景多图不共用第一块，B4）
         var promptContent = extractImagePrompt(enhancedText, m[0], m.index) || '';
-        // [Fix] 提示词只用【提示词】块内容（无则回退场景）：导演模式场景是主 LLM 写的长叙事
+        // [Fix] 提示词只用【提示词】块内容（无则回退场景）：占位符配图场景是主 LLM 写的长叙事
         // （人物动作/表情/衣着），拼进提示词会把剧情文字+角色名喂给生图模型
-        var fullPrompt = resolveFacePrompt(promptContent || scene);
+        var fullPrompt = promptContent || scene;
         if (isEnglishMode(mode)) { var _c = cleanPromptForMode(fullPrompt, mode); if (_c) fullPrompt = _c; }
-        // [Fix] 旧缓存 key 兼容（644d40c 前缓存 key=scene+', '+prompt），否则刷新后需重新生成
         var bid = blockIds?.[blockIdx] || (blockKey ? blockKey + '#' + blockIdx : '');
         blockIdx++;
-        blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, (bid ? imgCacheGetById(bid) : imgCacheGet(fullPrompt)), bid, mode) });
+        blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, imgCacheGetById(bid), bid, mode) });
     }
     return blocks;
 }

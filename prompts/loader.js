@@ -6,10 +6,8 @@ var PROMPTS_LOADED = false;
 
 export async function loadPrompts(baseUrl) {
     var files = [
-        'static-profile/system.txt',
         'roster/system.txt',
         'atomic-vocab.txt',
-        'ratio-to-atom.txt',
         'wardrobe-vocab.txt',
         'wardrobe-expand.txt',
         'pipeline/zit-overlay.txt',
@@ -21,7 +19,7 @@ export async function loadPrompts(baseUrl) {
         'pipeline/nsfw-overlay.txt',
         'pipeline/summary.txt',
         'main-llm-instruction.txt',
-        // v1.27.0 身份/拒绝对抗层（分层 system 第 0 条，抢最前）
+        // 身份/拒绝对抗层（分层 system 第 0 条，抢最前）
         'purge/inject.txt',
         'purge/refusal-hardening.txt',
     ];

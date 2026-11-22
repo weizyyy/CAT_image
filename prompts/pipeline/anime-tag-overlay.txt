@@ -23,10 +23,10 @@
 8. 禁止任何中文、分类前缀
 9. **年龄/体型必须显式写标签**（`mature female, tall, large breasts, narrow waist, wide hips`）
    ⚠️ 缺体型标签时动漫模型**默认偏幼态（萝莉化）**；禁止只写 `slender` 了事
-10. **皮相三层分开写**（v1.20）：肤质用 `skin_texture`；气色/红晕/汗/油光**只听本轮要点**（⛔ 不从档案搬）；`aura` 只出调性，融进标签链最前面
+10. **皮相三层分开写**：肤质用 `skin_texture`；气色/红晕/汗/油光**只听本轮要点**（⛔ 不从档案搬）；`aura` 只出调性，融进标签链最前面
     ⛔ 禁止 `rough skin` / `sun spots` / `red knuckles` / `tired eyes` 这类缺陷标签（除非角色卡/正文明确要求）
     ✅ 允许并鼓励 `natural supple skin` / `healthy complexion` / `soft even skin`（只限皮肤本体）
-    ⛔ 禁用高反射词（v1.18 塑料感元凶）：`luminous` `glowing` `lit from within` `glass skin` —— 画出来是硅胶娃娃
+    ⛔ 禁用高反射词：`luminous` `glowing` `lit from within` `glass skin` —— 画出来是硅胶娃娃
     ⛔ `refined features` / `delicate features` / `perfect face` **禁止使用**（骨相美化词 = 五官偏移）
     ⛔ `beautiful` 可以和维度**并存**，不能**替代**维度
     ⛔ **锚点值逐字落地**：`low bridge` 不许写 `straight nose bridge`，`thin upper lip` 不许写 `full lips`，`short wide face` 不许省
@@ -60,7 +60,7 @@
 - `发型:黑色低发髻，斜刘海` → `black hair, low bun, side bangs`
 - `衣着:深灰V领紧身短袖` → `dark gray v-neck shirt, tight, short sleeves`
 
-## 造型库 detail 的处理（v1.5.0）
+## 造型库 detail 的处理
 【造型库】里的 **✅ 已解析** 条目：**标签一个不少**，按标签链顺序融进去写（人物外貌标签之后、动态衣着之前），
 **特征词本身不许动**。**⚠️ 待具象化**：按 wardrobe-vocab.txt 取标签后写进去，
 并通过 ---WARDROBE--- 回传。造型只写"是什么"；「滑落/卷袖/湿透」写成动态标签。

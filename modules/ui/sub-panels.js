@@ -1,7 +1,7 @@
 // ── SillyImage Lab 子面板（AI 助理 / ComfyUI / 高级选项） ──
 import { CAT } from './theme.js';
 import { toast, esc, escAttr, sbtn, fi } from './utils.js';
-import { settings, saveSettings, getSTHeaders } from '../settings.js';
+import { settings, getDefaults, saveSettings, getSTHeaders } from '../settings.js';
 import { STYLE_PRESETS } from '../comfyui.js';
 import { pushPage } from './panel.js';  // 分层导航（仅函数体内使用，运行时安全）
 var SUB_TITLES = { aux: 'AI 助理', comfy: 'ComfyUI 与工作流', advanced: '高级选项' };
@@ -12,18 +12,15 @@ export function closeSubPanel(sub) { if (sub && sub.length) sub.remove(); }
 export function fillSubPanel(type, body) {
   var f = fi();
   if (type === "aux") {
-    var h = '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">🧠 AI 提供商</div><select id="sl_aux_provider" style="' + f + '"><option value="deepseek"' + (settings.auxProvider === "deepseek" ? " selected" : "") + '>DeepSeek</option><option value="custom"' + (settings.auxProvider === "custom" ? " selected" : "") + ">自定义</option></select></div>";
+    var h = '';
     h += '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">📍 API 地址</div><input id="sl_aux_url" type="text" value="' + escAttr(settings.auxUrl || "") + '" style="' + f + '"></div>';
     h += '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">🔑 API Key</div><input id="sl_aux_key" type="password" value="' + escAttr(settings.auxKey || "") + '" style="' + f + '"></div>';
     h += '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">🧠 聊天分析模型</div><input id="sl_aux_model" type="text" value="' + escAttr(settings.auxModel || "") + '" style="' + f + '"></div>';
-    h += '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">👤 角色卡分析模型</div><input id="sl_profile_model" type="text" value="' + escAttr(settings.profileModel || "") + '" style="' + f + '"></div>';
     h += '<div style="display:flex;gap:8px;align-items:center;"><button id="sl_test_aux" style="' + sbtn(CAT.accent) + '">🐾 测试连接</button><span id="sl_aux_status" style="font-size:11px;color:' + CAT.sub + ';"></span></div>';
     body.html(h);
-    jQuery("#sl_aux_provider").on("change", function () { settings.auxProvider = jQuery(this).val(); saveSettings(); });
     jQuery("#sl_aux_url").on("change input", function () { settings.auxUrl = jQuery(this).val(); saveSettings(); });
     jQuery("#sl_aux_key").on("change input", function () { settings.auxKey = jQuery(this).val(); saveSettings(); });
     jQuery("#sl_aux_model").on("change input", function () { settings.auxModel = jQuery(this).val(); saveSettings(); });
-    jQuery("#sl_profile_model").on("change input", function () { settings.profileModel = jQuery(this).val(); saveSettings(); });
     jQuery("#sl_test_aux").on("click", async function () { var b = jQuery(this), s = jQuery("#sl_aux_status"); b.prop("disabled", true).text("测试中..."); try { var baseUrl = (jQuery("#sl_aux_url").val() || "").replace(/\/+$/, ""), url = /\/chat\/completions$/.test(baseUrl) ? baseUrl : baseUrl + "/chat/completions", key = jQuery("#sl_aux_key").val(), hd = { "Content-Type": "application/json" }; if (key) hd["Authorization"] = "Bearer " + key; var r = await fetch(url, { method: "POST", headers: hd, body: JSON.stringify({ model: jQuery("#sl_aux_model").val() || "default", messages: [{ role: "user", content: "hi" }], max_tokens: 3, stream: false }) }); if (r.ok) { s.css({ color: CAT.green }).text("连接成功喵~ ✨"); toast("success", "AI助理连接成功~"); } else { var t = await r.text().catch(function () { return ""; }); s.css({ color: CAT.red }).text("HTTP " + r.status); toast("error", "连接失败: " + r.status); } } catch (e) { s.css({ color: CAT.red }).text(e.message); toast("error", "连不上喵…"); } b.prop("disabled", false).text("🔌 测试连接"); });
   } else if (type === "comfy") {
     var h = '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">🎨 ComfyUI 地址</div><input id="sl_comfy_url" type="text" value="' + escAttr(settings.cUrl || "http://localhost:8181") + '" style="' + f + '"></div>';
@@ -170,20 +167,18 @@ export function fillSubPanel(type, body) {
     h += '<div style="background:' + CAT.card + ';border-radius:10px;padding:12px;border:1px solid ' + CAT.line + ';">';
     h += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="sl_debug"' + (settings.debugMode ? " checked" : "") + '><span style="font-size:12px;color:' + CAT.text + ';">🐛 Debug 模式</span></label></div>';
     h += '<div style="background:' + CAT.card + ';border-radius:10px;padding:12px;margin-top:8px;border:1px solid ' + CAT.line + ';">';
-    h += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="sl_story_lib"' + (settings.storyLib !== false ? " checked" : "") + '><span style="font-size:12px;color:' + CAT.text + ';">📚 剧情存档（长期记忆：每轮正文+标签存到 user\\files\\，早期条目滚动总结后归档）</span></label>';
-    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;"><div><div style="font-size:10px;color:' + CAT.sub + ';margin-bottom:2px;">🧠 总结触发条目数</div><input id="sl_summary_threshold" type="number" min="10" max="200" value="' + (settings.summaryThreshold != null ? settings.summaryThreshold : 40) + '" style="' + f + '"></div><div><div style="font-size:10px;color:' + CAT.sub + ';margin-bottom:2px;">⏱ 总结最小间隔(轮)</div><input id="sl_summary_gap" type="number" min="5" max="100" value="' + (settings.summaryGap != null ? settings.summaryGap : 15) + '" style="' + f + '"></div></div></div>';
-    h += '<div style="background:' + CAT.card + ';border-radius:10px;padding:12px;margin-top:8px;border:1px solid ' + CAT.line + ';">';
     h += '<div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">📜 历史正文轮数（多轮记忆：每次分析额外重放最近 N 轮剧情原文，0=关闭，越大越费token）</div><input id="sl_history_rounds" type="number" min="0" max="10" value="' + (settings.historyRounds != null ? settings.historyRounds : 5) + '" style="' + f + '"></div>';
     h += '<div style="background:' + CAT.card + ';border-radius:10px;padding:12px;margin-top:8px;border:1px solid ' + CAT.line + ';">';
-    h += '<button id="sl_btn_reset" style="width:100%;' + sbtn(CAT.red) + '">🧹 重置插件（清空档案/缓存/设置）</button></div>';
+    h += '<button id="sl_btn_reset" style="width:100%;' + sbtn(CAT.red) + '">重置插件偏好</button></div>';
     body.html(h);
     jQuery("#sl_nsfw").on("change", function () { settings.nsfwEnhance = jQuery(this).is(":checked"); saveSettings(); });
     jQuery("input[name=sl_story]").on("change", function () { settings.storyMode = jQuery(this).val(); saveSettings(); });
     jQuery("#sl_debug").on("change", function () { settings.debugMode = jQuery(this).is(":checked"); saveSettings(); });
-    jQuery("#sl_story_lib").on("change", function () { settings.storyLib = jQuery(this).is(":checked"); saveSettings(); });
-    jQuery("#sl_summary_threshold").on("change input", function () { var v = parseInt(jQuery(this).val(), 10); settings.summaryThreshold = isNaN(v) ? 40 : Math.max(10, Math.min(200, v)); saveSettings(); });
-    jQuery("#sl_summary_gap").on("change input", function () { var v = parseInt(jQuery(this).val(), 10); settings.summaryGap = isNaN(v) ? 15 : Math.max(5, Math.min(100, v)); saveSettings(); });
     jQuery("#sl_history_rounds").on("change input", function () { var v = parseInt(jQuery(this).val(), 10); settings.historyRounds = isNaN(v) ? 0 : Math.max(0, Math.min(10, v)); saveSettings(); });
-    jQuery("#sl_btn_reset").on("click", function () { if (!confirm('⚠ 确定重置插件？\n\n会清除：角色卡档案 / 消息与图片缓存 / 插件设置（酒馆和生成图不受影响）')) return; try { var ks = Object.keys(localStorage); for (var i = 0; i < ks.length; i++) { if (ks[i].indexOf('sillab') === 0 || ks[i].indexOf('slimg') === 0 || ks[i].indexOf('sl_') === 0) localStorage.removeItem(ks[i]); } toast('success', '重置完成，页面即将刷新'); setTimeout(function () { location.reload(); }, 1200); } catch (e) { toast('error', '重置失败'); } });
+    jQuery("#sl_btn_reset").on("click", function () {
+      if (!confirm('恢复插件默认偏好？连接配置和本机工作流列表也会恢复默认值。')) return;
+      Object.assign(settings, getDefaults()); saveSettings();
+      toast('success', '插件偏好已恢复，重新打开面板查看');
+    });
   }
 }

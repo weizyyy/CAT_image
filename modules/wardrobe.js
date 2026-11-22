@@ -1,4 +1,4 @@
-// ── SillyImage Lab 造型库（v1.5.0）──
+// ── SillyImage Lab 造型库──
 // 作用：服装/发型/鞋袜/配饰/妆容 —— 主模型写 key，插件具象化一次并存档，之后原样复用。
 // 为什么需要：这些维度原先写在【要点】里，是自由文本，辅助AI 每轮都可能换一种说法 →
 //             同一件衣服画出两个样。存档后每轮原样复用即可消除漂移。
@@ -12,7 +12,7 @@
 
 import { slLog } from './log.js';
 import { settings } from './settings.js';
-import { getCharacterName, getChatId } from './pipeline/profile.js';
+import { currentSession, sessionData, cardSessions } from './archive.js';
 // 槽位表与造型段解析放在 text-utils（零依赖、可直接单测），这里复用
 import { WARDROBE_SLOTS, normalizeSlot, parseStyleSegment } from './text-utils.js';
 export { WARDROBE_SLOTS, normalizeSlot, parseStyleSegment };
@@ -64,16 +64,10 @@ export function matchEntry(allKeys, query) {
 // ── 存档层 ──
 
 // 确保当前 角色卡 × 聊天 的造型库存在
-export function ensureWardrobe() {
-    try {
-        var charName = getCharacterName();
-        if (!charName) return null;
-        var chatId = getChatId();
-        if (!settings.wardrobe) settings.wardrobe = {};
-        if (!settings.wardrobe[charName]) settings.wardrobe[charName] = {};
-        if (!settings.wardrobe[charName][chatId]) settings.wardrobe[charName][chatId] = {};
-        return { charName: charName, chatId: chatId, list: settings.wardrobe[charName][chatId] };
-    } catch (e) { return null; }
+function ensureWardrobe() {
+    const { key: chatId, card } = currentSession();
+    const session = sessionData(chatId, true);
+    return session && { cardId: card.id, chatId, list: session.wardrobe };
 }
 
 // 来源优先级：expanded(辅助AI具象化) > anchor(主模型原文)
@@ -145,7 +139,7 @@ export function upsertEntry(slot, key, detail, src) {
 }
 
 // 解析一批造型段 → { resolved:[{slot,key,detail,level}], pending:[{slot,key}], unmatched:[] }
-// v1.21 跨聊天兜底：造型库仍按聊天存（换聊天换衣柜），但**同一张卡在别的聊天里已经具象化过的同一套造型**可以直接复用。
+// 跨聊天兜底：造型库仍按聊天存（换聊天换衣柜），但**同一张卡在别的聊天里已经具象化过的同一套造型**可以直接复用。
 //   ① 只做 exact / norm 两级（不做 charset —— 跨聊天用模糊匹配容易把 A 套装认成 B 套装）
 //   ② 命中后把条目复制进当前聊天，之后就是原生命中（下一轮不再依赖兜底）
 //   ③ 多条命中取 ts 最新的那条
@@ -170,12 +164,8 @@ export function resolveSlots(styleGroups) {
         if (!w) return { resolved: [], pending: [] };
         var r = resolveAgainstList(w.list, styleGroups);
         if (r.pending.length) {
-            var _bag = (settings.wardrobe || {})[w.charName] || {};
-            var _others = [];
-            for (var _id in _bag) {
-                if (_id === w.chatId) continue;
-                if (_bag[_id] && Object.keys(_bag[_id]).length) _others.push({ id: _id, list: _bag[_id] });
-            }
+            const _others = cardSessions(w.cardId).filter(([key]) => key !== w.chatId)
+                .map(([id, session]) => ({ id, list: session.wardrobe }));
             if (_others.length) {
                 var _still = [];
                 for (var _pi = 0; _pi < r.pending.length; _pi++) {
@@ -237,12 +227,4 @@ export function wardrobeDataTextFor(styleGroups) {
         }
         return { text: lines.join('\n'), resolved: r.resolved, pending: r.pending };
     } catch (e) { return { text: '', resolved: [], pending: [] }; }
-}
-
-export function clearWardrobeChat(charName, chatId) {
-    try {
-        if (settings.wardrobe && settings.wardrobe[charName] && settings.wardrobe[charName][chatId]) {
-            delete settings.wardrobe[charName][chatId];
-        }
-    } catch (e) {}
 }

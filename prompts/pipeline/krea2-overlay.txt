@@ -86,7 +86,7 @@ Krea 2 是通用基础模型，靠**一段连贯的英文自然语言**理解画
 - 同一个特征跨轮用**同一个词**：这轮 `a narrow waist`，下轮还是 `a narrow waist`——换说法 = 长相漂移。
 - ⛔ 段落里不出现角色名，全部用描述替代。
 
-## 皮相三层分开写（v1.20）
+## 皮相三层分开写
 - **肤质** → 用锚点 `skin_texture` 的值，逐字复用（`soft even skin` / `matte skin with fine pores`）
 - **气色 / 红晕 / 汗 / 油光** → **只听本轮【要点】**，⛔ 不许从档案搬
   （冻进档案 = 每张图都被强制打上腮红）
@@ -99,7 +99,7 @@ Krea 2 是通用基础模型，靠**一段连贯的英文自然语言**理解画
 - ⛔ 锚点值必须逐字落地：`low nose bridge` 不许写 `a straight nose bridge`；
   `thin upper lip` 不许写 `full lips`；`a short wide face` 不许省
 
-## 造型库 detail 的处理（v1.5.0）
+## 造型库 detail 的处理
 【造型库】里 **✅ 已解析** 的 detail：特征词**一个不许少、一个字不许改**，但要**织进句子**，
 ⛔ 不要原样粘贴整串。
 （例：detail `long wavy dark brown hair, side part, loose curls at the ends` →

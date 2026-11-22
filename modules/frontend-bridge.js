@@ -2,7 +2,7 @@
 // No property traps, global first-iframe target, pending-turn overwrite or tail append.
 import { settings, getSTContext, getActiveMode } from './settings.js';
 import { slLog, slErr } from './log.js';
-import { getChatId } from './pipeline/profile.js';
+import { getChatId } from './archive.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
 import { scanCoordinator, generationBusy, reanalyzeSlot, getMsgKey, reuseGalleryImages, saveImageRevision } from './scanner.js';
 import { renderEnhancedLite, extractImgBlocksFromEnhanced, buildImgCard, bindImageButtonsIn } from './render.js';
@@ -166,7 +166,7 @@ function submitRecord(record) {
     });
 }
 function receive(win, raw, capturedChat, callId) {
-    if (!running || settings.feBridge === false || settings.pluginOn === false || getChatId() !== capturedChat) return;
+    if (!capturedChat || !running || settings.feBridge === false || settings.pluginOn === false || getChatId() !== capturedChat) return;
     const text = extractNarrativeText(raw);
     if (!tokenizePlaceholders(text).length) return;
     if (getSTContext()?.chat?.some(message => !message.is_user && extractNarrativeText(message.mes) === text)) return;
@@ -175,7 +175,7 @@ function receive(win, raw, capturedChat, callId) {
     const mode = getActiveMode(), tokens = tokenizePlaceholders(text);
     const id = 'fe-' + globalThis.crypto.randomUUID().replace(/-/g, '');
     const key = getMsgKey(capturedChat, id, text, 0, mode);
-    const record = { key, chatId: capturedChat, callId, mode, win, text, source: text, swipe: 0, results: new Map(), root: null,
+    const record = { key, chatId: capturedChat, messageId: id, callId, mode, win, text, source: text, swipe: 0, results: new Map(), root: null,
         slots: tokens.map(token => ({ id: key + '#' + token.index })) };
     record.autoEligible = settings.autoGen === 1;
     records.set(signature, record);
@@ -233,21 +233,20 @@ export function initFrontendBridge() {
     if (root) observer.observe(root, { childList: true, subtree: true });
     document.addEventListener('load', sweep, true);
     window.SILLAB_FE = { probe: probeFrontendApp, install: installFrontendHook, status: getFeBridgeStatus,
-        test: injectTestCard, testDirector: injectTestDirector };
-    slLog('前端桥 v2：来源窗口绑定 / generate + generateRaw / 独立队列');
+        test: injectTestCard };
+    slLog('前端桥：来源窗口绑定 / generate + generateRaw / 独立队列');
 }
 export function stopFrontendBridge() {
     running = false; clearInterval(timer); clearTimeout(initFrontendBridge._debounce); observer?.disconnect();
     document.removeEventListener('load', sweep, true); hooks.splice(0).forEach(undo => undo()); records.clear(); newestRecord = undefined;
 }
 export function getFeBridgeStatus() {
-    return settings.feBridge === false ? '已关闭' : '前端桥 v2 · 已挂钩 ' + hooks.length + ' 个入口 · 回复 ' + records.size + ' 组';
+    return settings.feBridge === false ? '已关闭' : '前端桥 · 已挂钩 ' + hooks.length + ' 个入口 · 回复 ' + records.size + ' 组';
 }
 export function probeFrontendApp() {
     const report = { running, enabled: settings.feBridge !== false, hooks: hooks.length, records: records.size };
     slLog('前端桥探针: ' + JSON.stringify(report)); return report;
 }
-export function injectTestDirector() { return injectTestCard(); }
 export function injectTestCard() {
     let doc;
     eachWindow(win => { if (win !== window) doc = win.document; });

@@ -1,4 +1,4 @@
-// ── SillyImage Lab v3.1 状态猫（Kawaii 贴纸猫：实心填充 + 腮红 + 大眼高光 + 胡须 + W嘴） ──
+// ── SillyImage Lab 状态猫（Kawaii 贴纸猫：实心填充 + 腮红 + 大眼高光 + 胡须 + W嘴） ──
 // 状态：idle（打盹zzz）/ queuing（弯眼开心）/ busy（专注+爪影）/ error（X_X）/ healthy（眨眼）
 // 配色跟随主题：脸=卡片色，描边/胡须=容器 color（通常 accent），腮红/耳内=粉色
 

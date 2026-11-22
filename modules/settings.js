@@ -12,72 +12,24 @@ export function getDefaults() {
         auxUrl: '',
         auxKey: '',
         auxModel: '',
-        // v1.12.0 兜底策略：warn（默认·兜底只报警不擅改模型输出）| patch（旧行为·缺什么补什么原文）
-        fallbackMode: 'warn',
-        profileModel: '',
-        userName: '',
-        userDesc: '',
-        profiles: {},
-        msgMap: {},
         stylePreset: '',
         enhancedTheme: '默认',
         nsfwEnhance: false,
         modelType: 'zit',
-        // v1.28.0 Krea 2 风格预设 id（'' = 自动）。清单见 modules/style-presets.js；
-        // 选中后由 comfyui.composeFinalPrompt 统一前置到每张提示词最前面（跨轮稳定）
         krea2Style: '',
-        uiTheme: '雪白猫',  // [Fix] 原默认 '奶糖小猫' 主题不存在，每次启动被重置为'雪白猫'（C9）
-        textTheme: '默认',
+        uiTheme: '雪白猫',
         debugMode: false,
-        // 多轮记忆：每次管线额外重放最近 N 轮角色消息正文（0 = 关闭，默认 5）
         historyRounds: 5,
-        // [C11] 补齐「代码在用但 defaults 缺失」的键：原实现依赖 undefined 碰巧等于默认值
         storyMode: 'narrative',
         animeArtist: '',
         workflows: {},
-        // 剧情库（长期记忆）：存档开关 / 总结触发条目数 / 总结最小间隔轮数
-        storyLib: true,
         summaryThreshold: 40,
-        summaryGap: 15,
-        // 配图偏好：always 总是配图（默认，强制+鼓励）/ encourage 鼓励配图（纯信息轮可零图） / key 关键场景
         imageMode: 'always',
-        // v1.5.0 造型库：服装/发型/鞋袜/配饰/妆容 —— 按 [角色卡][聊天ID] 存
-        wardrobe: {},
-        // ── v2.4 占位符协作（v1.2 起画师模式已移除，只剩导演模式）──
-        // 保留该键仅为兼容旧存档的 UI/日志；代码不再按它分支
-        imgMode: 'main',
-        // 酒馆AI模式：是否每轮向主LLM注入【生图协作卡+人物档案索引】（setExtensionPrompt）
         injectCards: true,
-        // 图块是否显示完整生成提示词（默认隐藏——详细字段只走生成链，不外显；调试时可打开）
         showGenPrompt: false,
-        // 图块尺寸档位：100%(大) / 75%(中) / 55%(小·默认) / 40%(迷你)
         imgBlockWidth: '55%',
-        // 导演模式：是否把扫描的卡库档案作为"人物基础档案"导入人物表。
-        // true=默认（人物档案规则：扫描过→用插件档案作为权威 base，酒馆AI发来的只做动态 live）；
-        // false=扫描仅用于立绘/档案查看，人物表只保留酒馆AI收集的信息（更省 token，一致性弱）。
-        // 档案跟着聊天走：同卡不同聊天【不继承】。开启后才会把卡级旧扫描档案导入新聊天（一般不需要）
-    directorCastImport: false,
-    // v1.21.0 图库：所有产出过的图都记一份账 → settings.gallery[角色卡][聊天ID][文件名] = { ts, url, kind }
-    // 独立于 msgMap（v1.22 起 msgMap 住 IndexedDB、不再随设置落盘；图库是"这张图属于哪场聊天"的账本）
-    gallery: {},
-        // ── v1.1.2 前端卡桥（重前端卡支持）──
-        // feBridge: 接管"前端卡"（酒馆助手 iframe 应用）配图。这类卡的叙事正文由卡自己调
-        //   TavernHelper.generate 生成、画在自己的 UI 里，从不进聊天消息 → 插件扫描永远扫不到。
-        //   打开后：从 generate 返回值截获叙事 → 走导演管线 → 图卡注入前端应用叙事区。
         feBridge: true,
-        // 图卡注入位置：true=优先注入前端应用自己的叙事区（推荐）；false=只放应用内浮层
-        feBridgeInline: true,
-        // 前端卡走哪条管线（v1.2 起画师管线已移除）：
-        //   auto（默认）—— 本轮剧情里有 [img:] → 导演管线（占位符原位出图）；没有 → 本轮跳过
-        //   director    —— 强制导演，并把 [img:] 占位符指令注入卡内请求（预设里没缝小猫指令时用）
         feBridgeMode: 'auto',
-        // ── v1.27.0 purge 注入层指纹（幂等）──
-        // { seedHash, injectHash, appliedAt }：只用于判断"注入内容有没有变"，
-        // 不参与权限/校验。reset 之后 seedHash 会重新登记，但至少"内容变了"这件事在日志里可见。
-        slPurgeMeta: {},
-        // v1.27.0 分层 system 开关：true=按 S0~S5 多层 system 下发（S1 纪律条独占位置）；
-        // false=合并成一条 system（顺序不变，只是丢掉"独占位置"这一项收益）。
-        // 只在"网关不认多条 system / 建档异常"时关掉，作为兼容兜底。
         slPurgeLayered: true,
     };
 }
@@ -123,50 +75,26 @@ export function escapeHtml(text) {
     return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// ── 设置持久化（localStorage + extension_settings 双存） ──
-export function removeRetiredSettings() {
-    for (const key of ['statuses', 'neg', 'promptPrefix', 'animeQualityPrefix']) delete settings[key];
-}
-export function saveSettings() {
-    removeRetiredSettings();
-    try {
-        // v1.22：msgMap / msgMapTs **不再随设置落盘**——它们现在住 IndexedDB（modules/imgstore.js）。
-        // 原因：saveSettings 写的是整份 settings，localStorage 只有几 MB，
-        // 图片缓存只能被压到 50 条（还是全库共享）→ 几十轮后历史图消失。
-        var _blob = settings;
-        if (settings.msgMap || settings.msgMapTs) {
-            _blob = Object.assign({}, settings);
-            delete _blob.msgMap;
-            delete _blob.msgMapTs;
-        }
-        localStorage.setItem('sillab_settings', JSON.stringify(_blob));
-        if (_extensionSettings) {
-            if (!_extensionSettings.sillab) _extensionSettings.sillab = {};
-            _extensionSettings.sillab = JSON.parse(JSON.stringify(_blob));
-        }
-    } catch (e) { console.log('[sillab] saveSettings异常: ' + e.message); }
+function preferences(source) {
+    const values = getDefaults();
+    for (const key of Object.keys(values)) if (Object.hasOwn(source, key)) values[key] = source[key];
+    return values;
 }
 
-// ── 统一模式查询 ──
-// 返回角色卡锁定的模式（meta.modelMode），无锁定则返回 settings.modelType（可修改值）
-// 所有需要查模式的地方统一走此函数，确保逻辑一致
+export function loadPreferences() {
+    Object.assign(settings, preferences(_extensionSettings?.cat_image || {}));
+}
+
+export function saveSettings() {
+    if (!_extensionSettings) return;
+    _extensionSettings.cat_image = structuredClone(preferences(settings));
+    getSTContext().saveSettingsDebounced?.();
+}
+
 export function getActiveMode() {
-    try {
-        var ctx = getSTContext();
-        var charName = ctx.characters?.[ctx.characterId]?.data?.name || '';
-        if (charName && settings.profiles && settings.profiles[charName] && settings.profiles[charName].meta) {
-            var locked = settings.profiles[charName].meta.modelMode;
-            if (locked) return locked;
-        }
-    } catch (e) {}
     return settings.modelType || 'zit';
 }
 
-// ── v1.28.0 模式清单（唯一来源）──
-// 新增一个提示词模式要动的只有五处，顺序固定：
-//   ① 本清单加一条  ② isEnglishMode 判定它是不是英文  ③ roster-pipeline 的 MODE_OVERLAY 指向 overlay
-//   ④ prompts/loader.js 加载对应文件  ⑤ prompts/pipeline/<name>-overlay.txt 写规则
-// 以前「四种模式」在设置页下拉 / 扫描下拉 / 首页徽章 / 紧凑条各写一份 → 加一种就要改四遍，必漏。
 export var MODES = [
     { id: 'zit',       label: 'ZIT（中文提示词）',                                          short: 'ZIT（中文提示词）',            badge: '🖼️ ZIT' },
     { id: 'anima',     label: '🎬 Anima 混合（标签定结构 + 自然语言写氛围）★ Anima 系模型推荐', short: 'Anima 混合（标签+自然语言）',   badge: '🎬 Anima' },
@@ -196,19 +124,4 @@ export function isEnglishMode(mode) {
 // English prose modes share the EN-PROMPT profile field, rather than EN-TAGS.
 export function isEnglishProseMode(mode = getActiveMode()) {
     return mode === 'anime' || mode === 'krea2' || mode === 'minimax_h3_image';
-}
-
-// ── v1.27.0 轻量同步指纹（FNV-1a 32bit + djb2，拼成 16 位 hex）──
-// 只用来判「同一份文本有没有变」，不是安全用途，不引入 crypto（浏览器端要异步，不值得）。
-export function strHash(s) {
-    var str = String(s || '');
-    var h1 = 0x811c9dc5, h2 = 0x01000193;
-    for (var i = 0; i < str.length; i++) {
-        var c = str.charCodeAt(i);
-        h1 = ((h1 ^ c) >>> 0) * 0x01000193 >>> 0;
-        h2 = ((h2 << 5) + h2 + c) >>> 0;
-    }
-    var a = (h1 >>> 0).toString(16).padStart(8, '0');
-    var b = (h2 >>> 0).toString(16).padStart(8, '0');
-    return a + b;
 }

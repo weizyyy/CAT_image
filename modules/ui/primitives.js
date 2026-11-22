@@ -1,4 +1,4 @@
-// ── SillyImage Lab v2.7 设计积木（SnowCat 极简版） ──
+// ── SillyImage Lab 设计积木（SnowCat 极简版） ──
 import { CAT, sbtn, esc } from './theme.js';
 
 // 极简卡：白底/16px 圆角/无边框/极浅影/大留白

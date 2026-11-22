@@ -1,4 +1,4 @@
-// ── SillyImage Lab v2.4 生图协作卡 + 人物档案索引（对主LLM的"对讲卡"） ──
+// ── SillyImage Lab 生图协作卡 + 人物档案索引（对主LLM的"对讲卡"） ──
 // 用 ST 原生 setExtensionPrompt 每轮注入，让酒馆AI知道：怎么配合写 [img:] 占位、插件知道哪些人。
 // position = 2 (BEFORE_PROMPT, ST script.js extension_prompt_types.BEFORE_PROMPT)
 
@@ -81,7 +81,7 @@ export function buildCoopCardText() {
     // [Fix] 画风预设只在 ZIT 模式实际应用（comfyui.js generateImage），anime 模式不再谎称"已自动应用"（C4）
     lines.push('· 当前模式：' + modeDesc(_modeNow) + '；' + (settings.stylePreset ? ('画风预设：「' + settings.stylePreset + '」' + (_modeNow === 'zit' || !_modeNow ? '已自动应用；' : '（中文预设，生图时未自动应用，按需在画面要点中体现风格）；')) : '画风预设：未选择；') + (settings.nsfwEnhance ? '成人内容：按卡内容如实配图。' : ''));
     lines.push('【人物档案索引】（引用时必须用这里的原始名字，禁止自创简称/标签）');
-    // v1.3：不再按「角色卡人物/剧情收集人物」分，改为按「有没有静态锚点」分——
+    // 不再按「角色卡人物/剧情收集人物」分，改为按「有没有静态锚点」分——
     // 原来那套把"名字在表里但外貌是空的"的人也标成"已建档"，直接导致主模型永远不写外貌（死循环）。
     var entries = rosterEntries();
     var withAnchor = [], noAnchor = [];
@@ -90,7 +90,7 @@ export function buildCoopCardText() {
         var mark = '';
         if (e._updated) { mark = '*更新*'; e._updated = false; }
         var hasBase = !!(e.base && String(e.base).length >= 20);
-        // v1.11：附上该人物已定的"种子"——让主模型看得见别人是一幅什么画（参照物，不是配额）
+        // 附上该人物已定的"种子"——让主模型看得见别人是一幅什么画（参照物，不是配额）
         var _sd = '';
         try {
             var _seedTxt = String(e.seed || '');

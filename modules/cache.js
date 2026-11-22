@@ -1,57 +1,8 @@
-// ── SillyImage Lab 图片缓存 ──
-import { slLog } from './log.js';
-import { settings, getSTHeaders, saveSettings } from './settings.js';
+import { getSTHeaders } from './settings.js';
+import { sessionData } from './archive.js';
 
-var imageCache = {};
-
-export function imgCacheLoad() {
-    try {
-        var data = localStorage.getItem('slimg_cache');
-        if (data) imageCache = JSON.parse(data);
-    } catch (e) { imageCache = {}; }
-}
-
-export function imgCacheSet(prompt, url) {
-    imageCache[prompt] = url;
-    try { localStorage.setItem('slimg_cache', JSON.stringify(imageCache)); } catch (e) {}
-}
-
-export function imgCacheGet(prompt) {
-    return imageCache[prompt];
-}
-
-// ── 图块精确缓存（用户方案：块标识 = 消息缓存key + 块序号 → 图片URL） ──
-// 提示词内容相同不再互相覆盖；刷新/恢复按标识精确对应，零模糊匹配
-export function imgCacheSetById(blockId, url) {
-    if (!blockId) return;
-    imageCache[blockId] = url;
-    try { localStorage.setItem('slimg_cache', JSON.stringify(imageCache)); } catch (e) {}
-}
-export function imgCacheGetById(blockId) {
-    return blockId ? imageCache[blockId] : undefined;
-}
-
-// 清全部图片缓存（内存 + localStorage）：index.js 部署清理使用（C2）
-export function imgCacheClear() {
-    imageCache = {};
-    try { localStorage.removeItem('slimg_cache'); } catch (e) {}
-}
-
-// 清理旧 base64 缓存
-export function cleanOldCache() {
-    try {
-        var changed = false;
-        for (var key in imageCache) {
-            if (imageCache[key].startsWith('data:') || imageCache[key].startsWith('//')) {
-                delete imageCache[key];
-                changed = true;
-            }
-        }
-        if (changed) {
-            localStorage.setItem('slimg_cache', JSON.stringify(imageCache));
-            slLog('旧 base64 缓存已清理');
-        }
-    } catch (e) {}
+export function imgCacheGetById(blockId, chatKey) {
+    return sessionData(chatKey)?.images[blockId];
 }
 
 // 上传图片到 ST 本地存储
@@ -70,6 +21,3 @@ export async function uploadImageToST(dataUrl, signal) {
     if (!data.path) throw new Error('Upload 返回缺少 path');
     return data.path.startsWith('/') ? data.path : '/' + data.path;
 }
-
-imgCacheLoad();
-cleanOldCache();

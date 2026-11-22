@@ -1,12 +1,12 @@
 import { clampPosition } from './viewport.js';
-// ── SillyImage Lab 紧凑状态条 v2.6（胶囊猫条） ──
+// ── SillyImage Lab 紧凑状态条（胶囊猫条） ──
 import { CAT, getCatStatusFace } from './theme.js';
 import { rosterEntries } from '../roster.js';
 import { catSVG, catStatusText } from './cat.js';
 import { setHeadStatus } from './panel.js';
 import { toast, chkProf } from './utils.js';
 import { settings, saveSettings, getActiveMode, modeBadge } from '../settings.js';
-import { getCharacterName } from '../pipeline/profile.js';
+import { getCharacterName } from '../archive.js';
 import { getScannerStatus, cancelPendingScans, resetAutomaticBacklog } from '../scanner.js';
 import { resetFrontendAutomaticBacklog } from '../frontend-bridge.js';
 import { getQueueLength, clearQueue } from '../queue.js';

@@ -1,55 +1,38 @@
-import { getSTContext, getSTHeaders, settings } from './settings.js';
-import { getCharacterName, getChatId } from './pipeline/profile.js';
-
-const normalize = value => String(value || '').replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '');
-
-export function characterChatKey(character, file) {
-    return normalize(character) + '_' + normalize(file);
-}
-
-export function cachedChatKey(messageKey) {
-    return messageKey.match(/^(.*)_(?:\d+|fe-\w+)_v2_/u)?.[1];
-}
-
-export function characterChatKeys(charName = getCharacterName()) {
-    return new Set([
-        ...Object.keys(settings.roster?.[charName] || {}),
-        ...Object.keys(settings.gallery?.[charName] || {}),
-        ...Object.keys(settings.profiles?.[charName]?.chats || {}),
-    ]);
-}
+import { getSTContext, getSTHeaders } from './settings.js';
+import { accessibleSessions, chatFile, currentCard, currentSession, sessionKey } from './archive.js';
 
 export async function fetchCharacterChats(context = getSTContext()) {
-    const character = context.characters?.[context.characterId];
-    if (!character?.avatar) return null;
+    const { id } = currentCard(context);
+    if (!id) return null;
     const response = await fetch('/api/characters/chats', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...getSTHeaders() },
-        body: JSON.stringify({ avatar_url: character.avatar, simple: true }),
+        method: 'POST', headers: { ...getSTHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ avatar_url: id, simple: true }),
     });
     if (!response.ok) return null;
     const list = await response.json();
     if (!Array.isArray(list)) return null;
-    return list.map(item => String(item?.file_name || '').replace(/\.jsonl$/i, '')).filter(Boolean);
+    const names = list.map(item => chatFile(item?.file_name));
+    return names.every(Boolean) ? [...new Set(names)] : null;
+}
+
+export function describeCharacterChats(current = currentSession(), names = []) {
+    const { card, key, file } = current;
+    const openable = new Map(names.map(name => [sessionKey(card.id, name), name]));
+    if (key) openable.set(key, file);
+    const saved = new Map(accessibleSessions(card));
+    const keys = new Set([...(key ? [key] : []), ...openable.keys(), ...saved.keys()]);
+    return [...keys].map(id => {
+        const openFile = openable.get(id);
+        const session = saved.get(id);
+        return { key: id, current: id === key, file: openFile, label: openFile || session?.label || session?.file };
+    });
 }
 
 export async function listCharacterChats() {
     const context = getSTContext();
-    const charName = getCharacterName(), current = getChatId();
+    const current = currentSession(context);
     const names = await fetchCharacterChats(context).catch(() => null);
-    const files = new Map();
-    const prefix = normalize(charName) + '_';
-    for (const name of names || []) {
-        const key = characterChatKey(charName, name);
-        // Normalization can collapse two filenames. Do not open an ambiguous entry.
-        files.set(key, files.has(key) ? null : name);
-    }
-    const rawCurrent = context.chatId || context.chatMetadata?.chat_name || context.chat_metadata?.chat_name;
-    if (rawCurrent) files.set(current, String(rawCurrent).replace(/\.jsonl$/i, ''));
-    const keys = new Set([current, ...files.keys(), ...characterChatKeys(charName)]);
-    return [...keys].map(key => ({
-        key, current: key === current, file: files.get(key),
-        label: files.get(key) || (key.startsWith(prefix) ? key.slice(prefix.length) : key),
-    }));
+    return describeCharacterChats(current, names || []);
 }
 
 export async function openCharacterSession(file) {

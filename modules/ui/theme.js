@@ -1,4 +1,4 @@
-// ── SillyImage Lab 主题系统 v2.6（MochiCat：五只猫五种气质，全部贴合小猫主题） ──
+// ── SillyImage Lab 主题系统（MochiCat：五只猫五种气质，全部贴合小猫主题） ──
 import { slLog } from '../log.js';
 import { settings, saveSettings } from '../settings.js';
 

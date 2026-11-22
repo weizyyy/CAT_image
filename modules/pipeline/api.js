@@ -3,7 +3,7 @@ import { slLog, slErr } from '../log.js';
 import { settings } from '../settings.js';
 
 // ══════════════════════════════════════════════════════════════
-// ── v1.13.5 思考强度选项已删除：辅助 AI 一律「关闭思考」 ──
+// ── 思考强度选项已删除：辅助 AI 一律「关闭思考」 ──
 //   实测（同一套破限 + 明确成人内容，每档 n=10）：
 //     off → 拒绝 0/10 ｜ low → 拒绝 4/10 ｜ high → 拒绝 9/10
 //   档位越高越容易被拒，画面质量却没有肉眼可见的提升 —— 性价比为负，直接砍掉选项。
@@ -12,7 +12,7 @@ import { settings } from '../settings.js';
 // ══════════════════════════════════════════════════════════════
 var OUT_MAXTOKENS = 16384;
 
-// ── v1.27.0 思考预算配对（恢复 v1.12.0 的表，v1.13.5 删档位时被一起删掉了）──
+// ── 思考预算配对（恢复 的表，删档位时被一起删掉了）──
 // reasoning 与 content **共享** max_tokens：开着思考却用 16k，就是"提前截断"和"晚点截断"两种结局。
 // 这张表是开思考的硬前提；档位与预算必须同源，不能一处改一处不改。
 var THINKING_BUDGET = { off: 16384, low: 32768, high: 65536, max: 98304 };
@@ -52,7 +52,7 @@ export function stripCoT(text) {
     var reEnd = /---\s*END\s*---/g, mm, lastIdx = -1;
     while ((mm = reEnd.exec(t)) !== null) lastIdx = mm.index + mm[0].length;
     if (lastIdx > 0) {
-        // v1.27.3：多段输出时，最后一个 ---END--- 之后**可能还有尾段**。
+        // 多段输出时，最后一个 ---END--- 之后**可能还有尾段**。
         // 实测：3 份「PROFILE/IMAGES/END」时，最后那份的 ---CHECK--- 不带 END，
         // 旧实现把它当思考残留砍掉（1788 字 → 1730 字，正好一段 CHECK）。
         // 判据：残余里还有段标记就不截，只有纯废话才砍。
@@ -81,7 +81,7 @@ async function _post(endpoint, headers, body, timeoutMs, signal) {
 
 /**
  * 辅助 API 调用（原始版）：返回 { content, finish, reasoningLen, truncated }。
- * v1.27.0：**finish_reason 必须回传**——旧实现只把它打进日志就 return content，
+ * **finish_reason 必须回传**——旧实现只把它打进日志就 return content，
  * 导致下游无法区分「模型拒绝」和「被 max_tokens 截断」，截断只能被压缩成 empty/short，
  * 重试策略只能靠猜（截断被当成空回 → 整轮重发 → 思考白烧一遍）。
  *
@@ -130,7 +130,7 @@ export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temper
             slErr('辅助API拒绝参数, 去掉 thinking 字段重试（⚠️ 对端若按服务端默认，等于开到 high）:', errorText.slice(0, 200));
             delete body.thinking;
             delete body.reasoning_effort;
-            // v1.27.0：删掉 thinking 字段 = 对端按服务端默认（DeepSeek 官方是 enabled + high）
+            // 删掉 thinking 字段 = 对端按服务端默认（DeepSeek 官方是 enabled + high）
             // → reasoning 会开始吃 token。这里必须同步把预算抬到 high 档，否则必然截断。
             body.max_tokens = Math.max(Number(body.max_tokens) || 0, THINKING_BUDGET.high);
             response = await _post(endpoint, headers, body, timeoutMs, signal);
@@ -171,7 +171,7 @@ export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temper
 
 /**
  * 兼容包装：老签名、老返回值（string content）。
- * 现存调用点（story.js / profile.js / 管线首调）零改动；需要 finish 的地方改用 auxApiCallRaw。
+ * 返回文本。需要结束原因时使用 auxApiCallRaw。
  */
 export async function auxApiCall(systemPrompt, userMessage, maxTokens, temperature, forceModel) {
     var r = await auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel);

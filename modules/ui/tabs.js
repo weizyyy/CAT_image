@@ -1,4 +1,4 @@
-// ── SillyImage Lab 视图 v2.7（SnowCat：主视图 Feed + 分层子页） ──
+// ── SillyImage Lab 视图（SnowCat：主视图 Feed + 分层子页） ──
 import { CAT, CAT_THEMES, TEXT_THEMES, applyTheme, THEME_ORDER, THEME_ICONS } from './theme.js';
 import { card, groupTitle, cell, cardHead, lbl, chip, btnMain, btnGhost, btnSm, btnDanger, switchHTML, empty } from './primitives.js';
 import { catSVG, catStatusText } from './cat.js';
@@ -6,12 +6,12 @@ import { toast, esc, escAttr, fi, chkProf } from './utils.js';
 import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge } from '../settings.js';
 import { KREA2_STYLES, krea2StyleById } from '../style-presets.js';
 import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
-import { getProfiles, getCharacterName, getChatId } from '../pipeline/profile.js';
 import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, scanAllMsgs } from '../scanner.js';
 import { getQueueLength, enqueueTask } from '../queue.js';
 import { cleanPromptForMode } from '../text-utils.js';
-import { rosterEntries, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry, getEnglishAnchor, editRosterAnchor, deleteRosterPerson, copyRosterToCurrent } from '../roster.js';
-import { listCharacterChats, openCharacterSession } from '../chat-sessions.js';
+import { rosterEntries, rosterForChat, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry, getEnglishAnchor, editRosterAnchor, deleteRosterPerson, copyRosterToCurrent } from '../roster.js';
+import { describeCharacterChats, listCharacterChats, openCharacterSession } from '../chat-sessions.js';
+import { archiveSaveError, currentCard, flushArchive, getCharacterName, getChatId, saveArchive } from '../archive.js';
 import { composeFinalPrompt } from '../comfyui.js';
 import { galleryList, galleryCount, galleryRemove, galleryClearChat, galleryPrune, galleryCacheSource, setGalleryCacheSource } from '../gallery.js';
 import { openSubPanel } from './sub-panels.js';
@@ -20,7 +20,7 @@ var pushPage = panel.pushPage;
 import * as compact from './compact-bar.js';
 import * as story from '../story.js';
 import { refreshCoopCards } from '../sync-cards.js';
-import { initFrontendBridge, stopFrontendBridge, getFeBridgeStatus, probeFrontendApp, injectTestCard, injectTestDirector } from '../frontend-bridge.js';
+import { initFrontendBridge, stopFrontendBridge, getFeBridgeStatus, probeFrontendApp, injectTestCard } from '../frontend-bridge.js';
 import { getPrompt, isPromptsLoaded } from '../../prompts/loader.js';
 
 // ═══════════ 主视图（Feed） ═══════════
@@ -41,7 +41,7 @@ export function renderHomeTab() {
   h += '<div class="sl-hover-card" style="' + card() + 'padding:16px;">';
   h += '<div style="display:flex;align-items:center;gap:13px;">';
   h += '<span style="width:48px;height:48px;border-radius:14px;background:' + CAT.bg + ';display:flex;align-items:center;justify-content:center;font-size:23px;flex-shrink:0;color:' + CAT.accent + ';">' + catSVG('healthy', 30) + '</span>';
-  h += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:16px;color:' + CAT.text + ';">' + esc(cn) + '</div><div style="font-size:11px;color:' + CAT.sub + ';margin-top:2px;">' + '🎬 导演模式 · 主模型指挥' + ' · ' + (settings.autoGen === 1 ? '自动出图' : '手动出图') + '</div></div>';
+  h += '<div style="flex:1;min-width:0;"><div style="font-weight:800;font-size:16px;color:' + CAT.text + ';">' + esc(cn) + '</div><div style="font-size:11px;color:' + CAT.sub + ';margin-top:2px;">' + '🎬 占位符配图' + ' · ' + (settings.autoGen === 1 ? '自动出图' : '手动出图') + '</div></div>';
   h += '</div>';
   h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">';
   h += '<span style="' + chip(CAT.bg, CAT.sub) + '">' + modeBadge(getActiveMode()) + '</span>';
@@ -51,8 +51,7 @@ export function renderHomeTab() {
   h += '</div></div>';
   // 快捷操作：一键补排（建档已改为聊天中自动完成，不再需要手动扫描）
   h += '<div style="display:flex;gap:8px;"><button id="sl_btn_gen_all" style="flex:1;' + btnMain() + '">一键排图</button></div>';
-  // v1.2：画师模式已移除，只剩导演模式 → 不再需要模式切换
-  h += '<div style="font-size:10px;color:' + CAT.mute + ';text-align:center;margin:2px 0 10px;">🎬 导演模式：主模型在正文写 [img:] 占位符（位置+画面要点），插件 AI 只负责把要点写成生图提示词（最省 token，需角色卡配置指令）</div>';
+  h += '<div style="font-size:10px;color:' + CAT.mute + ';text-align:center;margin:2px 0 10px;">🎬 占位符配图：主模型在正文写 [img:] 占位符（位置+画面要点），插件 AI 只负责把要点写成生图提示词（最省 token，需角色卡配置指令）</div>';
   // 设置与工具（分组列表）
   h += groupTitle('角色与世界');
   h += '<div style="' + card() + ';padding:4px 8px;">';
@@ -73,7 +72,6 @@ export function renderHomeTab() {
   h += cell('⚙️', '高级与重置', 'NSFW · Debug · 重置插件', '', 'data-nav="advanced"');
   h += '</div>';
   // 底部品牌
-  // [Fix v1.1.3] 版本号原先是写死的字符串（一直是 v1.1.1，升版本也不变，排查时误导人）→ 跟随实际版本变量
   var _ver = (typeof window !== 'undefined' && window.SILLYLAB_VERSION) ? window.SILLYLAB_VERSION : '';
   h += '<div style="text-align:center;padding:14px 0 6px;color:' + CAT.mute + ';font-size:10px;letter-spacing:1px;">小猫的生图插件 ' + esc(_ver) + '</div>';
   body.html(h);
@@ -97,7 +95,7 @@ function storyCountText() {
 }
 
 // ═══════════ 子页：设置 ═══════════
-// v1.28.0：模式下拉统一从 settings.MODES 生成（加模式不再需要改这里两处）
+// 模式下拉统一从 settings.MODES 生成（加模式不再需要改这里两处）
 function modeOptionsHTML(selected, useShort) {
   var h = '';
   for (var i = 0; i < MODES.length; i++) {
@@ -106,7 +104,7 @@ function modeOptionsHTML(selected, useShort) {
   }
   return h;
 }
-// v1.28.0：Krea 2 风格下拉（清单见 modules/style-presets.js，单一来源；按 group 分 optgroup）
+// Krea 2 风格下拉（清单见 modules/style-presets.js，单一来源；按 group 分 optgroup）
 function krea2StyleOptionsHTML(selected) {
   var h = '', cur = null;
   for (var i = 0; i < KREA2_STYLES.length; i++) {
@@ -129,19 +127,17 @@ export function renderSettingsPage() {
     h += '<div style="' + card() + '">' + cardHead('🖼️', '模型类型', '决定提示词语言') + '<select id="sl_model_type" style="' + f + '">' + modeOptionsHTML(settings.modelType, false) + '</select><div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.6;">Anima 系模型由 Danbooru 标签 + 自然语言 caption 混合训练：<b>纯标签丢氛围，纯描述丢结构</b> → 用混合模式效果最好。<br>Krea 2 吃<b>英文自然语言段落</b>（不吃标签链 / 权重语法）；它默认会探索风格，多张图靠同一套风格句保持一致。</div></div>';
     h += '<div style="' + card() + '">' + cardHead('🐟', '配图偏好', '这只猫什么时候画图') + '<select id="sl_image_mode" style="' + f + '"><option value="always"' + (settings.imageMode === 'always' ? ' selected' : '') + '>总是配图（每轮 ≥1 张）</option><option value="encourage"' + (settings.imageMode === 'encourage' ? ' selected' : '') + '>鼓励配图（该插就插）</option><option value="key"' + (settings.imageMode === 'key' ? ' selected' : '') + '>关键场景（宁缺毋滥）</option></select></div>';
     h += '<div style="' + card() + '">' + cardHead('🖼️', '图块尺寸', '图卡里图片的宽度（分辨率低建议调小）') + '<select id="sl_img_width" style="' + f + '"><option value="100%"' + ((settings.imgBlockWidth || '55%') === '100%' ? ' selected' : '') + '>大（100%）</option><option value="75%"' + ((settings.imgBlockWidth || '55%') === '75%' ? ' selected' : '') + '>中（75%）</option><option value="55%"' + ((settings.imgBlockWidth || '55%') === '55%' ? ' selected' : '') + '>小（55% · 默认）</option><option value="40%"' + ((settings.imgBlockWidth || '55%') === '40%' ? ' selected' : '') + '>迷你（40%）</option></select></div>';
-    h += '<div style="' + card() + '">' + cardHead('🎬', '配图方式：导演模式', '主模型写 [img:] 占位符 → 插件 AI 写提示词') + '<div style="font-size:10.5px;color:' + CAT.sub + ';margin:6px 0 10px;line-height:1.6;">主模型在正文写 <code>[img:场景|人物:名字（标签）：静态外貌特征|要点]</code> 标记图片位置+画面要点 → 插件按「占位符 + 人物档案」写提示词出图，<b>不读正文</b>（最省 token）。<br>需要在角色卡 / 预设 / 世界书贴「小猫指令」（👇 一键复制）。</div><div style="margin-bottom:10px;">' + switchHTML('sl_director_cast', settings.directorCastImport === true, '把卡级旧扫描档案带进每个聊天', '默认关闭 —— 人物档案跟着聊天走：每个聊天各存一套，同卡不同聊天【不继承】。开启后，新聊天第一次出图时会把卡级的旧扫描档案导入本聊天（一般不需要）') + '</div><button id="sl_copy_instr" style="width:100%;' + btnGhost() + 'color:' + CAT.accent + ';">复制 小猫指令</button></div>';
+    h += '<div style="' + card() + '">' + cardHead('🎬', '占位符配图', '主模型写 [img:] 占位符 → 插件 AI 写提示词') + '<div style="font-size:10.5px;color:' + CAT.sub + ';margin:6px 0 10px;line-height:1.6;">主模型在正文写 <code>[img:场景|人物:名字（标签）：静态外貌特征|要点]</code> 标记图片位置+画面要点 → 插件按「占位符 + 人物档案」写提示词出图，<b>不读正文</b>（最省 token）。<br>需要在角色卡 / 预设 / 世界书贴「小猫指令」（👇 一键复制）。</div><button id="sl_copy_instr" style="width:100%;' + btnGhost() + 'color:' + CAT.accent + ';">复制 小猫指令</button></div>';
     h += '<div style="' + card() + '">' + cardHead('🖥️', '前端卡配图（酒馆助手 iframe 应用）', 'Narrator / 检查站这类"重前端卡"专用') +
-      switchHTML('sl_fe_bridge', settings.feBridge !== false, '接管前端应用（推荐）', '前端卡的剧情由卡自己调 AI 画在自己界面里，从不写进聊天消息，插件按消息扫描永远扫不到。打开后：从卡内 AI 调用结果截获剧情 → 走导演管线出图 → 图卡注入应用自己的叙事区（找不到叙事区就放应用内浮层）') +
-      '<div style="margin-top:10px;"><span style="' + lbl() + '">走哪条管线</span><select id="sl_fe_mode" style="' + f + '">' +
-      '<option value="auto"' + ((settings.feBridgeMode || 'auto') === 'auto' ? ' selected' : '') + '>自动识别（推荐）— 剧情里有 [img:] 就走导演（占位符原位出图），没有则本轮跳过</option>' +
-      '<option value="director"' + (settings.feBridgeMode === 'director' ? ' selected' : '') + '>强制导演 + 注入指令 — 预设里没缝「小猫指令」时用，插件会把 [img:] 协议补进卡内请求</option>' +
+      switchHTML('sl_fe_bridge', settings.feBridge !== false, '接管前端应用（推荐）', '前端卡的剧情由卡自己调 AI 画在自己界面里，从不写进聊天消息，插件按消息扫描永远扫不到。打开后：从卡内 AI 调用结果截获剧情 → 生成配图 → 图卡注入应用自己的叙事区') +
+      '<div style="margin-top:10px;"><span style="' + lbl() + '">前端占位符策略</span><select id="sl_fe_mode" style="' + f + '">' +
+      '<option value="auto"' + ((settings.feBridgeMode || 'auto') === 'auto' ? ' selected' : '') + '>自动识别（推荐）— 剧情里有 [img:] 就原位出图，没有则本轮跳过</option>' +
+      '<option value="director"' + (settings.feBridgeMode === 'director' ? ' selected' : '') + '>强制注入占位符指令 — 预设里没缝「小猫指令」时用，插件会把 [img:] 协议补进卡内请求</option>' +
       '</select><div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.6;">你的预设里已经缝了小猫指令 → 保持「自动识别」即可：主模型写出 [img:…] 时，插件把它原位换成图卡（占位符原文会被吃掉，不会留在正文里）。</div></div>' +
-      '<div style="margin-top:10px;">' + switchHTML('sl_fe_inline', settings.feBridgeInline !== false, '图卡插入应用叙事区', '关闭则改为应用右下角浮层（当你觉得图卡插在正文里挡视线时用小浮层）') + '</div>' +
       '<div style="font-size:10.5px;color:' + CAT.sub + ';margin:10px 0 8px;line-height:1.6;">状态：' + esc(getFeBridgeStatus()) + '</div>' +
-      '<button id="sl_fe_testd" style="width:100%;' + btnGhost() + 'color:' + CAT.accent + ';margin-bottom:8px;">🧪 测试导演原位替换（不出图，插一段带 [img:] 的假剧情）</button>' +
-      '<button id="sl_fe_test" style="width:100%;' + btnGhost() + 'color:' + CAT.accent + ';margin-bottom:8px;">🧪 测试末尾插卡（不出图，插一张占位图卡）</button>' +
+      '<button id="sl_fe_test" style="width:100%;' + btnGhost() + 'color:' + CAT.accent + ';margin-bottom:8px;">🧪 测试前端卡渲染（不出图，插一张占位图卡）</button>' +
       '<button id="sl_fe_probe" style="width:100%;' + btnGhost() + '">🩺 诊断（写进日志）</button>' +
-      '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:8px;line-height:1.6;">前端卡必须装「酒馆助手 / JS-Slash-Runner」才能跑；每条剧情都会多一次辅助 AI 调用（导演管线的开销）。</div></div>';
+      '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:8px;line-height:1.6;">前端卡必须装「酒馆助手 / JS-Slash-Runner」才能跑；每条剧情都会多一次辅助 AI 调用（配图分析请求）。</div></div>';
     h += '<div style="' + card() + ';padding:14px 16px;">' + switchHTML('sl_show_prompt', settings.showGenPrompt === true, '图块显示完整提示词', '默认关闭：图块只显示短标题（详细字段只进生成链，用户看不到）；调试时打开可看到每张图的完整生成提示词') + '</div>';
     h += '<div id="sl_krea2_style_card" style="' + card() + ';' + (settings.modelType === 'krea2' ? '' : 'display:none;') + '">' + cardHead('🎨', 'Krea 2 风格', '锁定本场画风 · 插件统一前置，跨轮不漂') + '<select id="sl_krea2_style" style="' + f + '">' + krea2StyleOptionsHTML(settings.krea2Style) + '</select>' + '<div id="sl_krea2_style_note" style="font-size:10px;color:' + CAT.sub + ';margin-top:6px;line-height:1.7;">' + esc((krea2StyleById(settings.krea2Style) || {}).note || '') + '</div>' + '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.7;">官方没有固定的内置风格清单：Krea 2 的风格靠<b>提示词 / 风格参考图 / 情绪板 / LoRA</b> 四条路。这里是从官方示例归纳出的风格句 —— 选中后由插件加在每张提示词最前，辅助 AI 只写人物与场景，不再另写画风。<br>画风由插件统一拼接，不再自动注入质量前缀。</div></div>';
     h += '<div id="sl_minimax_h3_card" style="' + card() + ';' + (settings.modelType === 'minimax_h3_image' ? '' : 'display:none;') + '">' + cardHead('🎬', 'MiniMax-H3-Image · Galgame CG', '纯二次元 · 横向事件 CG · 人物主导') + '<div style="font-size:10.5px;color:' + CAT.sub + ';line-height:1.7;">以二维线条、平整色面、赛璐璐阴影和局部渐变表现人物、衣物与背景，优先表情、动作和清楚的接触关系。<br>默认 16:9 横向构图。正构图、人物侧倾与镜头滚转按场景选择，不强制倾斜；滚转时背景与重力保持一致。<br>实际画布由工作流决定，请自行在 ComfyUI 设置横向画布后导入。插件不会改写宽高；原生模型不使用负面提示词。</div></div>';
@@ -156,25 +152,18 @@ export function bindSettingsEvents(b) {
   b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); jQuery('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); jQuery('#sl_minimax_h3_card').toggle(settings.modelType === 'minimax_h3_image'); saveSettings(); refreshCoopCards(); checkLastMessage(); });
   b.off('change', '#sl_image_mode').on('change', '#sl_image_mode', function () { settings.imageMode = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_img_width').on('change', '#sl_img_width', function () { settings.imgBlockWidth = jQuery(this).val(); saveSettings(); });
-  b.off('change', '#sl_director_cast').on('change', '#sl_director_cast', function () { settings.directorCastImport = jQuery(this).is(':checked'); saveSettings(); try { refreshCoopCards(); } catch (e) {} toast('success', settings.directorCastImport !== false ? '已开启：卡库档案导入人物表' : '已关闭：扫描仅用于立绘/档案，人物表只留占位符收集'); });
   b.off('click', '#sl_copy_instr').on('click', '#sl_copy_instr', function () { var t = isPromptsLoaded() ? (getPrompt('main-llm-instruction.txt') || '') : ''; if (!t) t = '[img:画面描述] 指令未加载，请刷新重试'; if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(function () { toast('success', '指令已复制，贴到角色卡/预设/世界书'); }, function () { toast('error', '复制失败'); }); } else { toast('error', '浏览器不支持剪贴板'); } });
-  // ── v1.1.2 前端卡桥 ──
+  // ── 前端卡桥 ──
   b.off('change', '#sl_fe_bridge').on('change', '#sl_fe_bridge', function () {
     settings.feBridge = jQuery(this).is(':checked'); saveSettings();
     if (settings.feBridge) { initFrontendBridge(); toast('success', '已开启：前端卡配图'); }
     else { stopFrontendBridge(); toast('info', '已关闭：前端卡配图'); }
     renderSettingsPage();
   });
-  b.off('change', '#sl_fe_inline').on('change', '#sl_fe_inline', function () { settings.feBridgeInline = jQuery(this).is(':checked'); saveSettings(); toast('info', settings.feBridgeInline !== false ? '图卡插入应用叙事区' : '图卡改为应用内浮层'); });
   b.off('change', '#sl_fe_mode').on('change', '#sl_fe_mode', function () {
     settings.feBridgeMode = jQuery(this).val(); saveSettings();
     var m = settings.feBridgeMode;
-    toast('success', m === 'director' ? '前端卡：强制导演 + 注入指令' : '前端卡：自动识别（有 [img:] 就导演原位，否则本轮跳过）');
-    setTimeout(function () { try { renderSettingsPage(); } catch (e) {} }, 400);
-  });
-  b.off('click', '#sl_fe_testd').on('click', '#sl_fe_testd', function () {
-    var ok = injectTestDirector();
-    toast(ok ? 'success' : 'error', ok ? '已插入带 [img:] 的假剧情并原位替换：看图卡有没有落在正文里、[img:] 有没有被吃掉' : '没找到前端应用（当前聊天不是前端卡 / 酒馆助手没启用）');
+    toast('success', m === 'director' ? '前端卡：强制注入占位符指令' : '前端卡：自动识别（有 [img:] 就导演原位，否则本轮跳过）');
     setTimeout(function () { try { renderSettingsPage(); } catch (e) {} }, 400);
   });
   b.off('click', '#sl_fe_test').on('click', '#sl_fe_test', function () {
@@ -225,12 +214,11 @@ export function renderArchivePage() {
   pushPage(function (body) { renderArchiveInto(body); }, '角色档案', { key: '角色档案' });
 }
 // ── 立绘地址：直接存在人物表条目上（档案跟着聊天走 → 删聊天立绘一起走）──
-// v1.13.8：四个视角各存一张（front/left/right/back）；ent.portrait 保留为"正面"的别名（向后兼容）
+// 四个视角各存一张（front/left/right/back）；ent.portrait 保留为"正面"的别名（向后兼容）
 function getPortraitUrl(ent, view) {
   try {
     var v = view || 'front';
     var views = (ent && ent.portraitViews) || {};
-    if (v === 'front') return views.front || (ent && ent.portrait) || '';
     return views[v] || '';
   } catch (e) { return ''; }
 }
@@ -238,16 +226,15 @@ function setPortraitUrl(ent, url, view) {
   try {
     if (!ent) return;
     var v = view || 'front';
-    if (v === 'front') ent.portrait = url;
     ent.portraitViews = ent.portraitViews || {};
     ent.portraitViews[v] = url;
   } catch (e) {}
 }
 // 短标签：只给 UI（toast / 按钮）用
 var PORTRAIT_VIEW_CN = { front: '正面', left: '左侧面', right: '右侧面', back: '背面' };
-// v1.14：写进提示词的方向词必须**无歧义** —— 「左侧面」模型分不清是「从左边拍」还是「人朝左边」，
+// 写进提示词的方向词必须**无歧义** —— 「左侧面」模型分不清是「从左边拍」还是「人朝左边」，
 // 实测左右两版都画成朝左的侧脸（两张几乎一样）。改成「相机在她的左侧 + 鼻尖朝向画面右边」。
-// v1.18：正面提示词里不许出现否定式（'看不到脸' / 'face not visible'）——
+// 正面提示词里不许出现否定式（'看不到脸' / 'face not visible'）——
 // 扩散模型会把 face / 脸 这个 token 直接激活，实测会画出「诡异扭头回眸」甚至后脑勺长脸。
 var PORTRAIT_VIEW_SPEC_CN = {
   front: '正面，正对镜头',
@@ -267,7 +254,7 @@ var PORTRAIT_VIEW_SPEC_EN = {
 function collectArchivePeople(chatId = getChatId()) {
   var out = [];
   try {
-    var re = Object.values(settings.roster?.[getCharacterName()]?.[chatId] || {});
+    var re = Object.values(rosterForChat(chatId) || {});
     for (var i = 0; i < re.length; i++) {
       var e = re[i];
       if (!e || !e.key) continue;
@@ -281,13 +268,13 @@ const chatViewTokens = new WeakMap();
 
 function bindChatSwitch(body, sessions, render) {
   const byKey = new Map(sessions.map(session => [session.key, session]));
-  const character = getCharacterName();
+  const character = currentCard().id;
   body.off('click.slChat', '.sl_chat_switch').on('click.slChat', '.sl_chat_switch', async function (event) {
     event.preventDefault();
     event.stopPropagation();
     const session = byKey.get(this.dataset.chat);
     if (generationBusy()) { toast('warning', '请等回复结束后切换聊天'); return; }
-    if (!session || character !== getCharacterName() || session.key === getChatId()) return;
+    if (!session || character !== currentCard().id || session.key === getChatId()) return;
     this.disabled = true;
     try {
       if (await openCharacterSession(session.file)) render(body);
@@ -303,22 +290,35 @@ function chatSwitchButton(session) {
     : '';
 }
 
+function archiveSaveNotice() {
+  if (!archiveSaveError()) return '';
+  return '<button type="button" class="sl_archive_save" style="' + btnDanger() + '">存档保存失败 · 重试</button>';
+}
+
+function bindArchiveSave(body, render) {
+  body.off('click.slArchiveSave', '.sl_archive_save').on('click.slArchiveSave', '.sl_archive_save', async function () {
+    this.disabled = true;
+    if (await saveArchive()) render(body);
+    else this.disabled = false;
+  });
+}
+
 function renderArchiveInto(body, sessions) {
-  var pf = getProfiles();
-  if (!pf || !pf.charName) { body.html(empty('还没进入聊天，去左边找你的猫猫角色', '🐱')); return; }
+  const { name } = currentCard();
+  if (!getChatId()) { body.html(empty('还没进入聊天，去左边找你的猫猫角色', '🐱')); return; }
   if (!sessions) {
-    const node = body[0], token = {}, character = getCharacterName(), current = getChatId();
+    const node = body[0], token = {}, character = currentCard().id, current = getChatId();
     chatViewTokens.set(node, token);
-    renderArchiveInto(body, [{ key: current, label: current, current: true }]);
+    renderArchiveInto(body, describeCharacterChats());
     void listCharacterChats().then(list => {
       if (node.isConnected && chatViewTokens.get(node) === token && getCharacterName() === character && getChatId() === current)
         renderArchiveInto(body, list);
     });
     return;
   }
-  var h = '';
+  var h = archiveSaveNotice();
   // 当前角色卡（只显示卡名）
-  h += '<div style="' + card() + ';padding:11px 14px;margin-bottom:10px;"><span style="font-weight:700;font-size:13.5px;color:' + CAT.text + ';">🐾 ' + esc(pf.charName) + '</span></div>';
+  h += '<div style="' + card() + ';padding:11px 14px;margin-bottom:10px;"><span style="font-weight:700;font-size:13.5px;color:' + CAT.text + ';">🐾 ' + esc(name) + '</span></div>';
   for (const session of sessions) {
     const people = collectArchivePeople(session.key);
     h += '<details style="' + card() + '" data-chat="' + escAttr(session.key) + '"' + (session.current ? ' open' : '') + '>';
@@ -337,7 +337,7 @@ function renderArchiveInto(body, sessions) {
       h += '<div style="flex:1;min-width:0;">';
       h += '<div style="font-weight:700;font-size:13px;color:' + CAT.text + ';margin-bottom:3px;">' + esc(ppl.name || ck) + '</div>';
       h += '<div style="font-size:10.5px;color:' + CAT.sub + ';">' + esc(ppl.identity || '（无标签）') + '</div>';
-      // [v2.0] 立绘按钮上移到列表卡片（第2层）——不用点进详情页就能出图
+      // 立绘按钮上移到列表卡片（第2层）——不用点进详情页就能出图
       if (session.current) h += '<button class="sl_port_btn" data-char="' + escAttr(ck) + '" data-view="front" style="' + btnSm() + 'font-size:10px;padding:5px 11px;margin-top:8px;">生成立绘</button>';
       h += '</div>';
       h += '<div style="color:' + CAT.mute + ';font-size:15px;padding-right:2px;">›</div>';
@@ -345,24 +345,24 @@ function renderArchiveInto(body, sessions) {
     }
     h += '</details>';
   }
-  h += storyCardInto();
-  body.html(h); bindArchiveEvents(body); bindStoryEvents(body);
+  body.html(h); bindArchiveEvents(body);
+  bindArchiveSave(body, renderArchiveInto);
   bindChatSwitch(body, sessions, renderArchiveInto);
-  body.off('click.slRosterCopy', '.sl_roster_copy').on('click.slRosterCopy', '.sl_roster_copy', function () {
+  body.off('click.slRosterCopy', '.sl_roster_copy').on('click.slRosterCopy', '.sl_roster_copy', async function () {
     const count = copyRosterToCurrent(this.dataset.chat);
-    toast('info', count ? '已复制 ' + count + ' 份档案' : '当前聊天已有这些人物');
+    if (await flushArchive()) toast('info', count ? '已复制 ' + count + ' 份档案' : '当前聊天已有这些人物');
     renderArchiveInto(body, sessions);
   });
 }
 
-// ── v1.13.8 立绘提示词 ──
+// ── 立绘提示词 ──
 // 首选：辅助 AI 建档时写好的那一条（每视角一条，已润色过）；
 // 兜底：老档案没有 AI 提示词时，才退回「锚点 → 生图语言」拼装。
 // 视角固定四套：正面（第2层默认）/ 左侧 / 右侧 / 背面（第3层手动点）。
 function _portraitTail(view, bm, underage) {
   var v = PORTRAIT_VIEW_CN[view] ? view : 'front';
   var isBack = (v === 'back');
-  // v1.18：去掉 '无衣物遮挡' / 'no clothes' 这类否定式（会反向激活 clothes/衣物 这个 token），
+  // 去掉 '无衣物遮挡' / 'no clothes' 这类否定式（会反向激活 clothes/衣物 这个 token），
   // 改成纯正向的「全裸，赤裸肌肤」；背面视角不写表情（写了会把脸拽回来）
   if (bm === 'zit') {
     var cloth = underage ? '，素色紧身连体打底衣' : '，全裸，赤裸肌肤';
@@ -390,10 +390,10 @@ function buildPortraitPrompt(ent, view, bm) {
     if (underage) body = body.replace(/全裸|裸体|赤裸|一丝不挂|无衣物(遮挡)?|completely nude|nude|no clothes|uncensored|topless|naked/gi, '').replace(/[，,]\s*[，,]/g, '，').trim();
     if (!/站立|standing/i.test(body)) body += _portraitTail(v, bm, underage);
     if (!/全身|full body/i.test(body)) body += (bm === 'zit' ? '，全身（含脚）' : ', full body including feet');
-    // v1.14：AI 那条只写了「左侧面/右侧面」这种歧义词 → 补一句无歧义方向（左右两张画成一样就是这么来的）
+    // AI 那条只写了「左侧面/右侧面」这种歧义词 → 补一句无歧义方向（左右两张画成一样就是这么来的）
     var _dirOK = /相机在她的(左|右)侧|camera on her (left|right) side|背面，背对镜头|back view|正面，正对镜头|front view/i.test(body);
     if (!_dirOK) {
-      // v1.14.1：先看结尾标点 —— AI 那条常以「。」收尾，直接用「，」接会变成「全身含脚。，正面，」
+      // 先看结尾标点 —— AI 那条常以「。」收尾，直接用「，」接会变成「全身含脚。，正面，」
       var _sep = /[。！？!?]$/.test(body.trim()) ? '' : (bm === 'zit' ? '，' : ', ');
       var _clause = (bm === 'zit' ? PORTRAIT_VIEW_SPEC_CN[v] : PORTRAIT_VIEW_SPEC_EN[v]);
       body = body.trim() + (_sep === '' ? (bm === 'zit' ? '' : ' ') : _sep) + _clause;
@@ -404,7 +404,7 @@ function buildPortraitPrompt(ent, view, bm) {
     body = atomValues(anchor, bm) + _portraitTail(v, bm, underage);
   }
   if (isEnglishMode(bm)) body = cleanPromptForMode(body, bm);
-  // v1.8.3：走与 generateImage 完全同源的组装（画风预设 / 艺术家标签）
+  // 走与 generateImage 完全同源的组装（画风预设 / 艺术家标签）
   return composeFinalPrompt(body);
 }
 
@@ -433,7 +433,7 @@ function renderPersonDetail(body, key, chatId = getChatId()) {
   h += '<div style="font-size:10px;color:' + CAT.mute + ';line-height:1.75;max-height:190px;overflow:auto;">' + (atom ? esc(atom) : (bm === 'zit'
      ? '（还没有锚点 —— 先正常聊一轮、出一次图，插件就会按 38 维建档）'
      : '（还没有【英文锚点】—— 英文模式只读英文锚点（中文会被清洗逻辑删空、立绘画出路人）。先正常聊一轮出一次图，辅助 AI 会按 38 维生成英文锚点）')) + '</div>';
-  // v1.13.8：立绘四视角（正面在第2层就能出；左/右/背面在这里手动点）
+  // 立绘四视角（正面在第2层就能出；左/右/背面在这里手动点）
   h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin:11px 0 5px;">立绘视角（都需手动点；正面在第2层列表里直接出）</div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
   var _vlist = [['front', '🖼 正面'], ['left', '◀ 左侧面'], ['right', '▶ 右侧面'], ['back', '⬅ 背面']];
@@ -458,23 +458,25 @@ function renderPersonDetail(body, key, chatId = getChatId()) {
   h += '<textarea class="sl_prompt_ta" data-char="' + escAttr(ppl.key) + '" readonly style="width:100%;min-height:110px;' + fi() + 'font-size:10.5px;resize:vertical;">' + esc(buildPortraitPrompt(ppl.ent, 'front', bm)) + '</textarea>';
   h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><button class="sl_copy_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnSm() + 'font-size:10px;">复制提示词</button></div></div>';
   h += '</div></div></div>';
-  body.html(h); bindArchiveEvents(body);
-  const character = getCharacterName();
-  body.find('.sl_anchor_save').on('click', () => {
-    if (character !== getCharacterName() || !editRosterAnchor(chatId, key, body.find('.sl_anchor_input').val())) {
+  body.html(archiveSaveNotice() + h); bindArchiveEvents(body);
+  bindArchiveSave(body, () => renderPersonDetail(body, key, chatId));
+  const character = currentCard().id;
+  body.find('.sl_anchor_save').on('click', async () => {
+    if (character !== currentCard().id || !editRosterAnchor(chatId, key, body.find('.sl_anchor_input').val())) {
       toast('warning', '请输入有效的英文锚点'); return;
     }
-    toast('success', '英文锚点已保存');
-    renderPersonDetail(body, key, chatId);
+    if (await flushArchive()) toast('success', '英文锚点已保存');
+    if (character === currentCard().id) renderPersonDetail(body, key, chatId);
   });
-  body.find('.sl_person_delete').on('click', () => {
-    if (character !== getCharacterName() || !confirm('删除此聊天中的人物档案「' + ppl.name + '」？')) return;
-    if (deleteRosterPerson(chatId, key)) renderArchiveInto(body);
+  body.find('.sl_person_delete').on('click', async () => {
+    if (character !== currentCard().id || !confirm('删除此聊天中的人物档案「' + ppl.name + '」？')) return;
+    if (deleteRosterPerson(chatId, key)) {
+      await flushArchive();
+      renderArchiveInto(body);
+    }
   });
 }
 export function bindArchiveEvents(b) {
-  b.off('change input', '#sl_specialization').on('change input', '#sl_specialization', function () { var pf = getProfiles(); if (pf && pf.root[pf.charName] && pf.root[pf.charName].meta) { pf.root[pf.charName].meta.specialization = jQuery(this).val(); saveSettings(); } });
-  b.off('click', '.sl_arch_st').on('click', '.sl_arch_st', function () { var st = parseInt(jQuery(this).data('ast')); b.find('.sl_arch_st').css({ background: 'transparent', color: CAT.sub, fontWeight: '600' }); jQuery(this).css({ background: CAT.accent, color: '#fff', fontWeight: '700' }); b.find('#sl_arch_static').toggle(st === 0); b.find('#sl_arch_dynamic').toggle(st === 1); });
   // 卡片 → 详情页；返回
   b.off('click', '.sl_pcard').on('click', '.sl_pcard', function () { renderPersonDetail(b, this.dataset.char, this.closest('details[data-chat]')?.dataset.chat); });
   b.off('click', '.sl_pback').on('click', '.sl_pback', function () { renderArchiveInto(b); });
@@ -517,7 +519,7 @@ export function bindArchiveEvents(b) {
     var aiP = '', aiM = '';
     try { aiP = getPortraitPrompt(ent, view); aiM = portraitPromptsMode(ent); } catch (e8) {}
     var aiOk = !!(aiP && (!aiM || isEnglishMode(aiM) === isEnglishMode(bm)));
-    // [v2.0] 英文模式读【英文权威锚点】，zit 读中文呈现缓存；base 永不进立绘
+    // 英文模式读【英文权威锚点】，zit 读中文呈现缓存；base 永不进立绘
     var anchor = getAtomAnchor(ent, bm);
     if (!anchor && !aiOk) {
       toast('warning', bm === 'zit'
@@ -533,7 +535,7 @@ export function bindArchiveEvents(b) {
     enqueueTask('portrait_' + view + '_' + Date.now() + '_' + cn, prompt, function (result) {
       if (result && result.url) {
         setPortraitUrl(ent, result.url, view);
-        saveSettings();
+        void saveArchive();
         var safe = String(cn).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
         var bgCss = { backgroundImage: 'url(' + result.url + ')', backgroundSize: 'cover', backgroundPosition: 'top center', border: '1.5px solid ' + CAT.accent, color: 'transparent' };
         b.find('#sl_port_' + safe).css(bgCss).html('');
@@ -543,33 +545,16 @@ export function bindArchiveEvents(b) {
       btn.prop('disabled', false).text(oldTxt || '生成立绘');
     }, function (error) { if (error?.name !== 'AbortError') toast('error', '立绘生成失败'); btn.prop('disabled', false).text(oldTxt || '生成立绘'); });
   });
-  b.off('click', '.sl_edit_btn').on('click', '.sl_edit_btn', function () { b.find('.sl_edit_box[data-char="' + jQuery(this).data('char') + '"]').toggle(); });
-  b.off('click', '.sl_dyn_edit_btn').on('click', '.sl_dyn_edit_btn', function () { b.find('.sl_dyn_edit_box[data-char="' + jQuery(this).data('char') + '"]').toggle(); });
-  b.off('click', '.sl_dyn_cancel_btn').on('click', '.sl_dyn_cancel_btn', function () { b.find('.sl_dyn_edit_box[data-char="' + jQuery(this).data('char') + '"]').hide(); });
-  b.off('click', '.sl_dyn_save_btn').on('click', '.sl_dyn_save_btn', function () { var cn = jQuery(this).data('char'), nt = b.find('.sl_dyn_edit_ta[data-char="' + cn + '"]').val(), pf = getProfiles(); if (pf && pf.chat && pf.chat.dynamics) { pf.chat.dynamics[cn] = nt; saveSettings(); toast('success', cn + ' 动态已保存'); renderArchiveInto(b); } });
-  // v1.14：id 前缀改成 [id^=sl_port] —— 旧写法 [id^=sl_port_] 匹配不到四视角缩略位（sl_portv_…），点不开放大
+  // id 前缀改成 [id^=sl_port] —— 旧写法 [id^=sl_port_] 匹配不到四视角缩略位（sl_portv_…），点不开放大
   b.off('click', '[id^=sl_port]').on('click', '[id^=sl_port]', function (e) { if (e && e.stopPropagation) e.stopPropagation(); var bg = jQuery(this).css('background-image'); if (!bg || bg === 'none') return; var url = bg.slice(bg.indexOf('(')+1,bg.lastIndexOf(')')).replace(/["']/g,'');
         jQuery('<div style="position:fixed;z-index:30001;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;cursor:pointer;"><img src="' + url + '" style="max-width:90vw;max-height:90vh;border-radius:16px;box-shadow:0 4px 30px rgba(0,0,0,0.5);"></div>').appendTo('body').on('click', function () { jQuery(this).remove(); }); });
 }
-function cardTypeSelectHTML(selected) {
-  var opts = [['具体角色卡', '剧情围绕固定角色'], ['世界观卡', '角色由聊天动态生成'], ['混合型卡', '有档案但不围绕展开']];
-  var h = '<select id="sl_card_type" style="' + fi() + '">';
-  for (var i = 0; i < opts.length; i++) h += '<option value="' + opts[i][0] + '"' + (opts[i][0] === selected ? ' selected' : '') + '>' + opts[i][1] + '</option>';
-  return h + '</select>';
-}
-function scanModeSelectHTML(selected) {
-  return '<select id="sl_scan_mode" style="' + fi() + '">' + modeOptionsHTML(selected, true) + '</select>';
-}
-
 // ═══════════ 子页：剧情库 ═══════════
 export function renderStoryPage() {
   pushPage(function (body) {
-    var h = '<div style="' + card() + '">' + cardHead('🧶', '剧情库', '每轮正文自动存档 · 标签 · 滚动总结') + '<div id="sl_story_body">翻找中…</div></div>';
+    var h = '<div style="' + card() + '">' + cardHead('🧶', '剧情库', '浏览已保存剧情') + '<div id="sl_story_body">翻找中…</div></div>';
     body.html(h); bindStoryEvents(body);
   }, '剧情库', { key: '剧情库' });
-}
-function storyCardInto() {
-  return '<div style="' + card() + 'margin-top:12px;">' + cardHead('🧶', '剧情库', '每轮正文自动存档 · 标签 · 滚动总结') + '<div id="sl_story_body">翻找中…</div></div>';
 }
 function bindStoryEvents(b) {
   var bodyEl = b.find('#sl_story_body');
@@ -624,7 +609,7 @@ async function renderStoryPanel(b) {
   }
   var list = filter ? ov.entries.filter(function (en) { return (en.tags || []).indexOf(filter) >= 0; }) : ov.entries;
   if (!list.length) {
-    h += empty(ov.count ? '该标签下没有条目' : '剧情库空空如也，每轮正文会自动存进来', '🧶');
+    h += empty(ov.count ? '该标签下没有条目' : '剧情库空空如也，暂无剧情存档', '🧶');
   } else {
     for (var j = 0; j < list.length; j++) {
       var en = list[j], mid = escAttr(en.mesid || '');
@@ -650,7 +635,7 @@ export function renderLogPage() {
 
 export function showLogViewer() { renderLogPage(); }
 
-// ═══════════ 子页：图库（v1.21） ═══════════
+// ═══════════ 子页：图库 ═══════════
 // 所有产出过的图（聊天配图 + 立绘）都记在这里，按【角色卡 × 聊天】归档。
 // 删这里只是删账本，png 文件仍在 /user/images/ 下（浏览器删不了服务器文件）。
 export function renderGalleryPage() {
@@ -659,9 +644,9 @@ export function renderGalleryPage() {
 
 function renderGalleryInto(body, sessions) {
   if (!sessions) {
-    const node = body[0], token = {}, character = getCharacterName(), current = getChatId();
+    const node = body[0], token = {}, character = currentCard().id, current = getChatId();
     chatViewTokens.set(node, token);
-    renderGalleryInto(body, []);
+    renderGalleryInto(body, describeCharacterChats());
     void listCharacterChats().then(list => {
       if (node.isConnected && chatViewTokens.get(node) === token && getCharacterName() === character && getChatId() === current)
         renderGalleryInto(body, list);
@@ -670,7 +655,7 @@ function renderGalleryInto(body, sessions) {
   }
   const sessionByKey = new Map(sessions.map(session => [session.key, session]));
   const source = galleryCacheSource();
-  const character = getCharacterName(), current = getChatId();
+  const character = currentCard().id, current = getChatId();
   var list = [], total = 0;
   try { list = galleryList(); } catch (e) {}
   for (var i = 0; i < list.length; i++) total += list[i].items.length;
@@ -691,7 +676,7 @@ function renderGalleryInto(body, sessions) {
       h += '<details style="margin-top:14px;"' + (grp.current || grp.chatKey === source ? ' open' : '') + '>';
       h += '<summary style="cursor:pointer;margin-bottom:6px;">' + esc(session?.label || grp.label) + '</summary>';
       h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">';
-      if (!grp.current) {
+      if (!grp.current && grp.selectable) {
         const selected = grp.chatKey === source;
         h += '<button type="button" class="sl_gallery_source" data-chat="' + escAttr(grp.chatKey) +
           '" aria-pressed="' + selected + '" style="' + btnSm() + '">' +
@@ -699,51 +684,54 @@ function renderGalleryInto(body, sessions) {
       }
       h += '<span style="' + chip(CAT.bg, CAT.sub) + '">' + grp.items.length + ' 张</span>';
       if (grp.current) h += '<span style="' + chip(CAT.accent + '1F', CAT.accent) + '">当前</span>';
-      h += '<span style="flex:1;"></span><button class="sl_gal_clear" data-chat="' + escAttr(grp.chatKey) + '" style="font-size:9.5px;border:none;background:none;color:' + CAT.red + ';cursor:pointer;padding:2px 4px;">清空</button>';
+      h += '<span style="flex:1;"></span>';
+      if (grp.selectable) h += '<button class="sl_gal_clear" data-chat="' + escAttr(grp.chatKey) + '" style="font-size:9.5px;border:none;background:none;color:' + CAT.red + ';cursor:pointer;padding:2px 4px;">清空</button>';
       h += '</div>';
       h += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
       for (var j = 0; j < grp.items.length; j++) {
         var it = grp.items[j];
-        var title = it.scene || (it.kind === 'portrait' ? '立绘' : it.file);
+        var title = it.scene || (it.kind === 'portrait' ? '立绘' : it.url.split('/').at(-1));
         h += '<div style="position:relative;">';
         h += '<img class="sl_gal_img" data-url="' + escAttr(it.url || '') + '" src="' + escAttr(it.url || '') + '" title="' + escAttr(title) + '" style="width:92px;height:124px;object-fit:cover;border-radius:10px;border:1px solid ' + CAT.line + ';cursor:zoom-in;display:block;background:' + CAT.card + ';">';
-        h += '<button class="sl_gal_del" data-chat="' + escAttr(grp.chatKey) + '" data-file="' + escAttr(it.file) + '" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border:none;border-radius:9px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;line-height:18px;padding:0;cursor:pointer;">✕</button>';
+        if (grp.selectable) h += '<button class="sl_gal_del" data-chat="' + escAttr(grp.chatKey) + '" data-url="' + escAttr(it.url) + '" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border:none;border-radius:9px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;line-height:18px;padding:0;cursor:pointer;">✕</button>';
         h += '</div>';
       }
       h += '</div></details>';
     }
   }
   h += '</div>';
-  body.html(h);
-  body.off('click.slGallerySource', '.sl_gallery_source').on('click.slGallerySource', '.sl_gallery_source', function () {
+  body.html(archiveSaveNotice() + h);
+  bindArchiveSave(body, renderGalleryInto);
+  body.off('click.slGallerySource', '.sl_gallery_source').on('click.slGallerySource', '.sl_gallery_source', async function () {
     if (getCharacterName() !== character || getChatId() !== current) { renderGalleryInto(body); return; }
     const selected = this.dataset.chat;
     if (!setGalleryCacheSource(selected === source ? '' : selected)) return;
     scanAllMsgs();
-    renderGalleryInto(body, sessions);
+    await flushArchive();
+    renderGalleryInto(body);
   });
   body.off('click', '.sl_gal_img').on('click', '.sl_gal_img', function () {
     var u = jQuery(this).data('url'); if (u) window.open(u, '_blank');
   });
-  body.off('click', '.sl_gal_del').on('click', '.sl_gal_del', function () {
-    var b = jQuery(this);
-    if (galleryRemove(b.data('chat'), b.data('file'))) { saveSettings(); toast('success', '已从图库移除'); }
+  body.off('click', '.sl_gal_del').on('click', '.sl_gal_del', async function () {
+    if (galleryRemove(this.dataset.chat, this.dataset.url) && await flushArchive()) toast('success', '已从图库移除');
     renderGalleryInto(body);
   });
-  body.off('click', '.sl_gal_clear').on('click', '.sl_gal_clear', function () {
-    var ck = jQuery(this).data('chat');
+  body.off('click', '.sl_gal_clear').on('click', '.sl_gal_clear', async function () {
+    var ck = this.dataset.chat;
     if (!confirm('清空这场聊天的图库记录？（png 文件不会删）')) return;
-    var n = galleryClearChat(ck); saveSettings();
-    toast('success', '已清空 ' + n + ' 张记录'); renderGalleryInto(body);
+    var n = galleryClearChat(ck);
+    if (await flushArchive()) toast('success', '已清空 ' + n + ' 张记录');
+    renderGalleryInto(body);
   });
   body.off('click', '#sl_gal_prune').on('click', '#sl_gal_prune', async function () {
     var b = jQuery(this); b.prop('disabled', true).text('清理中…');
     try {
       var r = await galleryPrune();
-      if (!r.ok) toast('warning', '拿不到聊天列表（酒馆接口不可用），本次没动');
+      if (r.saveFailed) toast('warning', '图库清理尚未保存，请重试');
+      else if (!r.ok) toast('warning', '未能获取聊天列表，图库未清理');
       else if (!r.removedChats) toast('success', '没有已删除的聊天，图账是干净的');
       else toast('success', '清掉 ' + r.removedChats + ' 场 / ' + r.removedImages + ' 张图 / ' + r.removedCaches + ' 条缓存');
-      saveSettings();
     } catch (e) { toast('error', '清理失败'); }
     b.prop('disabled', false).text('清理已删聊天');
     renderGalleryInto(body);

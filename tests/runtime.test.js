@@ -14,13 +14,18 @@ globalThis.$ = jQuery;
 const eventSource = new EventEmitter();
 const types = Object.fromEntries(['GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_UPDATED','MESSAGE_RECEIVED',
     'MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED','CHARACTER_MESSAGE_RENDERED','CHAT_CHANGED'].map(x => [x, x]));
-const ctx = { chat: [], chatId: 'test', characters: [{ data: { name: 'Tester' }, chat: 'test' }], characterId: 0,
+const ctx = { chat: [], chatId: 'test', characters: [{ avatar: 'tester.png', data: { name: 'Tester' }, chat: 'test' }], characterId: 0,
     eventSource, eventTypes: types, getRequestHeaders: () => ({}), setExtensionPrompt() {} };
 initSettings(() => ctx, {});
-Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'http://analysis.local', auxModel: 'test', autoGen: 0, storyLib: false });
+Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'http://analysis.local', auxModel: 'test', autoGen: 0 });
 const { loadPrompts } = await import('../prompts/loader.js');
 globalThis.fetch = async url => ({ ok: true, text: () => readFile(new URL('../prompts/' + String(url).split('?')[0], import.meta.url), 'utf8') });
 await loadPrompts('');
+const { archive, sessionData, currentSession, sessionKey } = await import('../modules/archive.js');
+const { galleryAdd } = await import('../modules/gallery.js');
+const keyFor = file => sessionKey('tester.png', file);
+const liveSession = () => sessionData(currentSession().key);
+test.beforeEach(() => { archive.sessions = {}; });
 const scanner = await import('../modules/scanner.js');
 const { runRosterPipeline, parseRosterImages } = await import('../modules/pipeline/roster-pipeline.js');
 const { extractNarrativeText, initFrontendBridge, stopFrontendBridge } = await import('../modules/frontend-bridge.js');
@@ -48,9 +53,9 @@ test('switching to automatic queues only the new last assistant floor', async ()
     const { setEnqueueGen } = await import('../modules/render.js');
     const { enqueueGen } = await import('../modules/queue.js');
     const queued = [];
-    const saved = { auto: settings.autoGen, map: settings.msgMap };
+    const saved = settings.autoGen;
     try {
-        settings.autoGen = 0; settings.msgMap = {};
+        settings.autoGen = 0;
         setEnqueueGen(btn => { queued.push(btn.closest('.mes').attr('mesid')); btn.text('排队中…'); });
         show('[img:积压图]'); scanner.startPolling();
         fetch = async () => response('A scene.');
@@ -65,12 +70,12 @@ test('switching to automatic queues only the new last assistant floor', async ()
         assert.deepEqual(queued, ['1']);
     } finally {
         scanner.stopPolling(); setEnqueueGen(enqueueGen);
-        settings.autoGen = saved.auto; settings.msgMap = saved.map;
+        settings.autoGen = saved;
     }
 });
 
 test('TavernHelper visible streaming sibling restores finished slots and reanalyzes only the clicked marker', async () => {
-    const saved = settings.msgMap; settings.msgMap = {};
+
     const source = '开头[img:第一处]中间[img:第二处]结尾';
     show(source); scanner.startPolling();
     const parent = document.querySelector('.mes');
@@ -105,14 +110,13 @@ test('TavernHelper visible streaming sibling restores finished slots and reanaly
         assert.equal(requests, 3);
         assert.equal(streamed.querySelectorAll('.sl_img_btn')[0].dataset.slid, ids[0]);
         assert.notEqual(streamed.querySelectorAll('.sl_img_btn')[1].dataset.slid, ids[1]);
-    } finally { scanner.stopPolling(); settings.msgMap = saved; }
+    } finally { scanner.stopPolling(); }
 });
 
 test('a branch uses only its selected gallery for exact marker matches', async () => {
-    const { imgCacheSetById } = await import('../modules/cache.js');
-    const { setGalleryCacheSource, galleryCacheSource, galleryAdd } = await import('../modules/gallery.js');
-    const original = { map: settings.msgMap, gallery: settings.gallery, chat: ctx.chatId, sources: settings.galleryCacheSources };
-    settings.msgMap = {}; settings.gallery = {}; settings.galleryCacheSources = {};
+    const { setGalleryCacheSource, galleryCacheSource } = await import('../modules/gallery.js');
+    const original = ctx.chatId;
+
     const marker = '[img:会话复用测试]';
     const source = marker + ' 中间 ' + marker;
     let calls = 0;
@@ -122,46 +126,42 @@ test('a branch uses only its selected gallery for exact marker matches', async (
         await scanner.runAuxImageScan(jQuery('.mes_text'));
         await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 2);
         const ids = [...document.querySelectorAll('.sl_img_btn')].map(btn => btn.dataset.slid);
-        imgCacheSetById(ids[0], '/branch-a.png'); imgCacheSetById(ids[1], '/branch-b.png');
-        galleryAdd('/branch-a.png', { kind: 'chat' }); galleryAdd('/branch-b.png', { kind: 'chat' });
+        galleryAdd('/branch-a.png', { blockId: ids[0] }); galleryAdd('/branch-b.png', { blockId: ids[1] });
         ctx.chatId = 'another'; show(source);
         eventSource.emit(types.CHAT_CHANGED);
         await scanner.runAuxImageScan(jQuery('.mes_text'));
         await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 2 && !scanner.scanCoordinator.running);
-        imgCacheSetById(document.querySelector('.sl_img_btn').dataset.slid, '/unselected.png');
-        galleryAdd('/unselected.png', { kind: 'chat' });
+        galleryAdd('/unselected.png', { blockId: document.querySelector('.sl_img_btn').dataset.slid });
         ctx.chatId = 'branch'; show('分支正文 ' + source);
         eventSource.emit(types.CHAT_CHANGED);
         scanner.scanAllMsgs();
         assert.equal(galleryCacheSource(), '');
         assert.equal(document.querySelectorAll('.sl_img_block img').length, 0);
-        assert.equal(setGalleryCacheSource('Tester_test'), true);
+        assert.equal(setGalleryCacheSource(keyFor('test')), true);
         scanner.scanAllMsgs();
         assert.deepEqual([...document.querySelectorAll('.sl_img_block img')].map(img => img.getAttribute('src')), ['/branch-a.png', '/branch-b.png']);
         const branchIds = [...document.querySelectorAll('.sl_img_btn')].map(btn => btn.dataset.slid);
         assert.ok(branchIds.every(id => !ids.includes(id)));
         assert.equal(calls, 4);
-        assert.deepEqual(Object.keys(settings.gallery.Tester.Tester_branch), ['branch-a.png', 'branch-b.png']);
+        assert.deepEqual(Object.keys(liveSession().gallery), ['/branch-a.png', '/branch-b.png']);
         document.querySelector('.sl_img_reanalyze').click();
         await waitUntil(() => document.querySelector('.sl_img_btn').dataset.prompt === 'Prompt 5.');
         scanner.scanAllMsgs();
         assert.equal(document.querySelectorAll('.sl_img_block img').length, 1);
         assert.equal(document.querySelector('.sl_img_block img').getAttribute('src'), '/branch-b.png');
     } finally {
-        scanner.stopPolling(); ctx.chatId = original.chat; settings.msgMap = original.map;
-        settings.gallery = original.gallery; settings.galleryCacheSources = original.sources;
+        scanner.stopPolling(); ctx.chatId = original;
     }
 });
 
 test('chat filenames switch without normalization and roster copies can be edited or deleted independently', async () => {
     const { listCharacterChats, openCharacterSession } = await import('../modules/chat-sessions.js');
     const { copyRosterToCurrent, editRosterAnchor, deleteRosterPerson } = await import('../modules/roster.js');
-    const saved = settings.roster, character = ctx.characters[0], oldOpen = ctx.openCharacterChat;
-    const sourceKey = 'Tester_Tester-2026-11-23T100000';
+    const oldOpen = ctx.openCharacterChat;
     const file = 'Tester - 2026-11-23 @ T10:00:00';
+    const sourceKey = keyFor(file);
     try {
-        character.avatar = 'tester.png';
-        settings.roster = { Tester: { [sourceKey]: { Person: { anchor: 'eyes:green' } } } };
+        sessionData(sourceKey, true).roster.Person = { anchor: 'eyes:green' };
         fetch = async () => ({ ok: true, json: async () => [{ file_name: file + '.jsonl' }] });
         let opened;
         ctx.openCharacterChat = async name => { opened = name; };
@@ -170,29 +170,25 @@ test('chat filenames switch without normalization and roster copies can be edite
         assert.equal(await openCharacterSession(chats.find(chat => chat.key === sourceKey).file), true);
         assert.equal(opened, file);
         assert.equal(copyRosterToCurrent(sourceKey), 1);
-        assert.equal(editRosterAnchor('Tester_test', 'Person', 'eyes:blue'), true);
-        assert.equal(settings.roster.Tester.Tester_test.Person.anchor, 'eyes:blue');
-        assert.equal(settings.roster.Tester[sourceKey].Person.anchor, 'eyes:green');
-        assert.equal(deleteRosterPerson('Tester_test', 'Person'), true);
-        assert.ok(settings.roster.Tester[sourceKey].Person);
-    } finally { settings.roster = saved; delete character.avatar; ctx.openCharacterChat = oldOpen; }
+        assert.equal(editRosterAnchor(keyFor('test'), 'Person', 'eyes:blue'), true);
+        assert.equal(liveSession().roster.Person.anchor, 'eyes:blue');
+        assert.equal(sessionData(sourceKey).roster.Person.anchor, 'eyes:green');
+        assert.equal(deleteRosterPerson(keyFor('test'), 'Person'), true);
+        assert.ok(sessionData(sourceKey).roster.Person);
+    } finally { ctx.openCharacterChat = oldOpen; }
 });
 
-test('the archive page opens existing roster entries without rescanning or migrating them', async () => {
+test('the archive page opens the exact current and historical sessions', async () => {
     const { createExpandedPanel } = await import('../modules/ui/panel.js');
     const { renderArchivePage } = await import('../modules/ui/tabs.js');
-    const character = ctx.characters[0];
-    const saved = { roster: settings.roster, profiles: settings.profiles, fetch, frame: globalThis.requestAnimationFrame };
+    const saved = { fetch, frame: globalThis.requestAnimationFrame };
     const historyFile = 'Tester - 2026-11-16 @ T08:00:00';
-    const historyKey = 'Tester_Tester-2026-11-16T080000';
+    const historyKey = keyFor(historyFile);
     try {
-        character.avatar = 'tester.png';
-        settings.profiles = {};
-        settings.roster = { Tester: {
-            Tester_test: { Alice: { key: 'Alice', name: 'Alice', anchor: 'eyes:green', portrait: '/old.png' } },
-            [historyKey]: { Robin: { key: 'Robin', name: 'Robin', anchor: 'eyes:blue' } },
-        } };
-        const before = JSON.stringify(settings.roster);
+        sessionData(keyFor('test'), true).roster.Alice = { key: 'Alice', name: 'Alice', anchor: 'eyes:green', portraitViews: { front: '/existing.png' } };
+        sessionData(historyKey, true).roster.Robin = { key: 'Robin', name: 'Robin', anchor: 'eyes:blue' };
+        sessionData(sessionKey('other.png', 'test'), true).roster.Hidden = { key: 'Hidden', name: 'Hidden' };
+        const before = JSON.stringify(archive.sessions);
         globalThis.requestAnimationFrame = callback => callback();
         fetch = async url => url === '/api/characters/chats'
             ? { ok: true, json: async () => [{ file_name: historyFile + '.jsonl' }] }
@@ -201,19 +197,18 @@ test('the archive page opens existing roster entries without rescanning or migra
         renderArchivePage();
         const page = document.querySelector('.sl_page_body');
         assert.equal(page.querySelector('details[open] .sl_pcard').dataset.char, 'Alice');
-        const history = () => page.querySelector(`details[data-chat="${historyKey}"]`);
+        const history = () => [...page.querySelectorAll("details[data-chat]")].find(node => node.dataset.chat === historyKey);
         await waitUntil(history);
         assert.equal(history().open, false);
         assert.ok(history().querySelector('summary').textContent.includes(historyFile));
         history().open = true;
         history().querySelector('.sl_pcard').click();
         assert.equal(page.querySelector('.sl_anchor_input').value, 'eyes:blue');
-        assert.equal(JSON.stringify(settings.roster), before);
+        assert.equal(JSON.stringify(archive.sessions), before);
+        assert.equal(page.textContent.includes("Hidden"), false);
     } finally {
         jQuery('#sl_panel_body').empty();
-        settings.roster = saved.roster; settings.profiles = saved.profiles;
         fetch = saved.fetch; globalThis.requestAnimationFrame = saved.frame;
-        delete character.avatar;
     }
 });
 
@@ -280,7 +275,7 @@ test('the compact panel and icon dock to the dragged edge across collapse and vi
 
 for (const style of ['eventTypes', 'event_types']) test(style + ': generation lifecycle, late edits, swipe cache and rerender restoration', async () => {
     delete ctx.eventTypes; delete ctx.event_types; ctx[style] = types;
-    settings.msgMap = {};
+
     let calls = 0;
     fetch = async () => response('画面提示词' + ++calls);
     const prefix = '保持同样开头'.repeat(20);
@@ -319,7 +314,7 @@ test('late API result cannot update profiles/cache/DOM after chat switch', async
         release(response('不应落地的旧提示词'));
         await waitUntil(() => !scanner.scanCoordinator.running);
         assert.equal(document.querySelectorAll('.sl_img_btn').length, 0);
-        assert.equal(Object.values(settings.msgMap).some(v => v.includes('不应落地')), false);
+        assert.equal(JSON.stringify(archive.sessions).includes('不应落地'), false);
     } finally { scanner.stopPolling(); ctx.chatId = 'test'; }
 });
 
@@ -374,36 +369,29 @@ test('failed slots never borrow another prompt; successful slots are reused on r
     assert.equal(calls, 5); assert.equal(results.size, 1);
 });
 
-test('editing one marker retains other prompts, images and IDs, including after reload and v2 migration', async () => {
-    const { imgCacheSetById } = await import('../modules/cache.js');
-    for (const legacy of [false, true]) {
-        settings.msgMap = {}; settings.msgMapTs = {}; let calls = 0;
-        fetch = async () => response('编辑回归提示词' + ++calls);
-        const source = '前[img:相同]中[img:相同]后[img:尾图]';
-        show(source); scanner.startPolling();
-        try {
-            await scanner.runAuxImageScan(jQuery('.mes_text'));
-            await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 3 && !scanner.scanCoordinator.running);
-            const original = Array.from(document.querySelectorAll('.sl_img_btn'), b => ({ id: b.dataset.slid, prompt: b.dataset.prompt }));
-            imgCacheSetById(original[0].id, '/first.png'); imgCacheSetById(original[2].id, '/third.png');
-            if (legacy) {
-                const key = scanner.readSnapshot(0).key, record = JSON.parse(settings.msgMap[key]);
-                settings.msgMap[key] = JSON.stringify({ version: 2, source, swipe: 0, enhanced: record.enhanced });
-            }
-            scanner.stopPolling(); scanner.startPolling(); // No in-memory revision map survives.
-            ctx.chat[0].mes = source.replace('中[img:相同]', '中[img:新图]'); document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
-            await scanner.runAuxImageScan(jQuery('.mes_text'));
-            await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 3 && !scanner.scanCoordinator.running);
-            const updated = Array.from(document.querySelectorAll('.sl_img_btn'));
-            assert.equal(calls, 4); assert.equal(updated[0].dataset.slid, original[0].id); assert.equal(updated[2].dataset.slid, original[2].id);
-            assert.equal(updated[0].dataset.prompt, original[0].prompt); assert.equal(updated[2].dataset.prompt, original[2].prompt);
-            assert.notEqual(updated[1].dataset.slid, original[1].id);
-            assert.deepEqual(Array.from(document.querySelectorAll('.sl_img_block img'), i => i.getAttribute('src')), ['/first.png', '/third.png']);
-            ctx.chat[0].mes += '仅改正文'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
-            await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
-            assert.equal(calls, 4);
-        } finally { scanner.stopPolling(); }
-    }
+test('editing one marker retains other prompts, images and IDs after scanner restart', async () => {
+    let calls = 0;
+    fetch = async () => response('编辑回归提示词' + ++calls);
+    const source = '前[img:相同]中[img:相同]后[img:尾图]';
+    show(source); scanner.startPolling();
+    try {
+        await scanner.runAuxImageScan(jQuery('.mes_text'));
+        await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 3 && !scanner.scanCoordinator.running);
+        const original = Array.from(document.querySelectorAll('.sl_img_btn'), b => ({ id: b.dataset.slid, prompt: b.dataset.prompt }));
+        galleryAdd('/first.png', { blockId: original[0].id }); galleryAdd('/third.png', { blockId: original[2].id });
+        scanner.stopPolling(); scanner.startPolling(); // No in-memory revision map survives.
+        ctx.chat[0].mes = source.replace('中[img:相同]', '中[img:新图]'); document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+        await scanner.runAuxImageScan(jQuery('.mes_text'));
+        await waitUntil(() => document.querySelectorAll('.sl_img_btn').length === 3 && !scanner.scanCoordinator.running);
+        const updated = Array.from(document.querySelectorAll('.sl_img_btn'));
+        assert.equal(calls, 4); assert.equal(updated[0].dataset.slid, original[0].id); assert.equal(updated[2].dataset.slid, original[2].id);
+        assert.equal(updated[0].dataset.prompt, original[0].prompt); assert.equal(updated[2].dataset.prompt, original[2].prompt);
+        assert.notEqual(updated[1].dataset.slid, original[1].id);
+        assert.deepEqual(Array.from(document.querySelectorAll('.sl_img_block img'), i => i.getAttribute('src')), ['/first.png', '/third.png']);
+        ctx.chat[0].mes += '仅改正文'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+        await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
+        assert.equal(calls, 4);
+    } finally { scanner.stopPolling(); }
 });
 
 test('cancel image queue aborts active request, drops waiting/portrait tasks and requires explicit resume', async () => {
@@ -484,7 +472,7 @@ test('H3 retries caption JSON wrappers instead of forwarding them as image promp
 });
 
 test('H3 mode cannot reuse another model prompt; edits within H3 still reuse unchanged slots', async () => {
-    const savedMode = settings.modelType; settings.modelType = 'zit'; settings.msgMap = {}; settings.msgMapTs = {};
+    const savedMode = settings.modelType; settings.modelType = 'zit';
     let calls = 0; fetch = async () => response('Independent image caption ' + ++calls);
     show('[img:甲][img:乙]'); scanner.startPolling();
     try {
@@ -504,13 +492,12 @@ test('H3 mode cannot reuse another model prompt; edits within H3 still reuse unc
 });
 
 test('switching to H3 still restores historical images from another mode without generating them', async () => {
-    const { imgCacheSetById } = await import('../modules/cache.js');
-    const savedMode = settings.modelType; settings.modelType = 'zit'; settings.msgMap = {}; settings.msgMapTs = {};
+    const savedMode = settings.modelType; settings.modelType = 'zit';
     let calls = 0; fetch = async () => response('Historical image caption ' + ++calls);
     show('[img:历史图]'); scanner.startPolling();
     try {
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
-        const oldId = document.querySelector('.sl_img_btn').dataset.slid; imgCacheSetById(oldId, '/history.png');
+        const oldId = document.querySelector('.sl_img_btn').dataset.slid; galleryAdd('/history.png', { blockId: oldId });
         ctx.chat.push({ mes: '新的回复，无图', is_user: false, swipe_id: 0 });
         document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">新的回复，无图</div></div>');
         document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
@@ -525,14 +512,14 @@ test('assembled requests keep shared policies, model overlays and per-call recor
     const { getPrompt } = await import('../prompts/loader.js');
     const { upsertPerson, setEnglishAnchor } = await import('../modules/roster.js');
     const { upsertEntry } = await import('../modules/wardrobe.js');
-    const saved = { mode: settings.modelType, layered: settings.slPurgeLayered, roster: settings.roster, wardrobe: settings.wardrobe };
+    const saved = { mode: settings.modelType, layered: settings.slPurgeLayered };
     const overlayPaths = { zit: 'zit', anima: 'anima', anime: 'anime', anime_tag: 'anime-tag', krea2: 'krea2', minimax_h3_image: 'minimax-h3-image' };
     const anchor = 'race:LayerTestOrigin | age:forty-two | nose:LayerTestNose | skin_tone:LayerTestTone';
     const detail = 'LayerTestBlue cotton jacket, LayerTestRound collar';
     const source = '[img:递出包裹|人物:LayerActor（层次测试）|造型:服装=LayerOutfit|要点:腰部以上，左手托住包裹]';
     let request;
     try {
-        settings.roster = {}; settings.wardrobe = {}; settings.modelType = 'minimax_h3_image';
+        settings.modelType = 'minimax_h3_image';
         upsertPerson('LayerActor', '层次测试', '本轮档案原文', 'anchor');
         setEnglishAnchor('LayerActor', '层次测试', anchor);
         upsertEntry('服装', 'LayerOutfit', detail, 'expanded');
@@ -548,7 +535,6 @@ test('assembled requests keep shared policies, model overlays and per-call recor
             assert.equal(system.split(overlay).length - 1, 1, 'one selected overlay: ' + mode.id);
             assert.ok(system.indexOf('## 造型库具象化') < system.indexOf(wardrobe));
             assert.ok(system.indexOf(wardrobe) < system.indexOf(overlay));
-            assert.equal(system.includes(getPrompt('static-profile/system.txt').trim()), false, 'card scanning is a separate request');
             assert.equal(system.includes(getPrompt('main-llm-instruction.txt').trim()), false, 'main-model instructions are a separate stage');
             if (layered) assert.ok(systems.some(m => m.content === overlay)); else assert.equal(systems.length, 1);
             assert.ok(user.includes('【人物档案】') && user.includes(anchor));
@@ -562,6 +548,5 @@ test('assembled requests keep shared policies, model overlays and per-call recor
         }
     } finally {
         settings.modelType = saved.mode; settings.slPurgeLayered = saved.layered;
-        settings.roster = saved.roster; settings.wardrobe = saved.wardrobe;
     }
 });

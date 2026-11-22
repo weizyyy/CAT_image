@@ -1,13 +1,13 @@
-// ── SillyImage Lab v2.4 人物表（简化档案：不分静态/动态） ──
+// ── SillyImage Lab 人物表（简化档案：不分静态/动态） ──
 // 酒馆AI模式专用：主LLM通过占位符 [img:…|人物:名字（身份），外貌|…] 提供建档信息，
 // 插件直接存人物表；提示词由插件AI按人物表外貌+占位符要点补全。
 // key = 名字（身份标签）→ 重名天然区分（同名不同人）。
 
 import { slLog } from './log.js';
-import { settings, saveSettings, getSTContext, getActiveMode, isEnglishProseMode } from './settings.js';
-import { getCharacterName, getChatId } from './pipeline/profile.js';
-import { refreshCoopCards } from './sync-cards.js';  // [Fix] 人物表变化时刷新导演模式协作卡索引
-import { stripSeedText, parseSeedSegment, formatSeed, hasSeedField, findLostNumbers } from './text-utils.js';  // v1.11.1 种子剥离（+ v1.13.6 数字保真）
+import { getSTContext, getActiveMode } from './settings.js';
+import { currentSession, ownsSession, sessionData, saveArchive } from './archive.js';
+import { refreshCoopCards } from './sync-cards.js';
+import { stripSeedText, parseSeedSegment, formatSeed, hasSeedField, findLostNumbers } from './text-utils.js';
 
 // ── key 归一化 ──
 export function personKey(name, identity) {
@@ -18,47 +18,14 @@ export function personKey(name, identity) {
 }
 
 // ── 确保当前角色+会话的人物表存在，返回 {charName, chatId, list} ──
+export function rosterForChat(chatId = currentSession().key) {
+    return sessionData(chatId)?.roster;
+}
+
 export function ensureRoster() {
-    var charName = getCharacterName();
-    if (!charName) return null;
-    var chatId = getChatId();
-    if (!settings.roster) settings.roster = {};
-    if (!settings.roster[charName]) settings.roster[charName] = {};
-    if (!settings.roster[charName][chatId]) settings.roster[charName][chatId] = {};
-    return { charName: charName, chatId: chatId, list: settings.roster[charName][chatId] };
-}
-
-// ── 是否有该人物 ──
-export function hasPerson(name, identity) {
-    try {
-        var r = ensureRoster();
-        if (!r) return false;
-        var key = personKey(name, identity);
-        if (key && r.list[key]) return true;
-        // 无 identity 时按名字模糊匹配（容忍主LLM没写标签）
-        if (!identity) {
-            for (var k in r.list) {
-                if (k === name || k.indexOf(name + '（') === 0) return true;
-            }
-        }
-        return false;
-    } catch (e) { return false; }
-}
-
-// ── 查找人物外貌（用于提示词填充/校验） ──
-export function findAppearance(name, identity) {
-    try {
-        var r = ensureRoster();
-        if (!r) return '';
-        var key = personKey(name, identity);
-        if (key && r.list[key]) return r.list[key].appearance || '';
-        if (!identity) {
-            for (var k in r.list) {
-                if (k === name || k.indexOf(name + '（') === 0) return r.list[k].appearance || '';
-            }
-        }
-        return '';
-    } catch (e) { return ''; }
+    const { key: chatId, card } = currentSession();
+    const session = sessionData(chatId, true);
+    return session && { charName: card.name, chatId, list: session.roster };
 }
 
 // ── 建档/更新（appearance 取更长版本，防覆盖丢失） ──
@@ -74,7 +41,7 @@ export function composePersonAppearance(e) {
     if (base.indexOf(live) >= 0) return base;   // base 已包含 live → 只发 base
     return base + '，' + live;
 }
-// v1.26.5：主模型会把身份标签写成注释（「同上，不重复外貌」），personKey 一变就建出第二个空档案。
+// 主模型会把身份标签写成注释（「同上，不重复外貌」），personKey 一变就建出第二个空档案。
 function _isPlaceholderIdentity(id) {
     var t = String(id || "").trim();
     if (!t) return true;
@@ -105,14 +72,14 @@ export function upsertPerson(name, identity, appearance, source, seed) {
         var r = ensureRoster();
         if (!r) return null;
         var key = personKey(name, identity);
-        // v1.26.5：身份标签是占位注释（同上/不重复外貌…）或该 key 不存在时，复用同名条目
+        // 身份标签是占位注释（同上/不重复外貌…）或该 key 不存在时，复用同名条目
         var _existingProbe = (ensureRoster() || {}).list || {};
         if (!_existingProbe[key] || _isPlaceholderIdentity(identity)) {
             var _altKey = _findKeyByName(name);
             if (_altKey) key = _altKey;
         }
         if (!key) return null;
-        // [Fix v1.11.1] 种子不是外貌：从 appearance 里剥出来单独存（entry.seed）
+        // [Fix] 种子不是外貌：从 appearance 里剥出来单独存（entry.seed）
         // 留在 base 里会被当成"静态锚点"喂给辅助AI、还会被动态要素兜底抄进提示词
         var _seedRaw = String(seed || '').trim();
         try {
@@ -121,7 +88,7 @@ export function upsertPerson(name, identity, appearance, source, seed) {
         } catch (eSeed) {}
         var existing = r.list[key];
         var isCast = source === 'cast';
-        // v1.3：主模型在占位符里写的「静态锚点」也进 base（来源 'anchor'）
+        // 主模型在占位符里写的「静态锚点」也进 base（来源 'anchor'）
         // 优先级（高者永不被低者覆盖）：expanded(辅助AI具象化) > cast(角色卡扫描) > anchor(主模型原文)
         var isAnchor = source === 'anchor';
         var writesBase = isCast || isAnchor;
@@ -135,7 +102,7 @@ export function upsertPerson(name, identity, appearance, source, seed) {
                 if (_sk === name || _sk.indexOf(name + '（') === 0) _sameName.push(r.list[_sk]);
             }
             if (_sameName.length === 1) {
-                // [Fix v1.11] 身份标签变了 ≠ 换了一个人，但也 ≠ 一定是同一人 —— 要分两种情况：
+                // [Fix] 身份标签变了 ≠ 换了一个人，但也 ≠ 一定是同一人 —— 要分两种情况：
                 //   ① 剧情里她改嫁/被赎身/升职/落难 → 标签变了但**外貌还是同一套** → 合并（否则新建空条目 → 重新捏脸 = OOC）
                 //   ② 真·同名不同人（柳如烟（千金小姐）/ 柳如烟（青楼妓女））→ 标签不同且**外貌也不同** → 各存各条
                 // 判据 = 新旧外貌文本的 Dice 相似度（≥0.75 → 同一人换身份）
@@ -227,7 +194,7 @@ export function upsertPerson(name, identity, appearance, source, seed) {
 }
 
 // ── 批量应用占位符人物段 ──
-// v1.3：占位符人物段里的 appearance = 静态锚点（照抄角色卡）→ 默认写入 base（source='anchor'）
+// 占位符人物段里的 appearance = 静态锚点（照抄角色卡）→ 默认写入 base（source='anchor'）
 export function applyPersonSegments(segments, source) {
     var n = 0;
     if (!segments || !segments.length) return n;
@@ -246,7 +213,7 @@ export function applyPersonSegments(segments, source) {
     return n;
 }
 
-// ── v1.11.2：主模型漏了哪些外貌维度 ──
+// ── 主模型漏了哪些外貌维度 ──
 // 主模型只写体型时（例如"娇小，平胸，细腰"），辅助AI 会静默按"通用亚洲脸"先验补齐 →
 // 卡里写「雪白发/灰白瞳」的角色被画成「深棕发/深棕瞳」。这里把"缺哪些"明确告诉辅助AI。
 function _missingFaceDims(t) {
@@ -292,84 +259,18 @@ export function rosterIndexText(limit) {
     } catch (e) { return []; }
 }
 
-// ── 从卡库扫描档案导入人物表（复用 scanCharacterProfile 产出，保证人物一致性） ──
-// cast: { 角色名: { static, body, enPrompt, enTags, ... } }
-// mode: 'zit' | 'anima' | 'anime' | 'anime_tag' | 'krea2' | 'minimax_h3_image' → 选对应语言锚点
-// 返回值：导入/更新条数
-// 身份维度过滤器：档案只保留"脸部/身材/永久标记"（用户规则）——
-// 发型/衣着/配饰/状态等可变维度由酒馆AI按轮次写（插件AI只做 档案+酒馆AI提示词 → 图片prompt）。
-export function identityAnchorOnly(text) {
-    if (!text) return '';
-    var lines = String(text).split('\n');
-    var keep = [];
-    for (var i = 0; i < lines.length; i++) {
-        var ln = lines[i].trim();
-        if (!ln) continue;
-        if (/^(发型|衣着|配饰|状态|临时|服饰|发型与发色|衣着与配饰)/.test(ln)) continue;  // 可变维度 → 丢弃
-        keep.push(ln);
-    }
-    return keep.join('\n').replace(/【[^】]+】/g, '').trim();
-}
-
-export function importFromCast(cast) {
-    if (!cast) return 0;
-    var n = 0;
-    var mode = getActiveMode();
-    for (var name in cast) {
-        var c = cast[name];
-        if (!c) continue;
-        var label = (c.label || '').trim();
-        var appearance = '';
-        // anima 混合模式：结构用标签，所以优先 enTags；没有则退回 enPrompt
-        if (mode === 'anima' && (c.enTags || c.enPrompt)) appearance = c.enTags || c.enPrompt;
-        else if (isEnglishProseMode(mode) && c.enPrompt) appearance = c.enPrompt;   // 英文锚点为整体描述，暂不拆维度
-        else if (mode === 'anime_tag' && c.enTags) appearance = c.enTags;
-        else appearance = identityAnchorOnly(c.static || '');             // 中文：只保留脸/身形/永久标记
-        if (c.body && appearance && !/身形/.test(appearance)) appearance += '；身形：' + c.body;
-        if (!appearance) continue;
-        // 用户规则：人物表 key = 名字（身份标签）；同名不同身份标签 = 各存各条
-        //（两个柳如烟都发给插件AI，由其按占位符里的标签+场景自决）；同 key 由 upsert 做"更长者胜"。
-        upsertPerson(name, label, appearance, 'cast');
-        n++;
-    }
-    return n;
-}
-
-// ══════════════════════════════
-// ── 锚点库 v2.0 · 英文权威，英文模式共用一份 ──
-// 演进：
-//   v1.6.2 之前 —— 英文三模式每轮重新翻译主模型的中文锚点 → 措辞漂移（同一特征四种写法）。
-//   v1.6.2 做法 —— 按【模式】各存一份"该模式语言"的锚点。但 anima 的锚点规范没写清楚，
-//                  辅助AI 照 PROFILE 示例存成了中文 → 立绘走 cleanAnimePrompt 时被整段删空 →
-//                  只剩框架词 → 画出与角色无关的路人（2026-10-17 实测 8/8 全废）。
-//   v2.0 做法 —— 锚点**只有一套、只写英文**（`维度:值 | …`，维度名与值全 ASCII）：
-//      · entry.anchor    = 英文权威锚点（唯一来源，anima / anime / anime_tag / krea2 / zit 共用）
-//      · entry.atoms.zit = 中文呈现缓存（zit 中文模式逐字复用；辅助AI 在 zit 模式回传 anchor_zh）
-//      英文模式一律读 entry.anchor，**绝不读中文**（读了就会被 cleanAnimePrompt 删空 = 低级失误）。
-// 写入闸门：英文 → entry.anchor；中文 → 只允许进 atoms.zit 且模式必须是 zit；
-//          其余（英文模式收到中文锚点）一律拒绝并记日志。
-// 写入规则：首次写入即冻结；之后只接受「包含旧文且更长」的版本（= 追加缺失维度，而不是重写措辞）。
-var CJK_RE = /[\u2e80-\u2eff\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]/;
-// 是否"可安全进英文提示词"的锚点：不含任何中日韩字符/全角标点，且有英文字母
+const CJK_RE = /[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
 export function isEnglishAnchor(text) {
     var t = String(text || '');
     if (!t.trim()) return false;
     if (CJK_RE.test(t)) return false;
     return /[A-Za-z]/.test(t);
 }
-// 旧存档兼容：v2.0 之前按模式分桶存过锚点，挑第一个英文的当权威锚点（只读，不回写）
-function _legacyEnglishAtoms(e) {
-    try {
-        if (!e || !e.atoms) return '';
-        for (var m in e.atoms) { if (isEnglishAnchor(e.atoms[m])) return e.atoms[m]; }
-    } catch (e2) {}
-    return '';
-}
 export function getEnglishAnchor(entry) {
     try {
         if (!entry) return '';
         if (isEnglishAnchor(entry.anchor)) return entry.anchor;
-        return _legacyEnglishAtoms(entry);
+        return '';
     } catch (e) { return ''; }
 }
 // 该模式下"该用的锚点文本"：zit → 中文呈现缓存（没有才退回英文权威锚点）；英文模式 → 英文权威锚点
@@ -377,19 +278,18 @@ export function getAtomAnchor(entry, mode) {
     try {
         if (!entry) return '';
         var m = mode || getActiveMode();
-        if (m === 'zit') return (entry.atoms && entry.atoms.zit) || getEnglishAnchor(entry) || '';
+        if (m === 'zit') return entry.anchorZh || getEnglishAnchor(entry) || '';
         return getEnglishAnchor(entry);
     } catch (e) { return ''; }
 }
 
-// ── 结构化锚点工具（v1.8.1）──
+// ── 结构化锚点工具──
 // anchor 格式 = 维度:值 | 维度:值 | …；项数用于"到底补全了没有"的可检测校验
 export function atomCount(text) {
     try {
         var t = String(text || '').trim();
         if (!t) return 0;
-        if (t.indexOf('|') >= 0) return t.split('|').filter(function (s) { return s.trim(); }).length;
-        return t.split(/[，,。；;]/).filter(function (s) { return s.trim(); }).length;   // 兼容旧的逗号串
+        return t.split('|').filter(function (s) { return s.trim(); }).length;
     } catch (e) { return 0; }
 }
 
@@ -465,58 +365,15 @@ export function setZitAnchor(name, identity, text) {
         if (!t) return null;
         var e = _findAnchorEntry(name, identity);
         if (!e) return null;
-        if (!e.atoms) e.atoms = {};
-        var act = _applyFrozen(e.atoms.zit || '', t);
+
+        var act = _applyFrozen(e.anchorZh || '', t);
         if (act.write) {
-            e.atoms.zit = t;
+            e.anchorZh = t;
             slLog('中文锚点' + act.why + ': ' + e.key + '（' + atomCount(t) + ' 项）');
         }
-        return e.atoms.zit || null;
+        return e.anchorZh || null;
     } catch (e2) { return null; }
 }
-// ── v2.0 一次性清理：清掉旧版本残留的【分模式锚点】atoms ──
-// 旧版四种模式各存一份锚点，anima 那份被辅助 AI 按中文 PROFILE 示例写成了中文 →
-// 立绘走 cleanAnimePrompt 时被整段删空 → 只剩框架词 → 画出与角色无关的路人（实测 8/8 全废）。
-// 新版只认 entry.anchor（英文权威）+ entry.atoms.zit（中文呈现缓存），旧桶一律作废，
-// 由辅助 AI 在下一轮按新规范重建。⚠️ 只动锚点字段：base/appearance/live/portrait 与 API 配置全部保留。
-export function cleanLegacyAnchors() {
-    var stat = { persons: 0, slots: 0, bad: 0 };
-    try {
-        var root = settings.roster || {};
-        for (var c in root) {
-            var chats = root[c] || {};
-            for (var ch in chats) {
-                var list = chats[ch] || {};
-                for (var k in list) {
-                    var e = list[k];
-                    if (!e) continue;
-                    if (e.atoms) {
-                        stat.slots += Object.keys(e.atoms).length;
-                        delete e.atoms;
-                        stat.persons++;
-                    }
-                    // 保险：非英文的权威锚点（不该存在）一并清掉，避免又被清洗逻辑删空
-                    if (e.anchor && !isEnglishAnchor(e.anchor)) { delete e.anchor; stat.bad++; }
-                }
-            }
-        }
-    } catch (e3) {}
-    return stat;
-}
-// ── 兼容旧调用：按文本语言自动路由（英文 → 权威锚点；中文 → 仅 zit 模式进中文缓存）──
-export function setAtomAnchor(name, identity, mode, text) {
-    var t = String(text || '').trim();
-    if (!t) return null;
-    if (isEnglishAnchor(t)) return setEnglishAnchor(name, identity, t);
-    var m = mode || getActiveMode();
-    if (m === 'zit') return setZitAnchor(name, identity, t);
-    slLog('⛔ 中文锚点被拒（当前模式 ' + m + ' 只用英文锚点）: ' + name + ' — ' + t.slice(0, 40));
-    return null;
-}
-
-// ── 人物表正文（按名字过滤，不再全量发送） ──
-// 酒馆AI 只在占位符人物段注明"图里出现了谁"（名字即可）；插件按名字匹配：
-// 档案里有几个同名（不同身份标签）就发几个，由画师按场景自选。
 export function rosterDataTextFor(nameList) {
     try {
         var r = ensureRoster();
@@ -552,7 +409,7 @@ export function rosterDataTextFor(nameList) {
                             nmLines.push('   ⭐ 另：这位还缺【英文权威锚点】—— 本轮请一并回传 anchor（英文，维度名与值全英文）字段；它与中文呈现表达同一件事，所有英文模式共用。');
                         }
                     } else if (_m !== 'zit' && e.base) {
-                        // [Fix v1.7.4] 只发【静态锚点】，**不夹带上一轮的 live**
+                        // [Fix] 只发【静态锚点】，**不夹带上一轮的 live**
                         // （live 是上一轮辅助AI回传的可变状态，喂回去 = 读了之前的东西 → 状态串场）
                         nmLines.push('■ ' + e.key + '：' + e.base);
                         nmLines.push('   （以上是主模型写的中文静态锚点；⭐ 你这一轮必须把它具象化成**英文锚点**并通过 ---PROFILE--- 的 anchor 字段回传（维度名与值全英文），下一轮起即可逐字复用）');
@@ -560,19 +417,19 @@ export function rosterDataTextFor(nameList) {
                     } else if (_m === 'zit' && e.base) {
                         nmLines.push('■ ' + e.key + '：' + e.base);
                         nmLines.push('   （以上是静态锚点；本轮衣着/状态/动作一律以【占位符】为准，**不要沿用上一轮**）');
-                        // v1.13.7：zit 模式下「有原文但还没锚点」时，原来**从来没有要求过回传 anchor**
+                        // zit 模式下「有原文但还没锚点」时，原来**从来没有要求过回传 anchor**
                         // （只有英文模式那条分支要求了）→ 锚点会一直空着，每轮重新编脸。
                         nmLines.push('   ⭐ 这位**还没有锚点** —— 本轮必须通过 ---PROFILE--- 回传 anchor（「维度:值 | …」这种格式，zit 模式收中文锚点）+ anchor_zh，之后每轮逐字复用；漏了它 = 之后每张图都要重新编脸。');
                     } else {
                         nmLines.push('■ ' + e.key + '：' + (e.appearance || '（仅有名字，无外貌信息）'));
                     }
-                    // v1.11.2：主模型漏维度时明确告知（否则辅助AI 会按"通用亚洲脸"静默补，画出来不是这个角色）
+                    // 主模型漏维度时明确告知（否则辅助AI 会按"通用亚洲脸"静默补，画出来不是这个角色）
                     var _miss = _missingFaceDims(e.base || e.appearance || '');
                     if (_miss.length) nmLines.push('   ⚠️ 主模型没给：' + _miss.join(' / ') + ' —— 你必须按种子方向推断出具体值（推断值一旦定下就冻结复用，别每轮换）');
-                    // v1.13.6 数字保真：主模型原文里的数字若在锚点里蒸发了 → 点名要回来
+                    // 数字保真：主模型原文里的数字若在锚点里蒸发了 → 点名要回来
                     var _lostN = findLostNumbers((e.base || e.appearance || ''), _atom || '');
                     if (_lostN.length) nmLines.push('   🚨 数字保真：锚点里丢了主模型给的 ' + _lostN.join('、') + ' —— 数字（年龄/身高/体重）是硬事实，不会被润色掉。① 提示词里**必须写出来**（写成「十四岁左右」这类自然说法可以，但信息不许消失，⛔ 不许用「少女/女性」这种泛词顶掉）；② 锚点里该维度若只剩档位词，本轮请把它改成带数字的值（如 `age:14`），**其余维度照旧逐字复用**');
-                    // v1.11.1：种子单独下发（四个分支都要带上 —— 它是"取词方向"，不是外貌）
+                    // 种子单独下发（四个分支都要带上 —— 它是"取词方向"，不是外貌）
                     if (e.seed) nmLines.push('   🌱 种子（主模型给的**取词方向**：气质/调性/重心/反差 —— 按「种子 → 锚点反推」执行，⛔ 禁止把这行原文放进提示词）：' + e.seed);
                     nmCount++;
                     if (e.identity) nmLabels.push(e.identity);
@@ -589,52 +446,6 @@ export function rosterDataTextFor(nameList) {
         }
         return lines.join('\n');
     } catch (e) { return ''; }
-}
-
-// ── 人物表正文旧接口（全量；保留兼容，管线改用上面的过滤版） ──
-export function rosterDataText() {
-    try {
-        var r = ensureRoster();
-        if (!r) return '';
-        var keys = Object.keys(r.list);
-        if (!keys.length) return '';
-        var lines = [];
-        for (var i = 0; i < keys.length; i++) {
-            var e = r.list[keys[i]];
-            lines.push('■ ' + e.key + '：' + (e.appearance || '（仅有名字，无外貌信息）'));
-        }
-        return lines.join('\n');
-    } catch (e) { return ''; }
-}
-
-// ── 清档同步：删掉"角色卡扫描"来源的 base（保留酒馆AI收集的 live） ──
-// 用户删除角色卡档案后，人物表不再持有过期的扫描锚点；若之后重新扫描会自动按规则重建 base。
-export function dropCastBases(charName, chatId) {
-    try {
-        var chat = settings.roster && settings.roster[charName] && settings.roster[charName][chatId];
-        if (!chat) return 0;
-        var n = 0;
-        for (var k in chat) {
-            var e = chat[k];
-            if (e && e.fromCard) {
-                e.fromCard = false;
-                e.base = '';
-                e.appearance = e.live || '';
-                n++;
-            }
-        }
-        if (n) { saveSettings(); try { refreshCoopCards(); } catch (e2) {} }
-        return n;
-    } catch (e) { return 0; }
-}
-export function clearRosterChat(charName, chatId) {
-    try {
-        if (settings.roster && settings.roster[charName] && settings.roster[charName][chatId]) {
-            delete settings.roster[charName][chatId];
-            saveSettings();
-            try { refreshCoopCards(); } catch (e2) {}
-        }
-    } catch (e) {}
 }
 
 // ── 已知人名拆段（多人解析） ──
@@ -675,62 +486,61 @@ export function splitKnownPersonSegments(segments, knownNames) {
 
 // ── 人物表全部条目（供管线判断已建档） ──
 export function editRosterAnchor(chatId, key, text) {
-    const entry = settings.roster?.[getCharacterName()]?.[chatId]?.[key];
+    const session = sessionData(chatId);
+    const entry = ownsSession(session) ? session.roster[key] : null;
     const anchor = String(text || '').trim();
     if (!entry || !isEnglishAnchor(anchor)) return false;
     if (getEnglishAnchor(entry) === anchor) return true;
     entry.anchor = anchor;
-    if (entry.atoms) delete entry.atoms.zit;
+    delete entry.anchorZh;
     // Portrait captions from before the edit still describe the previous appearance.
     delete entry.portraitPrompts;
-    saveSettings();
-    if (chatId === getChatId()) refreshCoopCards();
+    void saveArchive();
+    if (chatId === currentSession().key) refreshCoopCards();
     return true;
 }
 
 export function deleteRosterPerson(chatId, key) {
-    const list = settings.roster?.[getCharacterName()]?.[chatId];
+    const session = sessionData(chatId);
+    const list = ownsSession(session) ? session.roster : null;
     if (!list || !Object.hasOwn(list, key)) return false;
     delete list[key];
-    saveSettings();
-    if (chatId === getChatId()) refreshCoopCards();
+    void saveArchive();
+    if (chatId === currentSession().key) refreshCoopCards();
     return true;
 }
 
 export function copyRosterToCurrent(sourceId) {
-    const roster = settings.roster?.[getCharacterName()];
-    const source = roster?.[sourceId], current = getChatId();
-    if (!source || sourceId === current) return 0;
-    const target = roster[current] ||= {};
+    const current = currentSession();
+    const sourceSession = sessionData(sourceId);
+    if (!ownsSession(sourceSession, current.card) || sourceId === current.key) return 0;
+    const source = sourceSession.roster;
+    const target = sessionData(current.key, true)?.roster;
+    if (!target) return 0;
     let copied = 0;
     for (const [key, entry] of Object.entries(source)) {
         if (Object.hasOwn(target, key)) continue;
         target[key] = JSON.parse(JSON.stringify(entry));
         copied++;
     }
-    if (copied) { saveSettings(); refreshCoopCards(); }
+    if (copied) { void saveArchive(); refreshCoopCards(); }
     return copied;
 }
 
 export function rosterEntries() {
     try {
-        var r = ensureRoster();
-        if (!r) return [];
-        var keys = Object.keys(r.list);
-        var out = [];
-        for (var i = 0; i < keys.length; i++) out.push(r.list[keys[i]]);
-        return out;
+        return Object.values(rosterForChat() || {});
     } catch (e) { return []; }
 }
 
 // ══════════════════════════════════════════════════════════════
-// ── v1.13.8 立绘提示词（辅助 AI 建档时一并产出，插件不再拼装）──
+// ── 立绘提示词（辅助 AI 建档时一并产出，插件不再拼装）──
 // 原来立绘是「atomValues(锚点) + 固定尾巴」拼出来的：锚点里没有的东西（骨相/体态/发丝走向）
 // 永远出不来，四个视角也只能靠"正面/背面"两个词硬顶。让写锚点的那个人顺手写四条，
 // 记忆点更完整、四个视角也更自洽。
 export var PORTRAIT_VIEWS = ['front', 'left', 'right', 'back'];
 
-// v1.26.4：立绘是「首次出场」的一次性基准（给用户看的人物初始状态），不是每轮状态。
+// 立绘是「首次出场」的一次性基准（给用户看的人物初始状态），不是每轮状态。
 // 首次写入后**永不覆盖** —— 后续轮次/后续重写都不许替换基准。
 export function setPortraitPrompts(name, identity, obj) {
     try {
@@ -763,13 +573,13 @@ export function getPortraitPrompt(entry, view) {
     try {
         var pp = entry && entry.portraitPrompts;
         if (!pp) return '';
-        // v1.14：非正面视角**不回退到正面** —— 旧写法 pp[view] || pp.front，某个视角没写就用正面那条，
+        // 非正面视角**不回退到正面** —— 旧写法 pp[view] || pp.front，某个视角没写就用正面那条，
         // 结果四个视角共用一条提示词（实测左右两张几乎一样）。缺就是缺，让上层去补方向/重写。
         var raw;
         if (view && view !== 'front') raw = String(pp[view] || '').trim();
         else raw = String(pp.front || '').trim();
         if (!raw) return '';
-        // v1.27.4：年龄闸门**接通**（v1.26.2 把返回值改回 true 之后一直是死代码，零调用）。
+        // 年龄闸门**接通**。
         // 卡点是：立绘清单（system.txt）要求逐人落地「胸的大小/胸型/乳晕/乳头/体毛/阴毛/阴部」，
         // 没有年龄门槛 —— 成年角色那是体型参考，未成年角色就不该有。
         // 在**出口**硬拦（不依赖模型自觉）：未成年角色的立绘不用模型写的那四条，改用中性维度重建。
@@ -788,7 +598,7 @@ function _safeMinorPortrait(entry, view) {
         : view === 'right' ? 'right side view'
         : view === 'back' ? 'back view' : 'front view';
     var keep = [];
-    var src = [String((entry && entry.anchor) || ''), String((entry && entry.anchor_zh) || '')].join(' | ');
+    var src = [String(entry?.anchor || ''), String(entry?.anchorZh || '')].join(' | ');
     var segs = src.split('|');
     for (var i = 0; i < segs.length; i++) {
         var s = String(segs[i] || '').trim();
@@ -808,15 +618,15 @@ export function portraitPromptsMode(entry) {
     try { return (entry && entry.portraitPrompts && entry.portraitPrompts.mode) || ''; } catch (e) { return ''; }
 }
 
-// ── 立绘年龄闸门（v1.13.8 引入 · v1.13.9 改窄）──
+// ── 立绘年龄闸门──
 // 立绘默认是"无衣物遮挡"的体型对照图。**明确写了未成年年龄的角色一律改用素色紧身打底衣** ——
 // 代码硬拦，不依赖模型自觉，也不管提示词是谁写的。
-// v1.13.9 改窄：删掉「整条档案里出现 少女/萝莉 就当未成年」的启发式 —— 它会误伤成年角色，
+// 改窄：删掉「整条档案里出现 少女/萝莉 就当未成年」的启发式 —— 它会误伤成年角色，
 //   而且 seed（气质/调性）是**取词方向**，不是年龄证据。现在只看两处真正的年龄来源：
 //   ① base / anchor / anchor_zh 里的**明确数字年龄**（14岁 / 十四岁 / 17周岁）
 //   ② 锚点里 **age / 年龄 这一维的值**（age:teenage girl / 年龄:少女）—— 只认这一维，不做全文扫描
 var _AGE_NUM_RE = /(\d{1,2})\s*(?:岁|周岁)/g;
-var _AGE_CN_RE = /(十[一二三四五六七八九]?|[一二三四五六七八九])\s*岁/g;
+var _AGE_CN_RE = /(?<![一二三四五六七八九十])(十[一二三四五六七八九]?|[一二三四五六七八九])\s*岁/g;
 var _AGE_CN_VAL = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
 var _AGE_DIM_RE = /(?:^|\|)\s*(?:age|年龄)\s*[:：]\s*([^|]*)/gi;
 var _AGE_TIER_RE = /(teenage|young girl|child|loli|elementary|underage|少女|萝莉|幼女|幼童|儿童|女童)/i;
@@ -828,7 +638,7 @@ function _ageNumUnder18(t) {
     _AGE_NUM_RE.lastIndex = 0;
     while ((m = _AGE_NUM_RE.exec(t)) !== null) {
         n = parseInt(m[1], 10);
-        if (n > 0 && n < 18) return false;    // [Fix v1.26.2] 命中未成年 → true（原为 false，闸门永久失效）
+        if (n > 0 && n < 18) return true;
     }
     _AGE_CN_RE.lastIndex = 0;
     while ((m = _AGE_CN_RE.exec(t)) !== null) {
@@ -836,7 +646,7 @@ function _ageNumUnder18(t) {
         n = _AGE_CN_VAL[s] || 0;
         if (!n && s.length === 2 && s[0] === '十') n = 10 + (_AGE_CN_VAL[s[1]] || 0);
         if (!n && s.length === 2) n = (_AGE_CN_VAL[s[0]] || 0) * 10;
-        if (n > 0 && n < 18) return false;    // [Fix v1.26.2] 同上
+        if (n > 0 && n < 18) return true;
     }
     return false;
 }
@@ -846,7 +656,7 @@ export function isUnderageEntry(entry) {
         if (!entry) return false;
         var base = String((entry.base || entry.appearance) || '');
         var anchor = String(entry.anchor || '');
-        var zh = String((entry.anchor_zh || (entry.atoms && entry.atoms.zit)) || '');
+        var zh = String(entry.anchorZh || '');
         // ① 明确数字年龄
         if (_ageNumUnder18(base) || _ageNumUnder18(anchor) || _ageNumUnder18(zh)) return true;
         // ② 只认锚点里 age / 年龄 这一维的值（不做全文扫描 —— 少女感 / 少女漫 这类不再算）
@@ -856,7 +666,9 @@ export function isUnderageEntry(entry) {
             var m;
             while ((m = _AGE_DIM_RE.exec(texts[k])) !== null) {
                 var val = String(m[1] || '').trim();
-                if (val && _AGE_TIER_RE.test(val)) return false;    // [Fix v1.26.2] age:teenage girl → true（原为 false）
+                const numeric = val.match(/^(\d{1,2})(?:\D|$)/);
+                if (numeric) return Number(numeric[1]) > 0 && Number(numeric[1]) < 18;
+                if (_AGE_TIER_RE.test(val)) return true;
             }
         }
         return false;

@@ -1,26 +1,26 @@
 import { tokenizePlaceholders, replaceTokens } from '../placeholders.js';
-// ── SillyImage Lab v2.4 协作管线（酒馆AI模式） ──
+// ── SillyImage Lab 协作管线（酒馆AI模式） ──
 // 主LLM写正文+[img:]占位 → 插件AI按占位符与人物表写提示词 → 填回占位 → 走现有渲染/生成链
-// v1.2 起为唯一管线（旧画师管线 runAuxPipeline 已移除）
+// 起为唯一管线（旧画师管线 runAuxPipeline 已移除）
 
 import { slLog, slErr } from '../log.js';
-import { settings, getActiveMode, isEnglishMode, saveSettings } from '../settings.js';
+import { settings, getActiveMode, isEnglishMode } from '../settings.js';
 import { auxApiCallRaw } from './api.js';
 import { isPromptsLoaded, getPrompt } from '../../prompts/loader.js';
 import { findImagePlaceholders, buildImageBlock, extractDynamicBits, findLostNumbers, wrapFactSpan, parseCheckSection } from '../text-utils.js';
-import { rosterDataTextFor, rosterEntries, upsertPerson, applyPersonSegments, importFromCast, splitKnownPersonSegments, setEnglishAnchor, setZitAnchor, getAtomAnchor, atomValues, setPortraitPrompts } from '../roster.js';
-import { getProfiles } from './profile.js';
+import { rosterDataTextFor, rosterEntries, upsertPerson, applyPersonSegments, splitKnownPersonSegments, setEnglishAnchor, setZitAnchor, getAtomAnchor, atomValues, setPortraitPrompts } from '../roster.js';
+import { saveArchive } from '../archive.js';
 import { wardrobeDataTextFor, upsertEntry, normKey } from '../wardrobe.js';
 import { krea2StyleById } from '../style-presets.js';
 
-// ── v1.13.1 管线输出合格性判定（失败重试用）──
+// ── 管线输出合格性判定（失败重试用）──
 // 判定顺序：空 → 结构标记 → 拒绝语 → **条数** → 单条质量
-// [Fix v1.13.1] 旧版只看"有没有 ---IMAGES--- 标记"，于是模型回 1 条（占位符 3 个）也算合格 →
+// [Fix] 旧版只看"有没有 ---IMAGES--- 标记"，于是模型回 1 条（占位符 3 个）也算合格 →
 //   不重试 → 剩下 2 条直接走中文场景兜底（就是用户看到的"没重试就用了主模型的词"）。
 var REFUSAL_RE = /(抱歉|对不起|我无法|我不能|我无法协助|无法协助|不便协助|恕难|无法生成|不能生成|违反.{0,6}政策|不当内容|敏感内容|不符合.{0,6}(准则|规范)|作为.{0,4}(AI|人工智能|语言模型)|I can't|I cannot|I'm sorry|I am unable|As an AI|cannot assist|cannot help)/i;
 
 export function classifyPipelineFailure(out, expectCount, meta) {
-    // v1.27.0：截断**先判**。
+    // 截断**先判**。
     // 旧实现没有 truncated 这一类，截断被压缩成 empty（正文空）或 short（条数不足）：
     //   empty → 「不带上次输出整轮重发」→ 思考白烧一遍，还要再烧一遍；
     //   short → 「带上次输出补齐」→ 其实是对的，但那是偶然撞上的，不是设计。
@@ -31,7 +31,7 @@ export function classifyPipelineFailure(out, expectCount, meta) {
     var hasPro = /---\s*PROFILE\s*---/.test(t);
     var hasImg = /---\s*IMAGES\s*---/.test(t);
     if (!hasPro && !hasImg) return REFUSAL_RE.test(t.slice(0, 200)) ? 'refusal' : 'format';
-    // v1.13.7：---PROFILE--- 是**必做段**（锚点/档案全靠它）。原来只有 IMAGES 也算合格 →
+    // ---PROFILE--- 是**必做段**（锚点/档案全靠它）。原来只有 IMAGES 也算合格 →
     // 实测出现过「图出了、3 个人一个锚点都没建」，而管线判定合格，谁也不会发现。
     if (!hasPro) return 'noprofile';
     // 结构标记在 → 再看 IMAGES 段实际回了几条
@@ -40,7 +40,7 @@ export function classifyPipelineFailure(out, expectCount, meta) {
         try { lines = parseRosterImages(t, expectCount) || []; } catch (ePL) { lines = []; }
         if (!lines.length) return REFUSAL_RE.test(t) ? 'refusal' : 'noimage';
         if (lines.length < expectCount) {
-            // v1.27.2：条数不足时把"标记计数"打出来 —— 不猜，让失败可见。
+            // 条数不足时把"标记计数"打出来 —— 不猜，让失败可见。
             // IMAGES 出现多次 = 模型按"每个占位符各写一份三段"输出（解析器已合并，走到这里说明合并后仍不够）。
             var st = _markerStats(t);
             slErr('⚠️ 条数不足: 解析到 ' + lines.length + '/' + expectCount
@@ -66,7 +66,7 @@ function _missingHint(expectCount, gotCount) {
     return miss.length ? ('还缺 ' + miss.join('、') + '（共需 ' + expectCount + ' 条）') : ('共需 ' + expectCount + ' 条');
 }
 
-// ── v1.13.6 数字保真：逐条对比"主模型给的数字"与"输出提示词里剩下的数字" ──
+// ── 数字保真：逐条对比"主模型给的数字"与"输出提示词里剩下的数字" ──
 // 返回 [{ i: 0, items: ['14岁'] }]（i = 占位符下标，0-based）
 export function findLostNumbersInPrompts(placeholders, prompts) {
     var misses = [];
@@ -84,7 +84,7 @@ export function findLostNumbersInPrompts(placeholders, prompts) {
 }
 
 
-// ── v1.14.2 地点保真：主模型给了地点，提示词里却找不到它的痕迹 → 只报警，不重试 ──
+// ── 地点保真：主模型给了地点，提示词里却找不到它的痕迹 → 只报警，不重试 ──
 // 判据很粗：地点串的 2-gram 至少命中 1 个（地点通常短而具体，如「东北农村土炕」）
 export function findLostPlaces(placeholders, prompts) {
     var out = [];
@@ -104,15 +104,14 @@ export function findLostPlaces(placeholders, prompts) {
     return out;
 }
 
-// ── v1.23 事实通道（无词表）：`事实:` 段原样拼进提示词，校验用归一化逐字包含 ──
+// ── 事实通道（无词表）：`事实:` 段原样拼进提示词，校验用归一化逐字包含 ──
 // facts.js 不再参与管线判断（事实由指令约束、日志审计）
 
-// ── v1.27.0：旧 buildRosterSystemPrompt() 已删除 ──
 // 它把 7 份文件 join 成一条 87.5 KB 字符串，正是下方要拆掉的东西。
-// 保留一份平行实现 = 第二个权威来源 = 迟早漂（v1.25.1 的教训）。system 只由 buildPurgeMessages 产生。
+// 保留一份平行实现 = 第二个权威来源 = 迟早漂。system 只由 buildPurgeMessages 产生。
 
 // ══════════════════════════════════════════════════════════════
-// v1.27.0 分层 system（位置层）
+// 分层 system（位置层）
 // ══════════════════════════════════════════════════════════════
 // 旧实现把 7 份文件 join 成一条 ≈87.5 KB 的字符串（zit 模式实测约 2.8 万 token），
 // <thinking_rules> 落在 roster/system.txt 第 46 行 ≈ 全文 7%。
@@ -142,7 +141,7 @@ function splitDiscipline(core) {
 
 function _p(f) { return isPromptsLoaded() ? (getPrompt(f) || '') : ''; }
 
-// ── v1.28.0：模式 → overlay 文件（单一来源）──
+// ── 模式 → overlay 文件（单一来源）──
 // 原先用嵌套三元拼文件名：加一个模式要动那一行，漏了就静默回退 zit 中文规则
 // （英文模型收到中文规则 = 输出被清洗成空）。现在一张表，缺项也走 zit（但至少一眼看得见）。
 var MODE_OVERLAY = {
@@ -163,7 +162,7 @@ function buildPurgeMessages() {
 
     var core = _p('roster/system.txt');
     if (!core) {
-        // v1.27.3：提示词没加载时不再静默降级 —— 那会让整轮规则、建档规范、输出格式全部消失，
+        // 提示词没加载时不再静默降级 —— 那会让整轮规则、建档规范、输出格式全部消失，
         // 表现成"档案无 / 提示词薄"，而日志里一句话都没有。显式报出来。
         slErr('⛔ roster/system.txt 未加载 → 本轮只有最小身份兜底，建档规范与输出格式缺失（检查 prompts/ 目录与加载日志）');
         core = '<role>你是 SIL —— 嵌入在聊天系统后端的生图管线组件。你只做两件事：为每个 [img:] 占位符写 1 条完整生图提示词；更新人物档案。</role>';
@@ -183,7 +182,7 @@ function buildPurgeMessages() {
     // ⑤ 语料（查表用，压在最后）
     push(['atomic-vocab.txt', 'wardrobe-vocab.txt', 'wardrobe-expand.txt']
         .map(_p).filter(Boolean).join('\n\n'));
-    // ⑥ 模式 overlay（v1.28.0：模式 → 文件收敛成一张表；新增模式只改 settings.MODES + 这张表）
+    // ⑥ 模式 overlay
     var pipeMode = getActiveMode();
     push(_p(MODE_OVERLAY[pipeMode] || MODE_OVERLAY.zit));
     if (settings.nsfwEnhance) push(_p('pipeline/nsfw-overlay.txt'));
@@ -196,14 +195,14 @@ function buildPurgeMessages() {
     return msgs;
 }
 
-// ── v1.27.0 截断续写（帧内）──
+// ── 截断续写（帧内）──
 // 与"整轮重发"的区别：重发要再烧一次完整预算（含思考），而思考在第一轮已经做完了。
 // 续写一律**关思考** —— 规划已完成，续写阶段的 reasoning 是纯浪费，还会再挤占一次预算。
-// ── 用户消息：人物表 + 占位符（不发送正文——导演模式插件AI 只做"档案+酒馆AI要点 → 提示词"的编辑） ──
+// ── 用户消息：人物表 + 占位符（不发送正文——占位符配图插件AI 只做"档案+酒馆AI要点 → 提示词"的编辑） ──
 function buildRosterUserContent(placeholders, wardrobeInfo) {
     var lines = [];
     lines.push('【任务】为每个 [img:] 占位符输出 1 条提示词，按【占位符】编号一一对应。人物外貌必须引用【人物档案】，禁止用名字代替外貌。禁止偷懒：每一幅图都要写完整详情（人物当前状态+衣着发型+表情+动作+场景+光影），不允许省略/概括/一句话带过。');
-    // v1.28.0：Krea 2 风格锁定 —— 风格句由插件统一前置（跨轮稳定），这里告诉模型"别再自己写媒介"
+    // Krea 2 风格锁定 —— 风格句由插件统一前置（跨轮稳定），这里告诉模型"别再自己写媒介"
     if (getActiveMode() === 'krea2') {
         var _kstyle = krea2StyleById(settings.krea2Style);
         if (_kstyle && _kstyle.prompt) {
@@ -216,7 +215,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
     }
     // [Fix] 格式硬约束（格式缺失=整轮作废，是此前 0 条提示词/串味的主因）
     lines.push('【输出格式·必须严格遵守·PROFILE 与 IMAGES 漏一段整轮作废】');
-    // v1.27.2：模型会把 workflow 的「对每一个占位符依次执行」理解成"每个占位符各输出一份三段"，
+    // 模型会把 workflow 的「对每一个占位符依次执行」理解成"每个占位符各输出一份三段"，
     // 于是 3 个占位符 → 3 个 PROFILE/IMAGES/END（实测 14707 字被误判 short）。
     // 解析器已经能合并多段；这里再把源头堵上，省掉重复输出的 token。
     lines.push('⚠️ **整轮只输出一次三段**：占位符有 N 个，就在**同一个** `---IMAGES---` 段里写 N 行。禁止"每个占位符各写一份 PROFILE/IMAGES/END"。');
@@ -237,7 +236,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
     var rosterTxt = rosterDataTextFor(_phNames);
     lines.push(rosterTxt || '（占位符未注明人物名或人物未建档；画师直接按【占位符】场景/要点描述画面，并可用 PROFILE 为新人物建档）');
     lines.push('');
-    // v1.5.0：【造型库】—— 服装/发型/鞋袜/配饰/妆容。已解析的原样复用（零漂移），未命中的具象化后回传
+    // 【造型库】—— 服装/发型/鞋袜/配饰/妆容。已解析的原样复用（零漂移），未命中的具象化后回传
     if (wardrobeInfo && wardrobeInfo.text) {
         lines.push('【造型库】（主模型写了造型 key；你负责「原样复用」或「具象化」，规则见 wardrobe-vocab.txt / wardrobe-expand.txt）');
         lines.push(wardrobeInfo.text);
@@ -248,7 +247,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
         lines.push('');
     }
 
-    // v1.11.1：【种子】—— 主模型给的是"取词方向"，精度由你按 roster/system.txt 的四步反推
+    // 【种子】—— 主模型给的是"取词方向"，精度由你按 roster/system.txt 的四步反推
     var _seedLines = [];
     for (var _sqi = 0; _sqi < placeholders.length; _sqi++) {
         var _sdTxt = placeholders[_sqi].seed || '';
@@ -266,7 +265,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
         for (var i = 0; i < placeholders.length; i++) {
             var ph = placeholders[i];
             lines.push((i + 1) + '. 场景：' + ph.scene);
-            // v1.14.2：地点是**硬约束** —— 插件不给世界观，地点只能靠主模型这段字
+            // 地点是**硬约束** —— 插件不给世界观，地点只能靠主模型这段字
             if (ph.place) lines.push('   地点（**硬约束，必须体现**）：' + ph.place + ' —— 用本帧取景内可见的建筑、材质、陈设或光源线索体现地点，保留指定空间关系；不强求每类线索全部入镜，不添加不可见的温感，不为展示背景拉远主体。⛔ 不许替换成通用「室内/房间」或纯色背景');
             if (ph.personSegments && ph.personSegments.length) {
                 var ps = [];
@@ -275,7 +274,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
             }
             if (ph.seed) lines.push('   种子：' + ph.seed);
             if (ph.topic) lines.push('   要点：' + ph.topic.replace(/\n/g, '；'));
-            // v1.21：这一条占位符里的状态事实（怀孕/绷带/纹身…）→ 点名要求出现事实词
+            // 这一条占位符里的状态事实（怀孕/绷带/纹身…）→ 点名要求出现事实词
             if (ph.facts && ph.facts.length) lines.push('   事实（⛔ 必须原词写进本条提示词的主体句，不许省略/改写/换成体征；插件不会替你补）：' + ph.facts.join('；'));
             // [Fix] 动态要素保真：酒馆AI写的本轮可变内容（衣着/发型/表情/光线/氛围/动作）逐项列出，
             // 插件AI 必须逐项润色进提示词（这是评分重点）
@@ -283,13 +282,13 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
             if (_dyn.length) lines.push('   动态要素（必须逐项润色进提示词，禁止省略）：' + _dyn.join('、'));
         }
     }
-    // [Fix] 导演模式不发送【当前正文】：主模型已在占位符里写了画面要素（谁+动作+表情+可变衣着），
-    // 插件AI 只需"人物档案 + 占位符要点"即可编辑生图提示词——与画师模式（读全文自决）本质区别
+    // [Fix] 占位符配图不发送【当前正文】：主模型已在占位符里写了画面要素（谁+动作+表情+可变衣着），
+    // 根据人物档案和占位符要点编写该图的提示词。
     return lines.join('\n');
 }
 
 // ── 输出解析 ──
-// ── v1.13.7 宽容 JSON：LLM 的 PROFILE 段经常不是合法 JSON ──
+// ── 宽容 JSON：LLM 的 PROFILE 段经常不是合法 JSON ──
 // 实测最常见的三种坏法：① 字符串里带**裸换行**（没转义）② 尾逗号 ③ ```json 围栏。
 // 旧实现只处理了①的一种形态，一旦 JSON.parse 失败就**静默返回 null** →
 // PROFILE 整段被丢掉 → 人物档案只建了主模型原文那层、**锚点永远空着**，而且没人发现。
@@ -318,7 +317,7 @@ function _looseJson(raw) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// v1.27.2 多段容错
+// 多段容错
 // ══════════════════════════════════════════════════════════════
 // 旧解析器用**单段**正则：`---NAME---([\s\S]*?)(?:---END---|$)`，只取第一个同名段。
 // 而模型完全可能按「每个占位符走一遍 workflow」来输出 —— 那就有 N 个 PROFILE/IMAGES/END。
@@ -407,7 +406,7 @@ export function parseRosterProfile(output) {
     return merged;
 }
 
-// v1.5.0：解析可选的 ---WARDROBE--- 段（key → detail）
+// 解析可选的 ---WARDROBE--- 段（key → detail）
 export function parseRosterWardrobe(output) {
     var sections = _allSections(output, 'WARDROBE');
     if (!sections.length) return null;
@@ -490,12 +489,12 @@ export function fillPlaceholders(bodyText, placeholders, prompts) {
         var prompt = '';
         if (pIdx < prompts.length) { prompt = prompts[pIdx]; pIdx++; }
         if (!prompt) {
-            // v1.24：代码不编造内容 —— 缺条就保留占位符原文，交给重试/人工
+            // 代码不编造内容 —— 缺条就保留占位符原文，交给重试/人工
             missing++;
             slErr('⛔ 第' + phIdx + '个占位符没有提示词（模型漏回）→ 保留 [img:] 原文，不补写');
             return m;
         }
-        // v1.24 事实审计：只记录，不拦截 —— 「同义同指」代码判断不了（怀孕16周 → 身孕四个月 是合法的）
+        // 事实审计：只记录，不拦截 —— 「同义同指」代码判断不了（怀孕16周 → 身孕四个月 是合法的）
         try { _auditFacts(ph, prompt, phIdx); } catch (eAudit) {}
         // 英文模式：字面出现的事实原样保护，避免被中文清洗吃掉（机械替换，不做语义判断）
         try {
@@ -547,28 +546,11 @@ async function runSinglePipeline(bodyText, mesId, options) {
     }
     slLog('协作管线启动: ' + placeholders.length + ' 个占位符');
     try {
-        // 0. 从卡库扫描档案导入人物表（人物一致性：脸部/身形锚点直接复用扫描产出）
-        // [Fix] 可关闭：导演模式只想用扫描来看立绘/档案时，关闭后人物表只保留占位符收集的信息，
-        // 插件AI每轮不再把卡库全量锚点发过去（省 token）。
-        // 档案跟着聊天走：默认【不导入】卡级旧扫描档案（同卡不同聊天不继承）；只有用户显式打开开关才导入
-        if (settings.directorCastImport === true) {
-            try {
-                var _pf = getProfiles();
-                var _cast = _pf && _pf.root && _pf.root[_pf.charName] ? (_pf.root[_pf.charName].cast || {}) : {};
-                var imported = importFromCast(_cast);
-                if (imported) slLog('协作管线: 卡库档案导入人物表 ' + imported + ' 人');
-            } catch (e) { slLog('卡库档案导入跳过: ' + e.message); }
-        }
-
         // 1. 占位符人物段直接建档（无LLM）——先做"已知人名拆段"（人物:柳如烟，赵云飞 逗号多人 → 拆两人）
         var _known = [];
         try {
             var _re = rosterEntries();
             for (var _ri = 0; _ri < _re.length; _ri++) _known.push(String(_re[_ri].name || '').replace(/（[^）]*）$/, ''));
-            if (settings.directorCastImport === true) {
-                var _pf2 = getProfiles();
-                if (_pf2 && _pf2.root && _pf2.root[_pf2.charName]) { for (var _ck in _pf2.root[_pf2.charName].cast) _known.push(_ck); }
-            }
         } catch (e4) {}
         placeholders = placeholders.map(function(p) {
             if (p.personSegments && p.personSegments.length) {
@@ -577,7 +559,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
             return p;
         });
         var nApplied = applyPersonSegments(placeholders.map(function(p) { return p.personSegments; }).reduce(function(a, b) { return a.concat(b); }, []));
-        if (nApplied) slLog('占位符建档: ' + nApplied + ' 人');
+        if (nApplied) { void saveArchive(); slLog('占位符建档: ' + nApplied + ' 人'); }
 
         // 1.5 造型库：解析造型段 → 查库
         // 已解析的（库里已有 detail）→ 交给插件AI 逐字复用；未命中的 → 交给它具象化并回传
@@ -604,7 +586,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
             }
         }
 
-        // 2. 调用插件AI（v1.27.0：分层 system + finish_reason 通道 + 帧内续写）
+        // 2. 调用插件AI
         var sysMsgs = buildPurgeMessages();
         var userContent = buildRosterUserContent(placeholders, wardrobeInfo);
         var expectN = placeholders.length;
@@ -616,11 +598,11 @@ async function runSinglePipeline(bodyText, mesId, options) {
 
         var output = _res.content;
         var _meta = { finish: _res.finish, truncated: _res.truncated, reasoningLen: _res.reasoningLen };
-        // v1.13.1：失败重试（兜底指令只在重试时下发 —— system prompt 里不留任何"可以省略/可以软化"的退路）
+        // 失败重试（兜底指令只在重试时下发 —— system prompt 里不留任何"可以省略/可以软化"的退路）
         //   拒绝/空回/格式崩 → **不带上次输出**重发（带着拒绝语重试会让它锚定在"我刚拒绝了"上）
         //   条数不足       → **带上上次输出** + 点名缺第几条（让它接着补，而不是整轮重写又漏）
         var _fail = classifyPipelineFailure(output, expectN, _meta);
-        // v1.13.6 数字保真闸门：条数对了，但主模型给的数字在提示词里蒸发了 → 同样算不合格
+        // 数字保真闸门：条数对了，但主模型给的数字在提示词里蒸发了 → 同样算不合格
         var _lostNum = [];
         if (!_fail) {
             try { _lostNum = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1)); } catch (eLN) { _lostNum = []; }
@@ -635,7 +617,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
             var _gotN = 0;
             try { _gotN = (_fail === 'short' || _fail === 'truncated') ? (parseRosterImages(output, 1) || []).length : 0; } catch (eG) { _gotN = 0; }
             var _need = _missingHint(expectN, _gotN);
-            // v1.13.2：**除了 refusal，其余一律带上上次输出**。
+            // **除了 refusal，其余一律带上上次输出**。
             // 理由：模型每次调用都是无状态的，任务素材（档案/种子/占位符）全在 userContent 里，
             // 所以"不带上次输出"它照样知道要干嘛 —— 但 short/format/noimage 这三种失败里，
             // 上次的内容往往是**有价值的**（short 的 1 条成品 / format 的散装提示词 / noimage 的（无）），
@@ -688,7 +670,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
                 _meta = { finish: _r3.finish, truncated: _r3.truncated, reasoningLen: _r3.reasoningLen };
             }
             var _fail2 = classifyPipelineFailure(output, expectN, _meta);
-            // v1.27.3：重试后**必须复检数字**。
+            // 重试后**必须复检数字**。
             // 旧实现重试后只判 classifyPipelineFailure —— 于是 lostnum 触发重试后，
             // 重试结果里数字仍然丢失也会被当成"重试成功"放行（实测：mock 两次输出都不带 24岁，第二次直接放行）。
             // 年龄（14岁）/身高（168cm）是硬事实，静默丢失 = 画面年龄/体型彻底失控。
@@ -716,7 +698,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
         slLog('协作管线LLM返回, 尾200: ' + output.slice(-200).replace(/\n/g, '⏎'));
 
         if (!options.isCurrent()) return { ok: false, stale: true };
-        // 3.0 v1.25 自校记录（---CHECK---）：模型自己写的校对结果，只记录、不判分、不进生图
+        // 3.0 自校记录（---CHECK---）：模型自己写的校对结果，只记录、不判分、不进生图
         try {
             var _check = parseCheckSection(output);
             if (_check.length) {
@@ -741,13 +723,13 @@ async function runSinglePipeline(bodyText, mesId, options) {
                 var upName = (pe && pe.name) || k.replace(/（[^）]*）$/, '');
                 var upIdm = (pe && pe.identity) || (k.indexOf('（') >= 0 ? k.slice(k.indexOf('（') + 1, k.lastIndexOf('）')) : '');
                 if (pe && pe.appearance) { upsertPerson(upName, upIdm, pe.appearance, 'profile'); ups++; }
-                // v2.0 锚点库：anchor = **英文权威锚点**（四种模式共用，逐字复用 → 零漂移）
+                // 锚点库：anchor = **英文权威锚点**（四种模式共用，逐字复用 → 零漂移）
                 //            anchor_zh = 中文呈现缓存（只给 zit 中文模式用）
                 // 闸门在 roster.js：英文进 anchor；中文只允许在 zit 模式进缓存；其余拒绝并记日志
                 if (pe && pe.anchor) {
                     if (setEnglishAnchor(upName, upIdm, pe.anchor)) nAnchors++;
                     else if (String(getActiveMode()) === 'zit') {
-                        // [Fix v1.13.3] zit 模式下辅助AI 习惯把**中文锚点塞进 anchor 字段** →
+                        // [Fix] zit 模式下辅助AI 习惯把**中文锚点塞进 anchor 字段** →
                         // 旧实现被英文闸门直接拒掉，而 anchor_zh 又没给 → anchor 和 atoms.zit **两边都空**
                         // （实测：萝莉岛 13:30 / 13:53 两个聊天的人物档案就是"有 base 无锚点"，锚点永远填不上）。
                         // 现在：zit 模式下把中文锚点收进中文呈现缓存，别白扔。
@@ -756,7 +738,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
                     } else nRej++;
                 }
                 if (pe && pe.anchor_zh) { if (setZitAnchor(upName, upIdm, pe.anchor_zh)) nZh++; }
-                // v1.13.8 立绘提示词：建档时一并产出（四视角），之后"生成立绘"直接用，不再由插件拼装
+                // 立绘提示词：建档时一并产出（四视角），之后"生成立绘"直接用，不再由插件拼装
                 if (pe && (pe.portrait || pe.portraits)) {
                     if (setPortraitPrompts(upName, upIdm, pe.portrait || pe.portraits)) nPort++;
                 }
@@ -769,7 +751,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
         }
 
 
-        // v1.13.7：PROFILE 没覆盖到的人 → 明确报警（否则锚点永远空着，没人发现）
+        // PROFILE 没覆盖到的人 → 明确报警（否则锚点永远空着，没人发现）
         try {
             var _ents = rosterEntries();
             var _seenName = {};
@@ -814,11 +796,11 @@ async function runSinglePipeline(bodyText, mesId, options) {
             }
             if (wUps) slLog('造型库回写: ' + wUps + ' 条');
         }
-        saveSettings();
+        void saveArchive();
 
         // 4. 解析提示词并填充
         var prompts = parseRosterImages(output, 1);
-        // v1.14.2 地点保真：不阻断、不重试，只点名（场景对不上就是这里漏的）
+        // 地点保真：不阻断、不重试，只点名（场景对不上就是这里漏的）
         try {
             var _lostPlace = findLostPlaces(placeholders, prompts);
             for (var _lp = 0; _lp < _lostPlace.length; _lp++) {

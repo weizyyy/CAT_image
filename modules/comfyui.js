@@ -3,7 +3,8 @@ import { workflowRequest } from './workflow-template.js';
 import { slLog } from './log.js';
 import { settings, getSTHeaders, saveSettings, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
 import { uploadImageToST } from './cache.js';
-import { getProfiles } from './pipeline/profile.js';
+import { getCharacterName } from './archive.js';
+import { rosterEntries } from './roster.js';
 import { krea2StylePrompt } from './style-presets.js';
 import { preserveQuotedText } from './text-utils.js';
 
@@ -12,18 +13,9 @@ import { preserveQuotedText } from './text-utils.js';
 export function stripCharacterNames(prompt) {
     if (!prompt) return prompt;
     try {
-        var prof = getProfiles();
-        if (!prof) return prompt;
-        var names = [prof.charName, 'User'];
-        if (prof.root && prof.root[prof.charName]) {
-            var cast = prof.root[prof.charName].cast || {};
-            for (var nk in cast) names.push(nk);
-        }
-        var npcs = (prof.chat && prof.chat.npcs) || {};
-        for (var n2 in npcs) names.push(n2);
+        const names = new Set([getCharacterName(), 'User', ...rosterEntries().map(entry => entry.name)]);
         var changed = false;
-        for (var i = 0; i < names.length; i++) {
-            var nm = names[i];
+        for (const nm of names) {
             if (!nm || nm.length < 2) continue;
             var re;
             try { re = new RegExp(nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'); } catch (e) { continue; }
@@ -36,7 +28,7 @@ export function stripCharacterNames(prompt) {
     return prompt;
 }
 // 画风预设表
-// v1.18：key 只作 UI 显示名，**不再原样拼进提示词**。旧版 value 里带着
+// key 只作 UI 显示名，**不再原样拼进提示词**。旧版 value 里带着
 // 「Anime 赛璐璐：」这种分类冒号（会把"分类标签"喂给模型）、大段日文假名（中文编码器吃不下）、
 // 以及 PBR物理级材质 / 超写实质感（高反射毒药词 → 皮肤变塑料）。
 // 现在 value 一律是干净的媒介描述，且避开"发光/超写实"一类词。
@@ -124,7 +116,7 @@ export async function deleteWorkflow(name) {
     saveSettings();
 }
 
-// ── 最终正向提示词组装（v1.8.3 抽出）──
+// ── 最终正向提示词组装──
 // 目的：面板里"复制提示词"必须等于**实际发给 ComfyUI 的那一条**（走一遍真实管线，而不是只给裸提示词）
 // 仅保留模型输出、画风和艺术家风格，不注入通用前缀或负面词。
 export function composeFinalPrompt(prompt, curMode = getActiveMode()) {
@@ -160,7 +152,7 @@ export function composeFinalPrompt(prompt, curMode = getActiveMode()) {
 export async function generateImage(workflow, prompt, { signal, mode = getActiveMode() } = {}) {
     signal?.throwIfAborted();
     // 最终组装（模型输出 / 画风预设 / 艺术家风格）——
-    // 与面板"提示词"里显示的完全同源（v1.8.3）
+    // 与面板"提示词"里显示的完全同源
     prompt = composeFinalPrompt(prompt, mode);
     slLog('🎨ComfyUI-prompt(' + prompt.length + '字):', prompt);
 

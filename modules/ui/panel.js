@@ -1,4 +1,4 @@
-// ── SillyImage Lab 主面板 v2.7（雪白猫：右侧抽屉 + 分层导航 + 动画） ──
+// ── SillyImage Lab 主面板（雪白猫：右侧抽屉 + 分层导航 + 动画） ──
 import { slLog } from '../log.js';
 import { CAT, applyTheme, injectThemeStyle, THEME_ORDER } from './theme.js';
 import { catSVG } from './cat.js';
@@ -37,7 +37,7 @@ export function createExpandedPanel() {
   // 遮罩
   _maskEl = jQuery('<div id="sl_mask" style="position:fixed;z-index:9990;top:0;left:0;width:100%;height:100%;background:rgba(20,20,24,0.32);backdrop-filter:blur(3px);display:none;"></div>').appendTo('body');
   _maskEl.on('click', function () {
-    // [Fix v1.1.1] 手机端点击穿透：打开面板的这次触控（含幽灵点击）会落在刚显示的遮罩上 → 面板刚开即关。
+    // [Fix] 手机端点击穿透：打开面板的这次触控（含幽灵点击）会落在刚显示的遮罩上 → 面板刚开即关。
     // 打开后 350ms 内的遮罩点击一律忽略（覆盖“双击放大”判定窗口）。
     if (Date.now() - _openGuard < 350) return;
     hidePanel();

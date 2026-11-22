@@ -2,51 +2,6 @@ import { tokenizePlaceholders } from './placeholders.js';
 // ── SillyImage Lab 文本处理工具 ──
 
 // 清洗 AI 模型输出的 XML/思考标签
-export function stripAiTags(text) {
-    if (!text) return '';
-    return text
-        .replace(/<think[\s\S]*?<\/think>/gi, '')
-        .replace(/<fox_selc>[\s\S]*?<\/fox_selc>/gi, '')
-        .replace(/<fox_tip>[\s\S]*?<\/fox_tip>/gi, '')
-        .replace(/<CEstuff>[\s\S]*?<\/CEstuff>/gi, '')
-        .replace(/<catsay>[\s\S]*?<\/catsay>/gi, '');
-}
-
-// 提取正文：从 正文###...结尾### 区间取内容
-export function extractBodyText(message) {
-    if (!message) return '';
-    var startIdx = message.indexOf('正文###');
-    var endIdx = message.indexOf('结尾###', startIdx + 1);
-    if (startIdx >= 0 && endIdx > startIdx) return message.slice(startIdx + 5, endIdx);
-
-    var endMarker = message.indexOf('\n结尾###');
-    if (endMarker >= 0) return message.slice(0, endMarker);
-    endMarker = message.indexOf('结尾###');
-    if (endMarker >= 0) return message.slice(0, endMarker);
-
-    var contentMatch = message.match(/<content>\s*([\s\S]*?)\s*<\/content>/i);
-    if (contentMatch) return contentMatch[1].trim();
-
-    var result = stripAiTags(message)
-        .replace(/<backgrounds>[\s\S]*?<\/backgrounds>/gi, '')
-        .replace(/<bginfor>[\s\S]*?<\/bginfor>/gi, '')
-        .replace(/\n{3,}/g, '\n\n').trim();
-    return result;
-}
-
-// 提取标记区间正文（用于缓存，不 trim）
-export function extractBodyContent(text) {
-    var startIdx = text.indexOf('正文###');
-    var endIdx = text.indexOf('结尾###', startIdx + 1);
-    if (startIdx >= 0 && endIdx > startIdx) return text.slice(startIdx + 5, endIdx);
-    return text;
-}
-
-export function hasBodyMarker(text) {
-    return text.indexOf('正文###') >= 0 && text.indexOf('结尾###') >= text.indexOf('正文###') + 5;
-}
-
-// 从增强文本中提取 [image:] 对应的【提示词】
 export function extractImagePrompt(rawText, imageTag, fromIndex) {
     if (!rawText || !imageTag) return '';
     // [Fix] 支持 fromIndex：同场景多张图时按上一次匹配位置向后找，
@@ -61,7 +16,7 @@ export function extractImagePrompt(rawText, imageTag, fromIndex) {
     return '';
 }
 
-// v1.23：事实段的保护标记。英文模式会清洗中文，而事实必须原样留下 ——
+// 事实段的保护标记。英文模式会清洗中文，而事实必须原样留下 ——
 // 用一对不在清洗范围内的符号把事实包住，cleanAnimePrompt 清洗完再把内容还回去。
 export var FACT_SPAN_OPEN = '⟦F⟧';
 export var FACT_SPAN_CLOSE = '⟦/F⟧';
@@ -77,7 +32,7 @@ export function cleanAnimePrompt(prompt) {
         return ' ⟦S' + (spans.length - 1) + '⟧ ';
     });
     t = t
-        // [Fix v1.18] 旧版把全角标点连同汉字一起删掉：'asian，1girl，solo' → 'asian1girlsolo'（粘连）
+        // [Fix] 旧版把全角标点连同汉字一起删掉：'asian，1girl，solo' → 'asian1girlsolo'（粘连）
         // 现在先把全角分隔符归一化成半角，再删残留中文
         .replace(/[\u4e00-\u9fff]+\s*[：:]\s*[\u4e00-\u9fff]+/g, '')
         .replace(/[，、；]/g, ', ')
@@ -114,7 +69,7 @@ export function cleanPromptForMode(prompt, mode) {
 }
 
 // ══════════════════════════════
-// ── v2.4 占位符协议：[img:…] 解析 ──
+// ── 占位符协议：[img:…] 解析 ──
 // 语法（酒馆AI模式，主LLM写入）：
 //   [img:场景描述]
 //   [img:场景描述|提示词要点]
@@ -123,7 +78,7 @@ export function cleanPromptForMode(prompt, mode) {
 // 分段规则（| 分隔）：
 //   第1段=场景描述（必填）；其余段："人物:" 前缀=建档段（分号可多条），无前缀=提示词要点
 
-// ── 多人切分（v1.4.1）──
+// ── 多人切分──
 // 【为什么不能直接 split('；')】占位符里 '；' 有两种含义：
 //   ① 分隔多个人物：人物:甲（标签）：外貌；人物:乙（标签）：外貌
 //   ② 人物段内部的字段分层：人物:甲（标签）：脸；身高；痣   ← 会被误拆成 3 个假人物（"身高168cm" / "左眼角有美人痣"）
@@ -145,7 +100,7 @@ export function splitPersonList(raw) {
     return out;
 }
 
-// ── 人物段解析（v1.3 新增冒号式）──
+// ── 人物段解析──
 // ① 冒号式（主推）：名字（可选标签）：静态锚点
 //      [img:…|人物:温若兰（邻家人妻）：鹅蛋脸，杏眼，168cm，胸臀丰满|要点]
 //      冒号是「硬边界」，不受标签/逗号影响，解析零歧义
@@ -169,7 +124,7 @@ export function parsePersonString(pStr) {
 }
 
 // ══════════════════════════════
-// ── v1.11.1 种子（seed）解析 / 剥离 ──
+// ── 种子（seed）解析 / 剥离 ──
 // 主模型在「种子:」段（或误写进人物段）里给的是**取词方向**：气质=…；调性=…；重心=…；反差=…
 // ⛔ 它不是画面素材。实测 bug：`反差=看着懒散邋遢` 里的「着」命中 DYNAMIC_CUE，
 //    被 extractDynamicBits 当成"本轮动态要素"抄进了成图提示词 → 提示词尾部出现
@@ -177,7 +132,7 @@ export function parsePersonString(pStr) {
 export var SEED_FIELDS = ['气质', '调性', '重心', '反差'];
 
 // 从一段文本里抽出种子 → { 印象 } 或老的 { 气质, 调性, 重心, 反差 }
-// v1.14：种子改成「一段白描」（气质定向）→ 没有字段标记时，整段就是印象
+// 种子改成「一段白描」（气质定向）→ 没有字段标记时，整段就是印象
 export function parseSeedSegment(text) {
     var body = String(text || '').replace(/^\s*(?:种子|印象)\s*[：:]?\s*/, '');
     var out = {};
@@ -213,7 +168,7 @@ export function stripSeedText(text) {
     var t = String(text || '');
     if (!t) return t;
     // ① 「种子：/印象：」之后到段尾（种子习惯写在最后）
-    //    [Fix v1.14] 旧正则写成了 [sS]* —— 只能吃掉字母 s/S，中文种子根本没被剥掉；
+    //    [Fix] 旧正则写成了 [sS]* —— 只能吃掉字母 s/S，中文种子根本没被剥掉；
     //    字段式种子靠 ② 侥幸兜住了，但改成「一段白描」后会整段漏进提示词，所以必须修正。
     t = t.replace(/(?:^|[。；;|])\s*(?:种子|印象)\s*[：:][\s\S]*$/, '');
     // ② 散落的 气质=/调性=/重心=/反差= 字段，各自到下一个分号/竖线
@@ -230,7 +185,7 @@ export function hasSeedField(text) {
 }
 
 // ══════════════════════════════
-// ── v1.5.0 造型段解析（衣柜/造型库）──
+// ── 造型段解析（衣柜/造型库）──
 // 语法：造型:服装=XX中学·校服（夏季）；发型=温若兰·短发扎尾；配饰=A、B
 // 槽之间用「；」，槽名与 key 用「=」，一个槽多个 key 用「、」
 // key 由主模型写全（含作用域前缀），插件原样使用，不做作用域判断
@@ -269,7 +224,7 @@ export function parseStyleSegment(text) {
 }
 
 // ══════════════════════════════
-// ── v1.23 事实段解析（原样通道）──
+// ── 事实段解析（原样通道）──
 // 语法：事实:怀孕16周；左臂截肢；戴金丝细框眼镜
 //   · 这些是"关于角色/处境的既成事实"，不是描写 → 由插件**逐字**拼进提示词最前面
 //   · 不做任何词表判断：写什么就是什么，新维度（义眼/化疗/义肢…）不需要改代码
@@ -307,7 +262,7 @@ export function findImagePlaceholders(text) {
                 scene = stripSeedText(seg);
                 continue;
             }
-            // v1.23：事实段（可选，以「事实:/硬事实:」开头）—— **原样通道**：逐字进提示词，任何环节不许改写
+            // 事实段（可选，以「事实:/硬事实:」开头）—— **原样通道**：逐字进提示词，任何环节不许改写
             // 为什么单列一段：怀孕/截肢/化疗这类是"事实"，不是"描写"。
             // 写成自由文本会按"改写成画面"的规则被翻译成体征（怀孕→小腹隆起），词就没了。
             if (/^(?:事实|硬事实)\s*[：:]/.test(seg)) {
@@ -315,19 +270,19 @@ export function findImagePlaceholders(text) {
                 for (var _fpi = 0; _fpi < _fp.length; _fpi++) factParts.push(_fp[_fpi]);
                 continue;
             }
-            // v1.14.2：地点段（可选，以「地点:/位置:/环境:」开头）—— 场景锚点，必须进提示词
+            // 地点段（可选，以「地点:/位置:/环境:」开头）—— 场景锚点，必须进提示词
             // 为什么单列一段：插件不读角色卡/世界观，地点只能由主模型给；写在场景句里容易被当成修辞扔掉
             if (/^(?:地点|位置|环境)\s*[：:]/.test(seg)) {
                 place = seg.replace(/^(?:地点|位置|环境)\s*[：:]\s*/, '').trim();
                 continue;
             }
-            // v1.11.1：种子段（可选，以「种子:/印象:」开头）—— 只给插件看，绝不进提示词
+            // 种子段（可选，以「种子:/印象:」开头）—— 只给插件看，绝不进提示词
             if (/^(?:种子|印象)\s*[：:]/.test(seg)) {
                 var _sd = parseSeedSegment(seg);
                 for (var _sdk in _sd) { seedObj[_sdk] = seedObj[_sdk] ? (seedObj[_sdk] + '；' + _sd[_sdk]) : _sd[_sdk]; }
                 continue;
             }
-            // v1.5.0：造型段（可选，以「造型:/穿搭:/衣柜:」开头）
+            // 造型段（可选，以「造型:/穿搭:/衣柜:」开头）
             if (/^(?:造型|穿搭|衣柜)[：:]/.test(seg)) {
                 var _sg = parseStyleSegment(seg);
                 for (var _gi = 0; _gi < _sg.length; _gi++) styleGroups.push(_sg[_gi]);
@@ -339,7 +294,7 @@ export function findImagePlaceholders(text) {
                 for (var pIdx = 0; pIdx < persons.length; pIdx++) {
                     var _ps = parsePersonString(persons[pIdx]);
                     if (!_ps) continue;
-                    // [Fix v1.11.1] 主模型常把种子直接写在人物段末尾 → 从这里剥出来，
+                    // [Fix] 主模型常把种子直接写在人物段末尾 → 从这里剥出来，
                     // 否则它会被当成外貌喂给辅助AI / 被动态要素兜底抄进提示词
                     if (_ps.appearance && hasSeedField(_ps.appearance)) {
                         var _pd = parseSeedSegment(_ps.appearance);
@@ -377,12 +332,12 @@ export function findImagePlaceholders(text) {
     return result;
 }
 
-// ── 动态要素提取（导演模式保真：占位符里酒馆AI写的一切动态内容——衣着/发型/表情/光线/氛围/动作——
+// ── 动态要素提取（占位符配图保真：占位符里酒馆AI写的一切动态内容——衣着/发型/表情/光线/氛围/动作——
 // 都是"本轮可变、由酒馆AI写"的部分，必须逐项润色进提示词，不得省略）
 var DYNAMIC_CUE = /(穿|着|披|围|戴|系|套|衣|裤|裙|袜|丝|鞋|靴|帽|开衫|风衣|马甲|吊带|抹胸|内衣|内搭|束腰|领口|束带|头发|发丝|发色|刘海|马尾|表情|神态|眼神|目光|微笑|皱眉|浅笑|光线|灯光|烛光|阳光|阴影|氛围|动作|姿势|站|坐|靠|蹲|跪|转身|弯腰|低头|抬头|抬手|伸手|撑|倚|抱|吻)/;
 export function extractDynamicBits(text) {
     if (!text) return [];
-    // [Fix v1.11.1] 先剥种子：`反差=看着懒散邋遢` 里的「着」会命中 DYNAMIC_CUE → 被当成动态要素抄进提示词
+    // [Fix] 先剥种子：`反差=看着懒散邋遢` 里的「着」会命中 DYNAMIC_CUE → 被当成动态要素抄进提示词
     text = stripSeedText(text);
     if (!text) return [];
     var parts = String(text).split(/[，。；、\n,;]/);
@@ -395,34 +350,17 @@ export function extractDynamicBits(text) {
     return out;
 }
 
-// ── 消息头部指纹（占位符感知） ──
-// 导演模式正文可能整个就是占位符：原文以 [img:…] 开头、缓存以 [image: …] 开头，
-// 前40字直接比较永远失配。取首个占位符的场景开头(≤30字)比较；无占位符回退前40字。
-// 匹配归一化：去空白与助词（的/地/得/色/个），用于"是否已包含"判断——
-// AI 润色把"浅灰开衫"写成"浅灰色开衫"时仍能认出已包含，避免重复补入
-export function normForMatch(s) {
-    return String(s || '').replace(/\s+/g, '').replace(/[的地得色个只]/g, '');
-}
-
-export function imgBlockHead(text) {
-    var m = String(text || '').match(/\[(?:img|image):\s*([^\]]{2,30})/);
-    return m ? m[1].replace(/\s/g, '') : String(text || '').slice(0, 40).replace(/\s/g, '');
-}
-
-// 组装成现有 [image:] 图卡格式（render.js 零改动）：
-// [image:场景]\n【提示词】提示词【/提示词】
 export function buildImageBlock(scene, prompt, styleHint) {
-    var s = scene && scene.trim() ? scene.trim() : '未命名画面';
-    if (s.length > 100) s = s.slice(0, 100) + '…';
-    var p = (prompt || '').trim();
-    var head = '[image: ' + s.replace(/\[/g, '［').replace(/\]/g, '］') + ']';
-    if (!p) return head;
-    if ((styleHint || '').trim()) p = styleHint.trim() + ', ' + p;
-    return head + '\n【提示词】' + p + '【/提示词】';
+    const title = String(scene || '').trim() || '未命名画面';
+    const label = (title.length > 100 ? title.slice(0, 100) + '…' : title).replace(/\[/g, '［').replace(/\]/g, '］');
+    const head = '[image: ' + label + ']';
+    const text = (prompt || '').trim();
+    if (!text) return head;
+    const style = (styleHint || '').trim();
+    return head + '\n【提示词】' + (style ? style + ', ' : '') + text + '【/提示词】';
 }
 
-// ══════════════════════════════════════════════════════════════
-// ── v1.13.6 数字保真（数值不许在管线里"蒸发"）──
+// ── 数字保真（数值不许在管线里"蒸发"）──
 // 主模型写下的数字是硬事实：年龄 14岁 / 身高 168cm / 体重 52kg。
 // 它也是最容易被"润色"掉的一类信息 —— 实测链路：
 //   主模型「14岁女性」→ 辅助AI 具象化成英文锚点 age:teenage girl
@@ -461,11 +399,11 @@ export function findLostNumbers(source, target) {
 }
 
 // ══════════════════════════════
-// ── v1.25 自校段解析（---CHECK---）──
+// ── 自校段解析（---CHECK---）──
 // 模型写完提示词后，自己逐条核对：事实是否原词出现、可见维度是否写全、有没有角色名、数字是否保留。
 // 插件只解析并记录（谁也没法替它判断"同义是否到位"），不进生图模型。
 //
-// v1.27.3：多段 + 前瞻。旧实现两个毛病：
+// 多段 + 前瞻。旧实现两个毛病：
 //   ① 只取**第一个** CHECK 段 —— 模型按"每个占位符各写一份三段"输出时，只有第 1 份的自校被记下；
 //   ② 缺 ---END--- 时 `([\s\S]*?)(?:---END---|$)` 会一路吃到文尾 ——
 //      实测把第 2 份输出的 `---PROFILE---` 和 JSON 当成自校行读进来（自校 #2 / #3 就是这个）。
