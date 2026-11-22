@@ -16,8 +16,8 @@ import { cleanLegacyAnchors } from './modules/roster.js';
 import { initFrontendBridge } from './modules/frontend-bridge.js';
 
 // ── 版本 ──
-window.SILLYLAB_VERSION = 'v1.32.0';
-slLog('LOADED v1.32.0');
+window.SILLYLAB_VERSION = 'v1.32.1';
+slLog('LOADED v1.32.1');
 
 // ── 初始化设置 ──
 initSettings(getContext, extension_settings);

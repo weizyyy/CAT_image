@@ -94,6 +94,12 @@ test('TavernHelper visible streaming sibling restores finished slots and reanaly
         streamed.textContent = source;
         scanner.scanAllMsgs();
         const ids = [...streamed.querySelectorAll('.sl_img_btn')].map(btn => btn.dataset.slid);
+        const gen = streamed.querySelector('.sl_img_btn');
+        const retry = streamed.querySelector('.sl_img_reanalyze');
+        assert.equal(gen.style.padding, '5px 14px');
+        for (const property of ['padding', 'borderRadius', 'fontSize', 'fontWeight', 'verticalAlign'])
+            assert.equal(retry.style[property], gen.style[property]);
+        assert.equal(retry.style.backgroundColor, 'rgb(201, 241, 213)');
         streamed.querySelectorAll('.sl_img_reanalyze')[1].click();
         await waitUntil(() => streamed.querySelectorAll('.sl_img_btn')[1].dataset.prompt === 'Scene number 3.');
         assert.equal(requests, 3);
@@ -170,6 +176,106 @@ test('chat filenames switch without normalization and roster copies can be edite
         assert.equal(deleteRosterPerson('Tester_test', 'Person'), true);
         assert.ok(settings.roster.Tester[sourceKey].Person);
     } finally { settings.roster = saved; delete character.avatar; ctx.openCharacterChat = oldOpen; }
+});
+
+test('the archive page opens existing roster entries without rescanning or migrating them', async () => {
+    const { createExpandedPanel } = await import('../modules/ui/panel.js');
+    const { renderArchivePage } = await import('../modules/ui/tabs.js');
+    const character = ctx.characters[0];
+    const saved = { roster: settings.roster, profiles: settings.profiles, fetch, frame: globalThis.requestAnimationFrame };
+    const historyFile = 'Tester - 2026-11-16 @ T08:00:00';
+    const historyKey = 'Tester_Tester-2026-11-16T080000';
+    try {
+        character.avatar = 'tester.png';
+        settings.profiles = {};
+        settings.roster = { Tester: {
+            Tester_test: { Alice: { key: 'Alice', name: 'Alice', anchor: 'eyes:green', portrait: '/old.png' } },
+            [historyKey]: { Robin: { key: 'Robin', name: 'Robin', anchor: 'eyes:blue' } },
+        } };
+        const before = JSON.stringify(settings.roster);
+        globalThis.requestAnimationFrame = callback => callback();
+        fetch = async url => url === '/api/characters/chats'
+            ? { ok: true, json: async () => [{ file_name: historyFile + '.jsonl' }] }
+            : { ok: false, status: 404 };
+        createExpandedPanel();
+        renderArchivePage();
+        const page = document.querySelector('.sl_page_body');
+        assert.equal(page.querySelector('details[open] .sl_pcard').dataset.char, 'Alice');
+        const history = () => page.querySelector(`details[data-chat="${historyKey}"]`);
+        await waitUntil(history);
+        assert.equal(history().open, false);
+        assert.ok(history().querySelector('summary').textContent.includes(historyFile));
+        history().open = true;
+        history().querySelector('.sl_pcard').click();
+        assert.equal(page.querySelector('.sl_anchor_input').value, 'eyes:blue');
+        assert.equal(JSON.stringify(settings.roster), before);
+    } finally {
+        jQuery('#sl_panel_body').empty();
+        settings.roster = saved.roster; settings.profiles = saved.profiles;
+        fetch = saved.fetch; globalThis.requestAnimationFrame = saved.frame;
+        delete character.avatar;
+    }
+});
+
+test('the compact panel and icon dock to the dragged edge across collapse and viewport changes', async t => {
+    const { createCompactBar, setPluginEnabled } = await import('../modules/ui/compact-bar.js');
+    const width = window.innerWidth, height = window.innerHeight;
+    const oldPosition = localStorage.getItem('sl_compact_pos');
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    function resize(w, h) {
+        window.innerWidth = w; window.innerHeight = h;
+        window.dispatchEvent(new window.Event('resize'));
+    }
+    try {
+        resize(1000, 700);
+        localStorage.setItem('sl_compact_pos', '{"x":18,"y":45}');
+        createCompactBar();
+        const bar = document.querySelector('#sl_compact');
+        const header = bar.querySelector('#sl_comp_header');
+        header.setPointerCapture = () => {};
+        const left = () => parseFloat(bar.style.left);
+        const right = () => left() + parseFloat(bar.style.width);
+        const pointer = (target, type, x) => target.dispatchEvent(new window.PointerEvent(type, { pointerId: 1, clientX: x, clientY: 60 }));
+        const move = (from, to) => {
+            pointer(header, 'pointerdown', from);
+            pointer(header, 'pointermove', to);
+            pointer(header, 'pointerup', to);
+        };
+        const collapse = () => { t.mock.timers.tick(3000); assert.ok(bar.classList.contains('sl_compact_logo')); };
+        const expand = () => { pointer(bar, 'pointerenter'); assert.ok(!bar.classList.contains('sl_compact_logo')); };
+
+        assert.equal(left(), 18);
+        collapse();
+        assert.equal(left(), 18);
+        expand();
+        move(50, 40);
+        assert.equal(left(), 0);
+        pointer(bar, 'pointerleave');
+        collapse();
+        assert.equal(left(), 0);
+
+        expand();
+        move(30, 715);
+        assert.equal(right(), 1000);
+        pointer(bar, 'pointerleave');
+        collapse();
+        assert.equal(right(), 1000);
+        const docked = localStorage.getItem('sl_compact_pos');
+        resize(260, 150);
+        assert.equal(right(), 260);
+        expand();
+        assert.equal(right(), 260);
+        assert.ok(parseFloat(bar.style.top) + parseFloat(bar.style.height) <= 150);
+        resize(1200, 800);
+        assert.equal(right(), 1200);
+        assert.equal(bar.style.top, '45px');
+        assert.equal(localStorage.getItem('sl_compact_pos'), docked);
+    } finally {
+        setPluginEnabled(false);
+        resize(width, height);
+        if (oldPosition === null) localStorage.removeItem('sl_compact_pos');
+        else localStorage.setItem('sl_compact_pos', oldPosition);
+    }
 });
 
 for (const style of ['eventTypes', 'event_types']) test(style + ': generation lifecycle, late edits, swipe cache and rerender restoration', async () => {

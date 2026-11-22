@@ -1,4 +1,4 @@
-# 🐱 CATimage v1.32.0 — 小猫的生图插件
+# 🐱 CATimage v1.32.1 — 小猫的生图插件
 
 **SillyTavern 1.18+ / Tauritavern 第三方扩展 · 文生图人物一致性方案**
 

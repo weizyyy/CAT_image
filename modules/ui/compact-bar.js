@@ -14,6 +14,8 @@ import * as panel from './panel.js';  // 循环依赖：仅函数体内引用，
 
 var _compactCleanup = null;
 var _compactEl = null, _compactTimer = null, _compDragMoved = false;
+const compactPositionKey = 'sl_compact_pos';
+const snapDistance = 24;
 
 export function getCompactEl() { return _compactEl; }
 
@@ -34,17 +36,8 @@ export function rebuildCompactBar() {
 }
 export function createCompactBar() {
   if (_compactEl && _compactEl.parent().length) return;
-  var saved = { x: null, y: null };
-  try { var s = localStorage.getItem('sl_compact_pos'); if (s) saved = JSON.parse(s); } catch (e) { }
-  var x = Number.isFinite(saved.x) ? saved.x : null, y = Number.isFinite(saved.y) ? saved.y : null;
-  // [Fix] 手机端 UI 位置：默认右下角会被手机浏览器底部工具栏遮挡、或压在酒馆聊天输入条后面
-  //（position:fixed bottom 在移动浏览器常不可见）。移动端（<640px）默认改挂右上角；
-  // 桌面端保持右下角不变；拖动后以保存的位置为准。
-  var isMobile = window.innerWidth < 640;
-  var l = x != null ? x + 'px' : 'auto', t = y != null ? y + 'px' : (isMobile ? '12px' : 'auto'), r = x != null ? 'auto' : '12px', b = y != null ? 'auto' : (isMobile ? 'auto' : '16px');
-  var W = Math.min(300, window.innerWidth - 24), H = Math.round(W * 0.66);
   var bar = '';
-  bar += '<div id="sl_compact" style="position:fixed;z-index:30000;bottom:' + b + ';right:' + r + ';left:' + l + ';top:' + t + ';width:' + W + 'px;height:' + H + 'px;background:' + CAT.card + ';border-radius:' + CAT.radius + ';box-shadow:0 14px 44px rgba(150,100,60,0.22);border:' + CAT.borderStyle + ' ' + CAT.line + ';font-family:' + CAT.font + ';font-size:12px;color:' + CAT.text + ';user-select:none;overflow:hidden;display:flex;flex-direction:column;">';
+  bar += '<div id="sl_compact" style="position:fixed;z-index:30000;background:' + CAT.card + ';border-radius:' + CAT.radius + ';box-shadow:0 14px 44px rgba(150,100,60,0.22);border:' + CAT.borderStyle + ' ' + CAT.line + ';font-family:' + CAT.font + ';font-size:12px;color:' + CAT.text + ';user-select:none;overflow:hidden;display:flex;flex-direction:column;">';
   // 头部：猫脸泡泡 + 文案 + 日志爪印
   bar += '<div id="sl_comp_header" style="display:flex;align-items:center;gap:9px;padding:10px 12px 8px;cursor:move;touch-action:none;border-bottom:1px solid ' + CAT.line + ';flex-shrink:0;height:26%;background:linear-gradient(135deg,' + CAT.accent + '14,transparent);">';
   bar += '<span id="sl_cat_icon" style="width:34px;height:34px;border-radius:12px;background:' + CAT.bg + ';display:flex;align-items:center;justify-content:center;pointer-events:none;color:' + CAT.accent + ';"></span>';
@@ -106,57 +99,87 @@ export function triggerGenAll() { var c = 0; jQuery('.sl_img_btn[data-prompt]').
 
 function installCompactBehavior() {
     const el = _compactEl[0], header = el.querySelector('#sl_comp_header');
-    let collapsed = false, dragging = false, hovering = false, idleTimer, drag;
+    let collapsed = false, hovering = false, idleTimer, drag, position;
     const viewport = () => window.visualViewport || { width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0 };
-    const dimensions = () => {
-        const v = viewport();
-        return { width: Math.max(1, Math.min(300, v.width - 16)), height: Math.max(1, Math.min(198, v.height - 16)) };
+    const fullSize = v => ({ width: Math.max(1, Math.min(300, v.width - 16)), height: Math.max(1, Math.min(198, v.height - 16)) });
+    const visibleSize = v => {
+        if (!collapsed) return fullSize(v);
+        const diameter = Math.max(1, Math.min(56, v.width, v.height));
+        return { width: diameter, height: diameter };
     };
-    function clamp(save = false) {
-        const v = viewport(), size = dimensions();
-        el.style.width = (collapsed ? Math.min(56, v.width) : size.width) + 'px';
-        el.style.height = (collapsed ? Math.min(56, v.height) : size.height) + 'px';
-        const rect = el.getBoundingClientRect();
-        const pos = clampPosition(rect.left, rect.top, rect.width, rect.height, v);
-        Object.assign(el.style, { left: pos.x + 'px', top: pos.y + 'px', right: 'auto', bottom: 'auto' });
-        if (save) try { localStorage.setItem('sl_compact_pos', JSON.stringify(pos)); } catch {}
+    // Store the inset from the nearer horizontal edge, independent of the panel width.
+    function anchorAt(point, size, v, snap = false) {
+        const left = point.x - (v.offsetLeft || 0), right = v.width - size.width - left;
+        const side = left <= right ? 'left' : 'right';
+        const inset = Math.max(0, Math.min(left, right));
+        return { side, inset: snap && inset <= snapDistance ? 0 : inset, y: point.y - (v.offsetTop || 0) };
+    }
+    let anchor = null;
+    try {
+        const saved = JSON.parse(localStorage.getItem(compactPositionKey));
+        if ((saved?.side === 'left' || saved?.side === 'right') && Number.isFinite(saved.inset) && Number.isFinite(saved.y)) {
+            anchor = saved;
+        } else if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) {
+            const v = viewport(), size = fullSize(v);
+            anchor = anchorAt(clampPosition(saved.x, saved.y, size.width, size.height, v), size, v);
+        }
+    } catch {}
+    function layout() {
+        const v = viewport(), size = visibleSize(v);
+        const left = v.offsetLeft || 0, top = v.offsetTop || 0;
+        const inset = anchor?.inset ?? 12;
+        const x = left + (anchor?.side === 'left' ? inset : v.width - size.width - inset);
+        const y = top + (anchor?.y ?? (v.width < 640 ? 12 : v.height - fullSize(v).height - 16));
+        position = clampPosition(drag?.left ?? x, drag?.top ?? y, size.width, size.height, v);
+        Object.assign(el.style, { left: position.x + 'px', top: position.y + 'px',
+            width: size.width + 'px', height: size.height + 'px' });
     }
     function setCollapsed(value) {
-        if (dragging || collapsed === value) return;
-        const rect = el.getBoundingClientRect(), size = dimensions();
+        if (drag || collapsed === value) return;
         collapsed = value;
         el.classList.toggle('sl_compact_logo', value);
-        el.style.left = (rect.right - (value ? Math.min(56, viewport().width) : size.width)) + 'px';
-        clamp();
+        layout();
     }
     function scheduleCollapse() {
         clearTimeout(idleTimer);
-        if (!hovering && !dragging && !el.querySelector(':focus-visible')) idleTimer = setTimeout(() => setCollapsed(true), 3000);
+        if (!hovering && !drag && !el.querySelector(':focus-visible')) idleTimer = setTimeout(() => setCollapsed(true), 3000);
     }
     const enter = e => { if (e.pointerType === 'touch') return; hovering = true; clearTimeout(idleTimer); setCollapsed(false); };
     const leave = () => { hovering = false; scheduleCollapse(); };
     const focus = () => { clearTimeout(idleTimer); setCollapsed(false); };
     const blur = () => setTimeout(scheduleCollapse, 0);
     const down = e => {
-        if (e.button && e.button !== 0 || e.target.closest('button')) return;
-        clearTimeout(idleTimer); dragging = true; _compDragMoved = false;
-        const rect = el.getBoundingClientRect();
-        drag = { x: e.clientX, y: e.clientY, left: rect.left, top: rect.top };
+        if (drag || e.button !== 0 || e.target.closest('button')) return;
+        clearTimeout(idleTimer); _compDragMoved = false;
+        drag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: position, left: position.x, top: position.y };
         header.setPointerCapture(e.pointerId); e.preventDefault();
     };
     const move = e => {
-        if (!dragging) return;
+        if (!drag || drag.id !== e.pointerId) return;
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
         if (Math.abs(dx) + Math.abs(dy) > 4) _compDragMoved = true;
-        el.style.left = drag.left + dx + 'px'; el.style.top = drag.top + dy + 'px'; clamp();
+        if (!_compDragMoved) return;
+        drag.left = drag.start.x + dx;
+        drag.top = drag.start.y + dy;
+        layout();
     };
-    const up = () => { if (!dragging) return; dragging = false; clamp(true); scheduleCollapse(); };
+    const up = e => {
+        if (!drag || drag.id !== e.pointerId) return;
+        if (_compDragMoved && e.type === 'pointerup') {
+            const v = viewport();
+            if (Math.abs(drag.left - drag.start.x) > 4) anchor = anchorAt(position, visibleSize(v), v, true);
+            else anchor = { side: anchor?.side ?? 'right', inset: anchor?.inset ?? 12, y: position.y - (v.offsetTop || 0) };
+            try { localStorage.setItem(compactPositionKey, JSON.stringify(anchor)); } catch {}
+        }
+        drag = null;
+        layout();
+        scheduleCollapse();
+    };
     const reset = e => {
         e.preventDefault();
-        const v = viewport(), size = dimensions();
-        el.style.left = (v.offsetLeft || 0) + v.width - (collapsed ? 56 : size.width) - 12 + 'px';
-        el.style.top = (v.offsetTop || 0) + (v.width < 640 ? 12 : v.height - (collapsed ? 56 : size.height) - 16) + 'px';
-        clamp(true);
+        anchor = null;
+        try { localStorage.removeItem(compactPositionKey); } catch {}
+        layout();
     };
     const key = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(false); panel.togglePanel(); } };
     const clickLogo = e => { if (collapsed && !_compDragMoved) { e.stopImmediatePropagation(); setCollapsed(false); scheduleCollapse(); } };
@@ -166,11 +189,11 @@ function installCompactBehavior() {
     document.head.appendChild(style);
     const listeners = [[el,'pointerenter',enter],[el,'pointerleave',leave],[el,'focusin',focus],[el,'focusout',blur],
         [header,'pointerdown',down],[header,'pointermove',move],[header,'pointerup',up],[header,'pointercancel',up],
-        [header,'dblclick',reset],[header,'keydown',key],[window,'resize',clamp],[window,'orientationchange',clamp]];
-    if (window.visualViewport) listeners.push([window.visualViewport,'resize',clamp],[window.visualViewport,'scroll',clamp]);
+        [header,'lostpointercapture',up],[header,'dblclick',reset],[header,'keydown',key],[window,'resize',layout],[window,'orientationchange',layout]];
+    if (window.visualViewport) listeners.push([window.visualViewport,'resize',layout],[window.visualViewport,'scroll',layout]);
     for (const [target,name,fn] of listeners) target.addEventListener(name,fn);
     header.addEventListener('click',clickLogo,true);
-    clamp(); scheduleCollapse();
+    layout(); scheduleCollapse();
     _compactCleanup = () => {
         clearTimeout(idleTimer); style.remove(); header.removeEventListener('click',clickLogo,true);
         for (const [target,name,fn] of listeners) target.removeEventListener(name,fn);

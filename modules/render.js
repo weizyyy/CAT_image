@@ -8,6 +8,8 @@ import { imgCacheGet, imgCacheGetById } from './cache.js';
 import { extractImagePrompt, cleanPromptForMode, imgBlockHead } from './text-utils.js';
 import { resolveFacePrompt } from './pipeline/profile.js';
 
+const imageActionStyle = 'display:inline-block;appearance:none;border:0;box-shadow:none;vertical-align:middle;padding:5px 14px;margin:4px 0 0;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px;line-height:inherit;font-weight:600;';
+
 // ── 构造 img 卡片 HTML ──
 export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
     // [Fix] 短标题：详细字段只走生成链（【提示词】/data属性/缓存），不外显——
@@ -21,8 +23,8 @@ export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
     return '<div class="sl_img_block" style="margin:8px 0;padding:10px 12px;border-radius:10px;background:' + COLORS.card + ';border:1px solid ' + COLORS.line + ';" title="' + escapeHtml(titleText) + '">' +
         '<div style="font-size:11px;color:' + COLORS.sub + ';margin-bottom:4px;">🖼️ ' + escapeHtml(titleText) + '</div>' +
         (cachedImage ? '<img src="' + escapeHtml(cachedImage) + '" style="max-width:' + (settings.imgBlockWidth || '55%') + ';border-radius:12px;margin-top:6px;display:block;">' : '') +
-        '<span class="sl_img_btn" data-prompt="' + escapeHtml(fullPrompt) + '"' + (blockId ? ' data-slid="' + escapeHtml(blockId) + '"' : '') + (mode ? ' data-sl-mode="' + escapeHtml(mode) + '"' : '') + ' style="display:inline-block;padding:5px 14px;margin-top:4px;background:' + (cachedImage ? COLORS.card : COLORS.blue) + ';color:' + (cachedImage ? COLORS.text : '#fff') + ';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;">' + (cachedImage ? '\u21bb \u91cd\u65b0\u751f\u6210' : '\u2726 \u751f\u6210\u56fe\u7247') + '</span>' +
-        (blockId ? '<button type="button" class="sl_img_reanalyze" style="margin:4px 0 0 6px;padding:4px 8px;border-radius:8px;font-size:11px;">重新解析</button>' : '') +
+        '<span class="sl_img_btn" data-prompt="' + escapeHtml(fullPrompt) + '"' + (blockId ? ' data-slid="' + escapeHtml(blockId) + '"' : '') + (mode ? ' data-sl-mode="' + escapeHtml(mode) + '"' : '') + ' style="' + imageActionStyle + 'background-color:' + (cachedImage ? COLORS.card : COLORS.blue) + ';color:' + (cachedImage ? COLORS.text : '#fff') + ';">' + (cachedImage ? '\u21bb \u91cd\u65b0\u751f\u6210' : '\u2726 \u751f\u6210\u56fe\u7247') + '</span>' +
+        (blockId ? '<button type="button" class="sl_img_reanalyze" style="' + imageActionStyle + 'margin-left:6px;background-color:#c9f1d5;color:#16482b;">重新解析</button>' : '') +
         (settings.showGenPrompt && fullPrompt !== scene ? '<div style="font-size:10px;color:#aeaeb2;font-family:Consolas,monospace;line-height:1.4;margin-top:6px;padding-top:4px;border-top:1px dotted ' + COLORS.line + ';word-break:break-all;">🐱 ' + escapeHtml(fullPrompt) + '</div>' : '') +
         '</div>';
 }

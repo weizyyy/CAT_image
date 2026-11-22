@@ -345,7 +345,7 @@ function renderArchiveInto(body, sessions) {
     }
     h += '</details>';
   }
-  h += userCardInto() + storyCardInto();
+  h += storyCardInto();
   body.html(h); bindArchiveEvents(body); bindStoryEvents(body);
   bindChatSwitch(body, sessions, renderArchiveInto);
   body.off('click.slRosterCopy', '.sl_roster_copy').on('click.slRosterCopy', '.sl_roster_copy', function () {
@@ -473,7 +473,6 @@ function renderPersonDetail(body, key, chatId = getChatId()) {
   });
 }
 export function bindArchiveEvents(b) {
-  b.off('change input', '#sl_user_name,#sl_user_desc').on('change input', '#sl_user_name,#sl_user_desc', function () { settings.userName = b.find('#sl_user_name').val(); settings.userDesc = b.find('#sl_user_desc').val(); saveSettings(); });
   b.off('change input', '#sl_specialization').on('change input', '#sl_specialization', function () { var pf = getProfiles(); if (pf && pf.root[pf.charName] && pf.root[pf.charName].meta) { pf.root[pf.charName].meta.specialization = jQuery(this).val(); saveSettings(); } });
   b.off('click', '.sl_arch_st').on('click', '.sl_arch_st', function () { var st = parseInt(jQuery(this).data('ast')); b.find('.sl_arch_st').css({ background: 'transparent', color: CAT.sub, fontWeight: '600' }); jQuery(this).css({ background: CAT.accent, color: '#fff', fontWeight: '700' }); b.find('#sl_arch_static').toggle(st === 0); b.find('#sl_arch_dynamic').toggle(st === 1); });
   // 卡片 → 详情页；返回
