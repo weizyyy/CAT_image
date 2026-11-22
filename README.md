@@ -1,4 +1,4 @@
-# CAT_image 2.0.0
+# CAT_image 2.0.1
 
 SillyTavern 1.18+ 和 Tauritavern 的第三方文生图扩展。主模型在回复中放置 `[img:…]`，扩展在回复完成后逐个分析占位符，并在原位显示图卡。
 

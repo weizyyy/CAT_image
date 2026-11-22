@@ -448,7 +448,7 @@ function renderPersonDetail(body, key, chatId = getChatId()) {
     h += '</div>';
   }
   h += '</div>';
-  h += '<details style="margin-top:11px;"><summary style="cursor:pointer;">编辑英文锚点</summary>';
+  h += '<details style="margin-top:11px;"><summary style="cursor:pointer;font-size:11px;line-height:1.45;">编辑英文锚点</summary>';
   h += '<textarea class="sl_anchor_input" style="width:100%;min-height:105px;' + fi() + '">' + esc(getEnglishAnchor(ppl.ent)) + '</textarea>';
   h += '<button type="button" class="sl_anchor_save" style="' + btnSm() + '">保存英文锚点</button></details>';
   h += '<button type="button" class="sl_person_delete" style="' + btnDanger() + ';margin-top:8px;">删除人物</button>';
