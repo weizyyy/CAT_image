@@ -1,6 +1,6 @@
 // ── SillyImage Lab 主题系统（MochiCat：五只猫五种气质，全部贴合小猫主题） ──
 import { slLog } from '../log.js';
-import { settings, saveSettings } from '../settings.js';
+import { COLORS, settings, saveSettings } from '../settings.js';
 
 // ⓪ 雪白猫（默认 v2.7）：Apple 式极简亮色 · 猫眼琥珀点缀
 var SNOW = { bg: '#f5f5f7', card: '#ffffff', accent: '#ff9f0a', accentHover: '#ff8a00', text: '#1d1d1f', sub: '#6e6e73', mute: '#aeaeb2', line: '#e8e8ea', green: '#30d158', red: '#ff3b30', yellow: '#ffcc00', radius: '16px', borderRadiusBtn: '12px', borderRadiusInput: '10px', btnPadding: '9px 18px', inputPadding: '9px 12px', shadow: '0 1px 3px rgba(20,20,24,0.05),0 8px 24px rgba(20,20,24,0.05)', btnShadow: '0 4px 14px rgba(255,159,10,0.28)', borderStyle: '1px solid', font: '-apple-system,BlinkMacSystemFont,PingFang SC,Noto Sans SC,Microsoft YaHei,sans-serif', backdropFilter: 'none' };
@@ -38,7 +38,15 @@ export var CAT_THEMES = {
 
 export var CAT = CAT_THEMES['雪白猫'];
 
-export var TEXT_THEMES = { '默认': { font: 'inherit', lineHeight: '1.6', color: 'inherit', bg: 'transparent', fontSize: 'inherit' }, '暖纸阅读': { font: 'Noto Serif SC, SimSun, serif', lineHeight: '2.0', color: '#4a3728', bg: '#fef9f2', fontSize: '15px' }, '深夜模式': { font: 'inherit', lineHeight: '1.7', color: '#d0d0d0', bg: '#1a1a1e', fontSize: '14px' }, '紧凑模式': { font: 'Noto Sans SC, sans-serif', lineHeight: '1.4', color: '#1a1a1a', bg: 'transparent', fontSize: '13px' } };
+export const TEXT_THEMES = {
+  '默认': { background: COLORS.card, color: COLORS.sub, border: COLORS.line },
+  '暖纸阅读': { background: '#f8e8b0', color: '#141414', border: '#e1cc8c' },
+  '深夜模式': { background: '#181818', color: '#ffffff', border: '#383838' },
+};
+
+export function getTextTheme() {
+  return Object.hasOwn(TEXT_THEMES, settings.enhancedTheme) ? settings.enhancedTheme : '默认';
+}
 
 // [Fix] 补上 CAT_THEMES/injectThemeStyle 已处理但从未入列的 2 套主题（C9）：
 // 原列表只有 5 套：云朵棉花猫/焦糖布丁猫 定义齐全却永远无法在 UI 中选中，对应分支成为死代码。
@@ -65,7 +73,7 @@ export function applyTheme(n) {
   r.style.setProperty('--sl-accent-soft', CAT.accent + '26');
   if (CAT.backdropFilter && CAT.backdropFilter !== 'none') r.style.setProperty('--sl-backdrop', CAT.backdropFilter);
   else r.style.removeProperty('--sl-backdrop');
-  syncThemeToDOM();
+  applyTextTheme(document);
   try { injectThemeStyle(); } catch (e) {}   // v3.0 修复：切主题时刷新纹理/装饰样式
 }
 
@@ -97,15 +105,48 @@ export function injectThemeStyle() {
   el.textContent = rules;
 }
 
-function syncThemeToDOM() {
-  try {
-    var t = TEXT_THEMES[settings.enhancedTheme] || TEXT_THEMES['默认'];
-    if (document.getElementById('sl_global_text_style')) return;
-    var s = document.createElement('style');
-    s.id = 'sl_global_text_style';
-    s.textContent = '.sl_enhanced,.sl_enhanced *{font-family:' + (t.font || 'inherit') + ';line-height:' + (t.lineHeight || '1.6') + ';color:' + (t.color || 'inherit') + ';background:' + (t.bg || 'transparent') + ';font-size:' + (t.fontSize || 'inherit') + '}';
-    document.head.appendChild(s);
-  } catch (e) {}
+export function applyTextTheme(doc) {
+  if (!doc.head) return;
+  const name = getTextTheme();
+  let style = doc.getElementById('sl_image_card_style');
+  if (style?.dataset.theme === name) return;
+  if (!style) {
+    style = doc.createElement('style');
+    style.id = 'sl_image_card_style';
+    doc.head.appendChild(style);
+  }
+  const { background, color, border } = TEXT_THEMES[name];
+  style.dataset.theme = name;
+  style.textContent = `
+    .sl_img_block {
+      margin:8px 0; padding:10px 12px; border-radius:10px;
+      background:${background}; color:${color}; border:1px solid ${border};
+    }
+    .sl_img_block .sl_img_title { font-size:11px; color:inherit; margin-bottom:4px; }
+    .sl_img_block .sl_img_result { max-width:var(--sl-image-width, 55%); border-radius:12px; margin-top:6px; display:block; }
+    .sl_img_block .sl_img_action {
+      display:inline-block; appearance:none; border:0; box-shadow:none; vertical-align:middle;
+      padding:5px 14px; margin:4px 0 0; border-radius:8px; cursor:pointer;
+      font-family:inherit; font-size:11px; font-weight:600; line-height:inherit;
+    }
+    .sl_img_block .sl_img_btn { background:${COLORS.blue}; color:#fff; }
+    .sl_img_block .sl_img_reanalyze { background:#c9f1d5; color:#16482b; margin-left:6px; }
+    .sl_img_block[data-sl-generated] .sl_img_action { padding:3px 6px; background:transparent; color:inherit; }
+    .sl_img_block .sl_img_btn[data-sl-state="queued"] { background:${COLORS.orange}; color:#fff; cursor:wait; }
+    .sl_img_block .sl_img_btn[data-sl-state="error"] { background:${COLORS.red}; color:#fff; }
+    .sl_img_block .sl_img_prompt {
+      font:10px/1.4 Consolas,monospace; color:inherit; margin-top:6px;
+      padding-top:4px; border-top:1px dotted ${border}; overflow-wrap:anywhere;
+    }
+  `;
+}
+
+export function refreshTextThemes(doc = document) {
+  applyTextTheme(doc);
+  for (const iframe of doc.querySelectorAll('iframe')) {
+    const child = iframe.contentDocument;
+    if (child) refreshTextThemes(child);
+  }
 }
 
 export function getCatStatusFace(s) {

@@ -1,13 +1,37 @@
 import { tokenizePlaceholders } from './placeholders.js';
 import { mountSlots, updateSlots } from './dom-placeholders.js';
 // ── SillyImage Lab 渲染 ──
-import { slLog, slErr } from './log.js';
-import { settings, COLORS, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
+import { slErr } from './log.js';
+import { settings, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
+import { applyTextTheme } from './ui/theme.js';
 
 import { imgCacheGetById } from './cache.js';
 import { extractImagePrompt, cleanPromptForMode } from './text-utils.js';
 
-const imageActionStyle = 'display:inline-block;appearance:none;border:0;box-shadow:none;vertical-align:middle;padding:5px 14px;margin:4px 0 0;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px;line-height:inherit;font-weight:600;';
+function imageActionLabel(generated) {
+    return generated ? '↻ 重新生成' : '✦ 生成图片';
+}
+
+export function setImageActionState(button, state) {
+    if (state) button.dataset.slState = state;
+    else delete button.dataset.slState;
+    button.textContent = state === 'queued' ? '排队中…' : state === 'error' ? '✕ 重试' :
+        imageActionLabel(button.closest('.sl_img_block')?.hasAttribute('data-sl-generated'));
+}
+
+export function showGeneratedImage(button, url) {
+    const card = button.closest('.sl_img_block');
+    if (!card) return;
+    let image = card.querySelector('.sl_img_result');
+    if (!image) {
+        image = card.ownerDocument.createElement('img');
+        image.className = 'sl_img_result';
+        button.before(image);
+    }
+    image.src = url;
+    card.setAttribute('data-sl-generated', '');
+    setImageActionState(button);
+}
 
 // ── 构造 img 卡片 HTML ──
 export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
@@ -19,12 +43,14 @@ export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
     var truncated = shortTitle.length > 14;
     if (truncated) shortTitle = shortTitle.slice(0, 14);
     var titleText = shortTitle + (truncated ? '…' : '');
-    return '<div class="sl_img_block" style="margin:8px 0;padding:10px 12px;border-radius:10px;background:' + COLORS.card + ';border:1px solid ' + COLORS.line + ';" title="' + escapeHtml(titleText) + '">' +
-        '<div style="font-size:11px;color:' + COLORS.sub + ';margin-bottom:4px;">🖼️ ' + escapeHtml(titleText) + '</div>' +
-        (cachedImage ? '<img src="' + escapeHtml(cachedImage) + '" style="max-width:' + (settings.imgBlockWidth || '55%') + ';border-radius:12px;margin-top:6px;display:block;">' : '') +
-        '<span class="sl_img_btn" data-prompt="' + escapeHtml(fullPrompt) + '"' + (blockId ? ' data-slid="' + escapeHtml(blockId) + '"' : '') + (mode ? ' data-sl-mode="' + escapeHtml(mode) + '"' : '') + ' style="' + imageActionStyle + 'background-color:' + (cachedImage ? COLORS.card : COLORS.blue) + ';color:' + (cachedImage ? COLORS.text : '#fff') + ';">' + (cachedImage ? '\u21bb \u91cd\u65b0\u751f\u6210' : '\u2726 \u751f\u6210\u56fe\u7247') + '</span>' +
-        (blockId ? '<button type="button" class="sl_img_reanalyze" style="' + imageActionStyle + 'margin-left:6px;background-color:#c9f1d5;color:#16482b;">重新解析</button>' : '') +
-        (settings.showGenPrompt && fullPrompt !== scene ? '<div style="font-size:10px;color:#aeaeb2;font-family:Consolas,monospace;line-height:1.4;margin-top:6px;padding-top:4px;border-top:1px dotted ' + COLORS.line + ';word-break:break-all;">🐱 ' + escapeHtml(fullPrompt) + '</div>' : '') +
+    return '<div class="sl_img_block"' + (cachedImage ? ' data-sl-generated' : '') +
+        ' style="--sl-image-width:' + escapeHtml(settings.imgBlockWidth || '55%') + '" title="' + escapeHtml(titleText) + '">' +
+        '<div class="sl_img_title">🖼️ ' + escapeHtml(titleText) + '</div>' +
+        (cachedImage ? '<img class="sl_img_result" src="' + escapeHtml(cachedImage) + '">' : '') +
+        '<button type="button" class="sl_img_action sl_img_btn" data-prompt="' + escapeHtml(fullPrompt) + '"' +
+        (blockId ? ' data-slid="' + escapeHtml(blockId) + '"' : '') + (mode ? ' data-sl-mode="' + escapeHtml(mode) + '"' : '') + '>' + imageActionLabel(cachedImage) + '</button>' +
+        (blockId ? '<button type="button" class="sl_img_action sl_img_reanalyze">重新解析</button>' : '') +
+        (settings.showGenPrompt && fullPrompt !== scene ? '<div class="sl_img_prompt">🐱 ' + escapeHtml(fullPrompt) + '</div>' : '') +
         '</div>';
 }
 
@@ -34,7 +60,9 @@ export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
 const reanalysisHandlers = new WeakMap();
 
 export function bindImageButtonsIn(doc) {
-    if (!doc || doc.__sl_imgbtn_bound) return;
+    if (!doc) return;
+    applyTextTheme(doc);
+    if (doc.__sl_imgbtn_bound) return;
     doc.__sl_imgbtn_bound = true;
     jQuery(doc).on('click', '.sl_img_reanalyze', function () {
         const slot = this.closest('[data-sl-slot]');

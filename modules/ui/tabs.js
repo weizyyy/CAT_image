@@ -1,5 +1,5 @@
 // ── SillyImage Lab 视图（SnowCat：主视图 Feed + 分层子页） ──
-import { CAT, CAT_THEMES, TEXT_THEMES, applyTheme, THEME_ORDER, THEME_ICONS } from './theme.js';
+import { CAT, CAT_THEMES, TEXT_THEMES, applyTheme, getTextTheme, refreshTextThemes, THEME_ORDER, THEME_ICONS } from './theme.js';
 import { card, groupTitle, cell, cardHead, lbl, chip, btnMain, btnGhost, btnSm, btnDanger, switchHTML, empty } from './primitives.js';
 import { catSVG, catStatusText } from './cat.js';
 import { toast, esc, escAttr, fi, chkProf } from './utils.js';
@@ -200,12 +200,13 @@ export function renderThemePage() {
       h += '</button>';
     }
     h += '</div></div>';
-    h += '<div style="' + card() + '">' + cardHead('📖', '正文渲染', '图片周围文字的阅读样式') + '<select id="sl_text_theme" style="' + fi() + '">';
-    for (var tk2 in TEXT_THEMES) h += '<option value="' + escAttr(tk2) + '"' + (settings.enhancedTheme === tk2 ? ' selected' : '') + '>' + tk2 + '</option>';
+    h += '<div style="' + card() + '">' + cardHead('📖', '正文渲染', '图卡的背景和文字颜色') + '<select id="sl_text_theme" style="' + fi() + '">';
+    const selectedTheme = getTextTheme();
+    for (const name of Object.keys(TEXT_THEMES)) h += '<option value="' + escAttr(name) + '"' + (selectedTheme === name ? ' selected' : '') + '>' + esc(name) + '</option>';
     h += '</select></div>';
     body.html(h);
     body.off('click', '.sl_theme_pick').on('click', '.sl_theme_pick', function () { var name = jQuery(this).data('theme'); if (!name || name === settings.uiTheme) return; settings.uiTheme = name; saveSettings(); applyTheme(name); compact.rebuildCompactBar(); panel.hidePanel(); setTimeout(function () { panel.showPanel(); renderThemePage(); toast('info', '换好啦：' + name); }, 300); });
-    body.off('change', '#sl_text_theme').on('change', '#sl_text_theme', function () { settings.enhancedTheme = jQuery(this).val(); saveSettings(); });
+    body.off('change', '#sl_text_theme').on('change', '#sl_text_theme', function () { settings.enhancedTheme = this.value; refreshTextThemes(); saveSettings(); });
   }, '主题外观', { key: '主题外观' });
 }
 

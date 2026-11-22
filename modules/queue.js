@@ -1,7 +1,7 @@
 // ── SillyImage Lab 生图排队 ──
 import { slLog } from './log.js';
-import { settings, COLORS, getSTContext, getActiveMode, isEnglishMode, escapeHtml } from './settings.js';
-import { imgCacheGetById } from './cache.js';
+import { settings, getSTContext, getActiveMode, isEnglishMode } from './settings.js';
+import { setImageActionState, showGeneratedImage } from './render.js';
 import { generateImage } from './comfyui.js';
 import { cleanPromptForMode } from './text-utils.js';
 import { getChatId } from './archive.js';
@@ -21,8 +21,7 @@ function liveButton(task) {
 }
 function resetButton(task) {
     const btn = liveButton(task);
-    if (btn) btn.text(imgCacheGetById(task.blockId, task.chatKey) ? '↻ 重新生成' : '✦ 生成图片')
-        .css({ background: COLORS.card, color: COLORS.text });
+    if (btn?.[0]) setImageActionState(btn[0]);
 }
 function cancelTask(task) {
     if (task.cancelled) return;
@@ -67,16 +66,7 @@ async function processImageQueue() {
             task.custom.onSuccess(result);
             slLog('排队完成(任务):', task.id);
         } else if (task.btn[0]?.isConnected) {
-            task.btn.text('\u21bb \u91cd\u65b0\u751f\u6210').css({ background: COLORS.card, color: COLORS.text });
-            task.btn.siblings('img').remove();
-            // [前端卡桥] 按钮可能位于酒馆助手的 iframe 文档中：
-            // 图片元素必须用该文档创建（跨文档 append 在部分浏览器不渲染），src 用 attr 赋值避免 data URL 被转义
-            var _od = (task.btn[0] && task.btn[0].ownerDocument) ? task.btn[0].ownerDocument : document;
-            var imgEl = jQuery(_od.createElement('img'));
-            imgEl.attr('src', result.url).attr('style', 'max-width:' + (settings.imgBlockWidth || '55%') + ';border-radius:12px;margin-top:6px;display:block;');
-            task.btn.after(imgEl);
-            imgEl[0].offsetHeight;
-            task.btn.parent()[0].offsetHeight;
+            showGeneratedImage(task.btn[0], result.url);
             getSTContext().saveMetadataDebounced && getSTContext().saveMetadataDebounced();
             // 重新绑定点击，恢复按钮功能
             slLog('排队完成:', task.id);
@@ -87,7 +77,7 @@ async function processImageQueue() {
             if (task.custom.onFail) task.custom.onFail(e);
             slLog('排队失败(任务):', task.id, e.message);
         } else {
-            task.btn.text('\u2715 \u91cd\u8bd5').css({ background: COLORS.red, color: '#fff' });
+            setImageActionState(task.btn[0], 'error');
             slLog('排队失败:', task.id, e.message);
         }
     } finally {
@@ -100,13 +90,12 @@ async function processImageQueue() {
 export function enqueueGen(btn, prompt, { automatic = false } = {}) {
     const blockId = btn.attr('data-slid');
     if (automatic && blockId && cancelledAutoBlocks.has(blockId)) return;
-    if (blockId && pendingBlocks.has(blockId)) { pendingBlocks.get(blockId).btn = btn; btn.text('排队中\u2026'); return; }
+    if (blockId && pendingBlocks.has(blockId)) { pendingBlocks.get(blockId).btn = btn; setImageActionState(btn[0], 'queued'); return; }
     if (blockId) cancelledAutoBlocks.delete(blockId);
     var id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
-    btn.text('排队中\u2026').css({ background: COLORS.orange, color: '#fff' }).off('click');
-    var _scene = '';
-    try { _scene = String(btn.closest('.sl_img_block').find('div').first().text() || '').replace(/^🖼️\s*/, '').slice(0, 60); } catch (eS) {}
-    const task = { id: id, btn: btn, blockId, prompt: prompt, mode: btn.attr('data-sl-mode') || getActiveMode(), workflow: settings.cWf, scene: _scene, chatKey: getChatId() };
+    setImageActionState(btn[0], 'queued');
+    const scene = btn.closest('.sl_img_block').attr('title') || '';
+    const task = { id: id, btn: btn, blockId, prompt: prompt, mode: btn.attr('data-sl-mode') || getActiveMode(), workflow: settings.cWf, scene, chatKey: getChatId() };
     if (blockId) pendingBlocks.set(blockId, task);
     imageQueue.push(task);
     slLog('入队:', id, '队列长度:', imageQueue.length);

@@ -99,12 +99,12 @@ test('TavernHelper visible streaming sibling restores finished slots and reanaly
         streamed.textContent = source;
         scanner.scanAllMsgs();
         const ids = [...streamed.querySelectorAll('.sl_img_btn')].map(btn => btn.dataset.slid);
-        const gen = streamed.querySelector('.sl_img_btn');
-        const retry = streamed.querySelector('.sl_img_reanalyze');
-        assert.equal(gen.style.padding, '5px 14px');
+        const gen = getComputedStyle(streamed.querySelector('.sl_img_btn'));
+        const retry = getComputedStyle(streamed.querySelector('.sl_img_reanalyze'));
+        assert.equal(gen.padding, '5px 14px');
         for (const property of ['padding', 'borderRadius', 'fontSize', 'fontWeight', 'verticalAlign'])
-            assert.equal(retry.style[property], gen.style[property]);
-        assert.equal(retry.style.backgroundColor, 'rgb(201, 241, 213)');
+            assert.equal(retry[property], gen[property]);
+        assert.equal(retry.backgroundColor, 'rgb(201, 241, 213)');
         streamed.querySelectorAll('.sl_img_reanalyze')[1].click();
         await waitUntil(() => streamed.querySelectorAll('.sl_img_btn')[1].dataset.prompt === 'Scene number 3.');
         assert.equal(requests, 3);
@@ -209,6 +209,82 @@ test('the archive page opens the exact current and historical sessions', async (
     } finally {
         jQuery('#sl_panel_body').empty();
         fetch = saved.fetch; globalThis.requestAnimationFrame = saved.frame;
+    }
+});
+
+test('the reading theme recolors complete cards and newly generated cards use matching secondary actions', async () => {
+    const { createExpandedPanel } = await import('../modules/ui/panel.js');
+    const { renderThemePage } = await import('../modules/ui/tabs.js');
+    const { renderEnhancedLite, setEnqueueGen } = await import('../modules/render.js');
+    const { refreshTextThemes } = await import('../modules/ui/theme.js');
+    const { enqueueGen } = await import('../modules/queue.js');
+    const saved = { fetch, theme: settings.enhancedTheme, frame: globalThis.requestAnimationFrame };
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    try {
+        settings.enhancedTheme = '紧凑模式';
+        globalThis.requestAnimationFrame = callback => callback();
+        createExpandedPanel();
+        renderThemePage();
+        const picker = document.querySelector('#sl_text_theme');
+        assert.equal(picker.value, '默认');
+        assert.deepEqual([...picker.options].map(option => option.value), ['默认', '暖纸阅读', '深夜模式']);
+
+        const source = '[img:场景]', enhanced = '[image:场景]【提示词】提示词【/提示词】';
+        show(source);
+        frame.contentDocument.body.textContent = source;
+        let reanalyzed;
+        for (const root of [document.querySelector('.mes_text'), frame.contentDocument.body])
+            renderEnhancedLite(jQuery(root), enhanced, 'themed-card', source, false, index => { reanalyzed = index; });
+        const card = document.querySelector('.sl_img_block');
+        const framedCard = frame.contentDocument.querySelector('.sl_img_block');
+        assert.equal(getComputedStyle(card).backgroundColor, 'rgb(245, 245, 247)');
+        assert.equal(getComputedStyle(card.querySelector('.sl_img_title')).color, 'rgb(110, 110, 115)');
+        for (const [theme, background, color] of [
+            ['暖纸阅读', 'rgb(248, 232, 176)', 'rgb(20, 20, 20)'],
+            ['深夜模式', 'rgb(24, 24, 24)', 'rgb(255, 255, 255)'],
+        ]) {
+            picker.value = theme;
+            picker.dispatchEvent(new window.Event('change', { bubbles: true }));
+            assert.equal(settings.enhancedTheme, theme);
+            assert.equal(document.querySelector('.sl_img_block'), card);
+            assert.equal(getComputedStyle(card).backgroundColor, background);
+            assert.equal(getComputedStyle(card.querySelector('.sl_img_title')).color, color);
+            assert.equal(frame.contentWindow.getComputedStyle(framedCard).backgroundColor, background);
+        }
+
+        fetch = async url => String(url).endsWith('/generate')
+            ? { ok: true, json: async () => ({ data: 'AA==', format: 'png' }) }
+            : { ok: true, json: async () => ({ path: '/theme-test.png' }) };
+        setEnqueueGen(enqueueGen);
+        card.querySelector('.sl_img_btn').click();
+        await waitUntil(() => card.querySelector('.sl_img_result'));
+        const assertGenerated = element => {
+            const generate = element.querySelector('.sl_img_btn');
+            const reanalyze = element.querySelector('.sl_img_reanalyze');
+            assert.match(generate.textContent, /重新生成/);
+            assert.equal(reanalyze.textContent, '重新解析');
+            for (const button of [generate, reanalyze]) {
+                const style = button.ownerDocument.defaultView.getComputedStyle(button);
+                assert.equal(style.padding, '3px 6px');
+                assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)');
+                assert.equal(style.color, 'rgb(255, 255, 255)');
+            }
+        };
+        assertGenerated(card);
+        card.querySelector('.sl_img_reanalyze').click();
+        assert.equal(reanalyzed, 0);
+        // Mount the saved image in the iframe through the same path used on a redraw.
+        frame.contentDocument.body.textContent = source;
+        renderEnhancedLite(jQuery(frame.contentDocument.body), enhanced, 'themed-card', source);
+        assertGenerated(frame.contentDocument.querySelector('.sl_img_block'));
+    } finally {
+        frame.remove();
+        jQuery('#sl_panel_body').empty();
+        settings.enhancedTheme = saved.theme;
+        refreshTextThemes();
+        fetch = saved.fetch;
+        globalThis.requestAnimationFrame = saved.frame;
     }
 });
 
