@@ -265,6 +265,7 @@ function collectArchivePeople(chatId = getChatId()) {
 }
 
 const chatViewTokens = new WeakMap();
+const chatSummaryStyle = 'cursor:pointer;font-size:12px;line-height:1.45;overflow-wrap:anywhere;';
 
 function bindChatSwitch(body, sessions, render) {
   const byKey = new Map(sessions.map(session => [session.key, session]));
@@ -322,7 +323,7 @@ function renderArchiveInto(body, sessions) {
   for (const session of sessions) {
     const people = collectArchivePeople(session.key);
     h += '<details style="' + card() + '" data-chat="' + escAttr(session.key) + '"' + (session.current ? ' open' : '') + '>';
-    h += '<summary style="cursor:pointer;padding:8px;">' + esc(session.label) + ' · ' + people.length + ' 人' +
+    h += '<summary style="' + chatSummaryStyle + 'padding:8px;">' + esc(session.label) + ' · ' + people.length + ' 人' +
         (session.current ? ' · 当前聊天' : '') + '</summary>';
     h += chatSwitchButton(session);
     if (!session.current && people.length) h += '<button type="button" class="sl_roster_copy" data-chat="' + escAttr(session.key) +
@@ -674,7 +675,7 @@ function renderGalleryInto(body, sessions) {
       var grp = list[g];
       const session = sessionByKey.get(grp.chatKey);
       h += '<details style="margin-top:14px;"' + (grp.current || grp.chatKey === source ? ' open' : '') + '>';
-      h += '<summary style="cursor:pointer;margin-bottom:6px;">' + esc(session?.label || grp.label) + '</summary>';
+      h += '<summary style="' + chatSummaryStyle + 'margin-bottom:6px;">' + esc(session?.label || grp.label) + '</summary>';
       h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">';
       if (!grp.current && grp.selectable) {
         const selected = grp.chatKey === source;
