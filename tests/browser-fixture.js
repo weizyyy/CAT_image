@@ -160,6 +160,15 @@ export async function runBrowserFixture() {
         root.querySelector('.sl_scan_retry').click();
         await wait(() => !!root.querySelector('.sl_img_btn') && !scanner.scanCoordinator.running);
         checks.push({ name: 'webview-cancelled-analysis-explicit-resume', ok: calls === oldCalls + 3 });
+        const manualForm = document.querySelector('#sl_comp_manual');
+        const manualField = manualForm.querySelector('input');
+        const manualRect = manualForm.getBoundingClientRect();
+        const beforeManual = generations;
+        manualField.value = '0';
+        manualForm.querySelector('button').click();
+        await wait(() => root.querySelector('.sl_img_result') && !queue.getQueueStatus().running);
+        checks.push({ name: 'webview-manual-floor-control-queues-existing-prompt',
+            ok: calls === oldCalls + 3 && generations === beforeManual + 1 && manualRect.top >= cancelRect.bottom && manualRect.bottom <= barRect.bottom });
         compact.setPluginEnabled(false);
         const panel = await import('../modules/ui/panel.js'), tabs = await import('../modules/ui/tabs.js');
         panel.showPanel(); tabs.renderSettingsPage();

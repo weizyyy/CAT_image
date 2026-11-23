@@ -8,7 +8,7 @@ import { messageKey, tokenizePlaceholders } from './placeholders.js';
 import { reconcileSlots } from './slot-revisions.js';
 import { resetSlots } from './dom-placeholders.js';
 import { imgCacheGetById } from './cache.js';
-import { isImagePending, resumeImageButton } from './queue.js';
+import { enqueueChatImage, isImagePending, resumeImageButton } from './queue.js';
 import { galleryAdd, galleryCacheSource } from './gallery.js';
 import { ScanCoordinator } from './scan-coordinator.js';
 
@@ -32,13 +32,15 @@ export function readSnapshot(messageId) {
     const source = message.mes, chatId = getChatId(), swipe = message.swipe_id ?? 0, mode = getActiveMode();
     if (!chatId) return null;
     const key = getMsgKey(chatId, messageId, source, swipe, mode), version = epoch;
+    function isSameReply() {
+        const current = getSTContext()?.chat?.[Number(messageId)];
+        return getChatId() === chatId && current?.mes === source && (current.swipe_id ?? 0) === swipe;
+    }
     return { owner: chatId + ':' + messageId, chatId, messageId: String(messageId),
-        source, swipe, mode, key, results: new Map(),
+        source, swipe, mode, key, isSameReply, results: new Map(),
         isCurrent() {
-            const current = getSTContext()?.chat?.[Number(messageId)];
             return active && settings.pluginOn !== false && epoch === version &&
-                !generationBusy() && getChatId() === chatId &&
-                current?.mes === source && (current.swipe_id ?? 0) === swipe && getActiveMode() === mode;
+                !generationBusy() && isSameReply() && getActiveMode() === mode;
         } };
 }
 function latestAssistantId() {
@@ -162,7 +164,7 @@ function retryMessageSlot(snapshot, index, button) {
             revision.results.set(index, { ok: true, enhanced });
             saveImageRevision(revision);
             const isLatest = Number(revision.messageId) === latestAssistantId();
-            renderSnapshot(revision, null, isLatest, !isLatest);
+            renderSnapshot(revision, { autoGenerate: isLatest, resolvedOnly: !isLatest });
         },
         onError: () => restore('重新解析失败 · 重试'),
         onCancel: () => restore('重新解析'),
@@ -171,37 +173,61 @@ function retryMessageSlot(snapshot, index, button) {
     if (!job) restore('重新解析');
 }
 
-function renderSnapshot(snapshot, enhanced, autoGenerate = true, resolvedOnly = false, root = messageRoot(snapshot.messageId)) {
-    const ids = snapshot.slots?.map(s => s.id);
-    if (snapshot.slots) enhanced = snapshot.slots.map((slot, index) => slot.enhanced
+function imageBlocks(snapshot) {
+    const ids = snapshot.slots?.map(slot => slot.id);
+    return snapshot.slots?.map((slot, index) => slot.enhanced
         ? extractImgBlocksFromEnhanced(slot.enhanced, snapshot.key, index, ids, slot.mode || snapshot.mode)[0] : undefined);
+}
+
+function renderSnapshot(snapshot, { autoGenerate = true, resolvedOnly = false, root = messageRoot(snapshot.messageId),
+    blocks = imageBlocks(snapshot), buttons } = {}) {
     autoGenerate = autoGenerate && snapshot.key === automaticLatest && Number(snapshot.messageId) === latestAssistantId();
     const mountedIds = new Set();
     for (const surface of renderRoots(root)) {
         clearMessageCards(surface, snapshot.key);
-        if (!renderEnhancedLite(jQuery(surface), enhanced, snapshot.key, snapshot.source, {
+        if (!renderEnhancedLite(jQuery(surface), blocks, snapshot.key, snapshot.source, {
             autoGenerate, resolvedOnly, mountedIds,
             onReanalyze: (index, button) => retryMessageSlot(snapshot, index, button),
         })) continue;
         for (const button of surface.querySelectorAll('.sl_img_btn[data-slid]')) {
-            if (button.closest('[data-sl-slot]')?.dataset.slSlot.startsWith(snapshot.key + '#')) resumeImageButton(button);
+            if (!button.closest('[data-sl-slot]')?.dataset.slSlot.startsWith(snapshot.key + '#')) continue;
+            resumeImageButton(button);
+            buttons?.set(button.dataset.slid, button);
         }
     }
     return mountedIds.size > 0;
 }
+
+function renderAndQueueFloor(snapshot, pending = false, newIndex) {
+    const blocks = imageBlocks(snapshot), buttons = new Map();
+    renderSnapshot(snapshot, { blocks, buttons, autoGenerate: false, resolvedOnly: !pending });
+    let queued = 0;
+    for (const [index, block] of blocks.entries()) {
+        if (!block || (newIndex !== undefined && index !== newIndex) ||
+            imgCacheGetById(block.id, snapshot.chatId) || isImagePending(block.id)) continue;
+        const button = buttons.get(block.id);
+        if (enqueueChatImage({ btn: button && jQuery(button), blockId: block.id, mode: block.mode, scene: block.scene,
+            prompt: block.prompt, chatKey: snapshot.chatId,
+            isCurrent: () => snapshot.isSameReply() && snapshot.slots[index]?.id === block.id })) queued++;
+    }
+    return queued;
+}
+
 export const scanCoordinator = new ScanCoordinator({
     run: (snapshot, isCurrent, signal) => snapshot.run ? snapshot.run(isCurrent, signal)
         : runRosterPipeline(snapshot.source, snapshot.messageId, { isCurrent, signal, results: snapshot.results,
             onSlot(index, enhanced) {
                 if (!isCurrent()) return;
+                const newlyAnalyzed = !snapshot.slots[index].enhanced;
                 snapshot.slots[index].enhanced = enhanced;
                 saveImageRevision(snapshot);
-                renderSnapshot(snapshot, null);
+                if (snapshot.queueAfterAnalysis && newlyAnalyzed) renderAndQueueFloor(snapshot, true, index);
+                else renderSnapshot(snapshot, { autoGenerate: !snapshot.queueAfterAnalysis });
             } }),
     async commit(snapshot, result) {
         if (snapshot.commit) return snapshot.commit(result);
         saveImageRevision(snapshot);
-        if (snapshot.isCurrent()) renderSnapshot(snapshot, result.enhanced);
+        if (snapshot.isCurrent()) renderSnapshot(snapshot, { autoGenerate: !snapshot.queueAfterAnalysis });
     },
     onError(error, snapshot) {
         slErr('配图分析失败: ' + error.message);
@@ -320,6 +346,14 @@ function findBestCachedEntry(chatId, messageId, source, swipe, mode = getActiveM
     return { ...record, key, complete: record.slots.every(slot => slot.enhanced) };
 }
 
+function findHistoricalEntry(snapshot) {
+    const saved = sessionData(snapshot.chatId)?.revisions || {};
+    return Object.entries(saved)
+        .filter(([, record]) => record.messageId === snapshot.messageId && record.swipe === snapshot.swipe &&
+            record.source === snapshot.source && record.slots.some(slot => slot.enhanced))
+        .sort(([, a], [, b]) => b.ts - a.ts)[0];
+}
+
 export function clearMsgCache(chatId, messageId) {
     const session = sessionData(chatId);
     const id = String(messageId);
@@ -353,16 +387,12 @@ export function scanAllMsgs() {
         const cached = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
         const revision = cached || (reuse && tokenizePlaceholders(snapshot.source).length) ? prepareRevision(snapshot) : null;
         const reused = revision && reuse?.(revision);
-        if (cached || reused) renderSnapshot(revision, null, Number(id) === latest, Number(id) !== latest, root);
+        if (cached || reused) renderSnapshot(revision, { autoGenerate: Number(id) === latest, resolvedOnly: Number(id) !== latest, root });
         else if (Number(id) !== latest) {
-            const saved = sessionData(snapshot.chatId)?.revisions || {};
-            const historical = Object.entries(saved)
-                .filter(([, record]) => record.messageId === snapshot.messageId && record.swipe === snapshot.swipe &&
-                    record.source === snapshot.source && record.slots.some(slot => slot.enhanced))
-                .sort(([, a], [, b]) => b.ts - a.ts)[0];
+            const historical = findHistoricalEntry(snapshot);
             if (historical) {
                 const [key, record] = historical;
-                renderSnapshot({ ...snapshot, key, mode: record.mode, slots: record.slots }, null, false, true, root);
+                renderSnapshot({ ...snapshot, key, mode: record.mode, slots: record.slots }, { autoGenerate: false, resolvedOnly: true, root });
             }
         }
     }
@@ -378,12 +408,12 @@ function scheduleMessage(id, immediate = false) {
     if (!snapshot || !snapshot.isCurrent()) return;
     const tokens = tokenizePlaceholders(snapshot.source);
     if (!tokens.length) {
-        renderSnapshot(snapshot, [], false, true);
+        renderSnapshot(snapshot, { autoGenerate: false, resolvedOnly: true });
         prepareRevision(snapshot);
         return;
     }
     const cache = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
-    if (cache?.complete) { renderSnapshot(prepareRevision(snapshot), null); return; }
+    if (cache?.complete) { renderSnapshot(prepareRevision(snapshot)); return; }
     if (!settings.cWf || !settings.auxUrl || !settings.auxModel) return;
     const observation = observations.get(snapshot.owner);
     if (!observation || observation.key !== snapshot.key) {
@@ -392,11 +422,62 @@ function scheduleMessage(id, immediate = false) {
     } else if (!immediate && Date.now() - observation.since < 700) { requestCheck(800); return; }
     snapshot = prepareRevision(snapshot);
     reuseGalleryImages(snapshot);
-    if (!renderSnapshot(snapshot, null) || snapshot.slots.every(slot => slot.enhanced)) return;
+    if (!renderSnapshot(snapshot) || snapshot.slots.every(slot => slot.enhanced)) return;
     saveImageRevision(snapshot);
     const job = scanCoordinator.submit(snapshot);
     if (job?.state === 'cancelled') scanCoordinator.onCancel(snapshot);
 }
+
+function parseFloorSelection(input, last) {
+    const floors = new Set();
+    for (const part of input.normalize('NFKC').trim().split(/[,、]/)) {
+        const match = part.trim().match(/^(\d+)(?:\s*[-–—]\s*(\d+))?$/);
+        if (!match) throw new Error('请输入楼层或范围，例如 56,58-60,62');
+        const from = Number(match[1]), to = Number(match[2] ?? match[1]);
+        if (from > to) throw new Error('楼层范围应从小到大');
+        if (to > last) throw new Error('楼层超出当前聊天范围（0–' + last + '）');
+        for (let id = from; id <= to; id++) floors.add(id);
+    }
+    return floors;
+}
+
+export function queueMessageFloors(input) {
+    if (!active || settings.pluginOn === false || !getChatId()) throw new Error('请先打开聊天和生图插件');
+    if (generationBusy() || document.querySelector('.edit_textarea,#curEditTextarea')) throw new Error('请等回复或编辑结束后排图');
+    if (!settings.cWf) throw new Error('请先配置生图工作流');
+    const floors = parseFloorSelection(input, (getSTContext().chat?.length ?? 0) - 1);
+    const result = { queued: 0, analysing: 0, skipped: 0, needsArtist: 0 };
+    for (const id of floors) {
+        const snapshot = readSnapshot(id);
+        if (!snapshot || !tokenizePlaceholders(snapshot.source).length) { result.skipped++; continue; }
+        const revision = prepareRevision(snapshot);
+        const previous = findHistoricalEntry(revision)?.[1];
+        for (const [index, slot] of revision.slots.entries()) {
+            const old = previous?.slots[index];
+            if (slot.enhanced || !old?.enhanced || !imgCacheGetById(old.id, revision.chatId)) continue;
+            revision.slots[index] = { ...old, mode: old.mode || previous.mode };
+            revision.results.set(index, { ok: true, enhanced: old.enhanced });
+        }
+        reuseGalleryImages(revision);
+        const missing = revision.slots.some(slot => !slot.enhanced);
+        const pending = missing && !!(settings.auxUrl && settings.auxModel);
+        if (missing && !pending) result.needsArtist++;
+        saveImageRevision(revision);
+        result.queued += renderAndQueueFloor(revision, pending);
+        if (!pending) continue;
+        result.analysing++;
+        const job = scanCoordinator.jobs.get(revision.key);
+        if (job && ['running', 'queued'].includes(job.state)) {
+            job.snapshot.queueAfterAnalysis = true;
+            continue;
+        }
+        scanCoordinator.jobs.delete(revision.key);
+        revision.queueAfterAnalysis = true;
+        scanCoordinator.submit(revision);
+    }
+    return result;
+}
+
 export function cancelPendingScans() {
     const latest = readSnapshot(latestAssistantId());
     return scanCoordinator.cancelPending(latest?.isCurrent() && tokenizePlaceholders(latest.source).length &&

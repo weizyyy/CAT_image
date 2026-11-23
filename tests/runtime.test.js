@@ -74,6 +74,69 @@ test('switching to automatic queues only the new last assistant floor', async ()
     }
 });
 
+test('manual floor ranges recover missing historical markers, including unloaded floors, and preserve cached images', async () => {
+    const { clearQueue, getQueueStatus } = await import('../modules/queue.js');
+    const { imgCacheGetById } = await import('../modules/cache.js');
+    const savedAuto = settings.autoGen;
+    settings.autoGen = 0;
+    const sources = ['前[img:甲]中[img:乙]后', '[img:用户]', '[img:未加载]', '[img:已出图]', '[img:已解析]', '[img:不应排图]', '最新文字'];
+    ctx.chat = sources.map((mes, id) => ({ mes, is_user: id === 1 }));
+    const chat = document.querySelector('#chat');
+    const mount = id => chat.insertAdjacentHTML('beforeend', '<div class="mes" mesid="' + id + '"><div class="mes_text">' + sources[id] + '</div></div>');
+    const row = id => chat.querySelector('.mes[mesid="' + id + '"]');
+    chat.replaceChildren();
+    for (const id of [0, 1, 3, 4, 5, 6]) mount(id);
+    function save(id, blockId) {
+        const revision = scanner.readSnapshot(id);
+        revision.slots = [{ id: blockId, enhanced: '[image:缓存图]【提示词】cached prompt【/提示词】' }];
+        scanner.saveImageRevision(revision);
+    }
+    save(3, 'already-generated');
+    save(4, 'preanalyzed');
+    galleryAdd('/cached-floor.png', { blockId: 'already-generated' });
+
+    const analyses = [];
+    let imageRequests = 0;
+    fetch = async (url, options) => {
+        if (String(url).includes('analysis.local')) {
+            analyses.push(JSON.parse(options.body).messages.at(-1).content);
+            return response('Floor test ' + analyses.length + '.');
+        }
+        if (String(url).endsWith('/generate')) {
+            imageRequests++;
+            return { ok: true, json: async () => ({ data: 'AA==', format: 'png' }) };
+        }
+        return { ok: true, json: async () => ({ path: '/manual-floor-' + imageRequests + '.png' }) };
+    };
+    scanner.startPolling();
+    try {
+        assert.throws(() => scanner.queueMessageFloors('4-2'), /从小到大/);
+        assert.throws(() => scanner.queueMessageFloors('0,99'), /超出/);
+        const result = scanner.queueMessageFloors('0,1-4,２');
+        assert.deepEqual(result, { queued: 1, analysing: 2, skipped: 1, needsArtist: 0 });
+        await waitUntil(() => imageRequests === 4 && !scanner.scanCoordinator.running && !getQueueStatus().running);
+        assert.equal(analyses.length, 3);
+        assert.deepEqual(analyses.map(request => ['甲', '乙', '未加载'].find(scene => request.includes(scene))), ['甲', '乙', '未加载']);
+        assert.equal(row(0).querySelectorAll('.sl_img_result').length, 2);
+        assert.equal(row(3).querySelector('.sl_img_result').getAttribute('src'), '/cached-floor.png');
+        assert.equal(row(4).querySelectorAll('.sl_img_result').length, 1);
+        assert.equal(row(1).querySelectorAll('.sl_img_block').length, 0);
+        assert.equal(row(5).querySelectorAll('.sl_img_block').length, 0);
+        assert.ok(imgCacheGetById(scanner.readSnapshot(2).key + '#0'));
+        mount(2);
+        scanner.scanAllMsgs();
+        assert.equal(row(2).querySelectorAll('.sl_img_result').length, 1);
+        assert.equal(scanner.queueMessageFloors('0,2-4').queued, 0);
+        assert.equal(imageRequests, 4);
+        eventSource.emit(types.GENERATION_STARTED, 'normal', {}, false);
+        assert.throws(() => scanner.queueMessageFloors('0'), /等回复/);
+    } finally {
+        scanner.stopPolling();
+        clearQueue();
+        settings.autoGen = savedAuto;
+    }
+});
+
 test('TavernHelper visible streaming sibling restores finished slots and reanalyzes only the clicked marker', async () => {
 
     const source = '开头[img:第一处]中间[img:第二处]结尾';

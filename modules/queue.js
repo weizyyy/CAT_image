@@ -39,7 +39,7 @@ async function processImageQueue() {
     var task = imageQueue.shift();
     activeTask = task; task.controller = new AbortController();
     liveButton(task);
-    if (!task.custom && (!task.btn[0]?.isConnected || settings.pluginOn === false)) {
+    if (!task.custom && (settings.pluginOn === false || (task.isCurrent ? !task.isCurrent() : !task.btn?.[0]?.isConnected))) {
         pendingBlocks.delete(task.blockId);
         queueRunning = false; activeTask = null;
         return processImageQueue();
@@ -65,7 +65,7 @@ async function processImageQueue() {
             // [Fix] 通用任务（如生成立绘）：由调用方回调处理结果
             task.custom.onSuccess(result);
             slLog('排队完成(任务):', task.id);
-        } else if (task.btn[0]?.isConnected) {
+        } else if (task.btn?.[0]?.isConnected) {
             showGeneratedImage(task.btn[0], result.url);
             getSTContext().saveMetadataDebounced && getSTContext().saveMetadataDebounced();
             // 重新绑定点击，恢复按钮功能
@@ -77,7 +77,7 @@ async function processImageQueue() {
             if (task.custom.onFail) task.custom.onFail(e);
             slLog('排队失败(任务):', task.id, e.message);
         } else {
-            setImageActionState(task.btn[0], 'error');
+            if (task.btn?.[0]) setImageActionState(task.btn[0], 'error');
             slLog('排队失败:', task.id, e.message);
         }
     } finally {
@@ -87,19 +87,27 @@ async function processImageQueue() {
     }
 }
 
-export function enqueueGen(btn, prompt, { automatic = false } = {}) {
-    const blockId = btn.attr('data-slid');
-    if (automatic && blockId && cancelledAutoBlocks.has(blockId)) return;
-    if (blockId && pendingBlocks.has(blockId)) { pendingBlocks.get(blockId).btn = btn; setImageActionState(btn[0], 'queued'); return; }
+export function enqueueChatImage({ btn, blockId, prompt, mode, scene, chatKey = getChatId(), isCurrent }, automatic = false) {
+    if (automatic && blockId && cancelledAutoBlocks.has(blockId)) return false;
+    if (blockId && pendingBlocks.has(blockId)) {
+        if (btn?.[0]) resumeImageButton(btn[0]);
+        return false;
+    }
     if (blockId) cancelledAutoBlocks.delete(blockId);
-    var id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
-    setImageActionState(btn[0], 'queued');
-    const scene = btn.closest('.sl_img_block').attr('title') || '';
-    const task = { id: id, btn: btn, blockId, prompt: prompt, mode: btn.attr('data-sl-mode') || getActiveMode(), workflow: settings.cWf, scene, chatKey: getChatId() };
+    const id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
+    if (btn?.[0]) setImageActionState(btn[0], 'queued');
+    const task = { id, btn, blockId, prompt, mode, workflow: settings.cWf, scene, chatKey, isCurrent };
     if (blockId) pendingBlocks.set(blockId, task);
     imageQueue.push(task);
     slLog('入队:', id, '队列长度:', imageQueue.length);
-    processImageQueue();
+    void processImageQueue();
+    return true;
+}
+
+export function enqueueGen(btn, prompt, { automatic = false } = {}) {
+    return enqueueChatImage({ btn, prompt, blockId: btn.attr('data-slid'),
+        mode: btn.attr('data-sl-mode') || getActiveMode(),
+        scene: btn.closest('.sl_img_block').attr('title') || '' }, automatic);
 }
 
 // [Fix] 通用排队任务（立绘等非聊天图按钮的生成）：与聊天图共用同一队列，串行打 ComfyUI

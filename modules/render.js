@@ -109,7 +109,7 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
         if (isEnglishMode(mode)) { var _c = cleanPromptForMode(fullPrompt, mode); if (_c) fullPrompt = _c; }
         var bid = blockIds?.[blockIdx] || (blockKey ? blockKey + '#' + blockIdx : '');
         blockIdx++;
-        blocks.push({ scene: scene, prompt: fullPrompt, id: bid, html: buildImgCard(scene, fullPrompt, imgCacheGetById(bid), bid, mode) });
+        blocks.push({ scene, prompt: fullPrompt, id: bid, mode, html: buildImgCard(scene, fullPrompt, imgCacheGetById(bid), bid, mode) });
     }
     return blocks;
 }
