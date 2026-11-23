@@ -174,11 +174,12 @@ test('TavernHelper HTML copies and repeated mode switches leave one card per fin
             const streamed = document.createElement('div');
             streamed.className = 'TH-streaming';
             streamed.innerHTML = original.innerHTML;
+            const inactiveHtml = original.innerHTML;
             original.classList.add('hidden!');
             original.after(streamed);
-            await waitUntil(() => buttonsIn(original).length === 0 && buttonsIn(streamed).length === 2 &&
+            await waitUntil(() => streamed.hasAttribute('data-sl-active-stream') && buttonsIn(streamed).length === 2 &&
                 buttonsIn(streamed).every(button => button.closest('[data-sl-slot]')));
-            assert.equal(buttonsIn(original).length, 0);
+            assert.equal(original.innerHTML, inactiveHtml);
             assert.deepEqual(buttonsIn(streamed).map(button => button.dataset.slid), ids);
             assert.deepEqual([...streamed.querySelectorAll('.sl_img_result')].map(img => img.getAttribute('src')),
                 ['/first.png', '/second.png']);
@@ -189,10 +190,11 @@ test('TavernHelper HTML copies and repeated mode switches leave one card per fin
             assert.deepEqual(buttonsIn(streamed).map(button => button.dataset.slid), ids);
 
             // The old host may survive briefly while the original is shown again.
+            const streamedHtml = streamed.innerHTML;
             streamed.style.display = 'none';
             original.classList.remove('hidden!');
-            await waitUntil(() => buttonsIn(original).length === 2);
-            assert.equal(buttonsIn(streamed).length, 0);
+            await waitUntil(() => !streamed.hasAttribute('data-sl-active-stream'));
+            assert.equal(streamed.innerHTML, streamedHtml);
             assert.deepEqual(buttonsIn(original).map(button => button.dataset.slid), ids);
             streamed.remove();
         }
@@ -251,7 +253,7 @@ test('a pending image follows its slot between a TavernHelper iframe and normal 
         rendered.hidden = true;
         original.hidden = false;
         await waitUntil(() => original.querySelector('.sl_img_btn')?.dataset.slState === 'queued');
-        assert.equal(frameBody.querySelectorAll('.sl_img_block').length, 0);
+        assert.equal(frameBody.querySelector('.sl_img_btn'), button);
         assert.equal(original.querySelector('.sl_img_btn').dataset.slid, id);
         finishImage();
         await waitUntil(() => original.querySelector('.sl_img_result')?.getAttribute('src') === '/pier.png');
@@ -259,7 +261,7 @@ test('a pending image follows its slot between a TavernHelper iframe and normal 
         original.hidden = true;
         rendered.hidden = false;
         await waitUntil(() => frameBody.querySelector('.sl_img_result')?.getAttribute('src') === '/pier.png');
-        assert.equal(original.querySelectorAll('.sl_img_block').length, 0);
+        assert.equal(original.querySelector('.sl_img_result').getAttribute('src'), '/pier.png');
         assert.equal(frameBody.querySelector('.sl_img_btn').dataset.slid, id);
         assert.equal(analysisRequests, 1);
         assert.equal(imageRequests, 1);

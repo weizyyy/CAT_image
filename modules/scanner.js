@@ -63,6 +63,7 @@ export function resetAutomaticBacklog() {
 }
 
 const STREAMING_SURFACE = '.TH-streaming,.mes_streaming';
+const ACTIVE_STREAM = 'data-sl-active-stream';
 
 function isSurfaceShown(element) {
     if (element.closest('[hidden],.hidden\\!,[aria-hidden="true"],[inert]')) return false;
@@ -70,27 +71,29 @@ function isSurfaceShown(element) {
     return display !== 'none' && visibility !== 'hidden' && visibility !== 'collapse';
 }
 
-function messageSurfaces(id) {
+function messageRoot(id) {
     const message = Array.from(document.querySelectorAll('.mes')).find(n =>
         String(n.getAttribute('mesid') ?? n.getAttribute('data-mesid')) === String(id));
     const original = message?.querySelector('.mes_text');
-    if (!original) return { active: undefined, inactive: [] };
-    // TavernHelper copies .mes_text into a sibling. During a switch, both
-    // surfaces may still exist, or the replacement may still be empty.
+    if (!original) return;
     const streaming = [...original.parentElement.children].filter(node => node !== original && node.matches(STREAMING_SURFACE));
-    const active = streaming.find(node => isSurfaceShown(node) && (node.childElementCount || node.textContent.trim()))
-        || (isSurfaceShown(original) ? original : undefined);
-    return { active, inactive: [...streaming, original].filter(node => node !== active) };
+    const editing = original.querySelector('#curEditTextarea,.edit_textarea');
+    const replacement = !editing && streaming.find(node =>
+        isSurfaceShown(node) && (node.childElementCount || node.textContent.trim()));
+    // The helper owns both surfaces. Mark the displayed copy so an exposed
+    // source is hidden by CSS, without writing into the helper's observed DOM.
+    for (const node of streaming) node.toggleAttribute(ACTIVE_STREAM, node === replacement);
+    if (!editing) return replacement || (isSurfaceShown(original) ? original : undefined);
 }
 
-function* renderRoots(root, includeHidden = false, depth = 0) {
+function* renderRoots(root, depth = 0) {
     if (!root) return;
     yield root;
     if (depth >= 4) return;
     for (const frame of root.querySelectorAll('iframe')) {
-        if (!includeHidden && !isSurfaceShown(frame)) continue;
+        if (!isSurfaceShown(frame)) continue;
         try {
-            yield* renderRoots(frame.contentDocument?.body, includeHidden, depth + 1);
+            yield* renderRoots(frame.contentDocument?.body, depth + 1);
         } catch { /* Cross-origin frames cannot be modified. */ }
     }
 }
@@ -164,13 +167,9 @@ function renderSnapshot(snapshot, enhanced, autoGenerate = true, resolvedOnly = 
     const ids = snapshot.slots?.map(s => s.id);
     if (snapshot.slots) enhanced = snapshot.slots.map((slot, index) => slot.enhanced
         ? extractImgBlocksFromEnhanced(slot.enhanced, snapshot.key, index, ids, slot.mode || snapshot.mode)[0] : undefined);
-    const surfaces = messageSurfaces(snapshot.messageId);
-    for (const inactive of surfaces.inactive) {
-        for (const root of renderRoots(inactive, true)) clearMessageCards(root);
-    }
     autoGenerate = autoGenerate && snapshot.key === automaticLatest && Number(snapshot.messageId) === latestAssistantId();
     const mountedIds = new Set();
-    for (const root of renderRoots(surfaces.active)) {
+    for (const root of renderRoots(messageRoot(snapshot.messageId))) {
         clearMessageCards(root, snapshot.key);
         if (!renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source, {
             autoGenerate, resolvedOnly, mountedIds,
@@ -199,13 +198,13 @@ export const scanCoordinator = new ScanCoordinator({
     onError(error, snapshot) {
         slErr('配图分析失败: ' + error.message);
         if (snapshot.onError) return snapshot.onError(error);
-        messageSurfaces(snapshot.messageId).active?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
+        messageRoot(snapshot.messageId)?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
             slot.textContent = '🐱 分析失败，点击重试'; slot.classList.add('sl_scan_retry'); slot.style.cursor = 'pointer';
         });
     },
     onCancel(snapshot) {
         if (snapshot.onCancel) return snapshot.onCancel();
-        messageSurfaces(snapshot.messageId).active?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
+        messageRoot(snapshot.messageId)?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
             slot.textContent = '🐱 分析已取消，点击继续'; slot.classList.add('sl_scan_retry'); slot.style.cursor = 'pointer';
         });
     }
@@ -449,6 +448,7 @@ function onFrameLoad() { requestCheck(200); }
 export function stopPolling() {
     active = false; epoch++; generating = false; clearTimeout(timer); clearInterval(fallback); observer?.disconnect();
     document.querySelector('#chat')?.removeEventListener('load', onFrameLoad, true);
+    for (const node of document.querySelectorAll('#chat [' + ACTIVE_STREAM + ']')) node.removeAttribute(ACTIVE_STREAM);
     handlers.splice(0).forEach(off => off()); observations.clear(); revisions.clear(); scanCoordinator.clear(); jQuery(document).off('click.slScan');
 }
 export function getScannerStatus() {

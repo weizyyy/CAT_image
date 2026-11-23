@@ -69,12 +69,23 @@ export async function runBrowserFixture() {
             const streamed = document.createElement('div');
             streamed.className = 'TH-streaming';
             streamed.innerHTML = jQuery('<div>').append(jQuery(root.innerHTML).toArray()).html();
-            root.classList.add('hidden!');
+            const sourceHtml = root.innerHTML;
             root.after(streamed);
-            await wait(() => cardIds(streamed) === ids.join(',') && !root.querySelector('.sl_img_block'));
+            await wait(() => cardIds(streamed) === ids.join(',') && getComputedStyle(root).display === 'none');
+            if (root.innerHTML !== sourceHtml) throw new Error('The hidden source was rewritten');
+            const editor = document.createElement('textarea');
+            editor.id = 'curEditTextarea';
+            root.append(editor);
+            scanner.scanAllMsgs();
+            if (!editor.getClientRects().length) throw new Error('The editor was hidden with the source');
+            editor.remove();
+            scanner.scanAllMsgs();
+            if (getComputedStyle(root).display !== 'none') throw new Error('Two reply surfaces are visible after editing');
+            const streamedHtml = streamed.innerHTML;
             streamed.hidden = true;
-            root.classList.remove('hidden!');
-            await wait(() => cardIds(root) === ids.join(',') && !streamed.querySelector('.sl_img_block'));
+            await wait(() => cardIds(root) === ids.join(',') && getComputedStyle(root).display !== 'none' &&
+                !streamed.hasAttribute('data-sl-active-stream'));
+            if (streamed.innerHTML !== streamedHtml) throw new Error('The inactive copy was rewritten');
             streamed.remove();
         }
         checks.push({ name: 'webview-tavernhelper-streaming-toggles-preserve-two-cached-cards', ok: calls === before && generations === beforeGen });

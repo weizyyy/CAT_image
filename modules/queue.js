@@ -14,7 +14,7 @@ const cancelledAutoBlocks = new Set();
 let activeTask;
 
 function liveButton(task) {
-    if (!task.btn || !task.blockId) return task.btn;
+    if (!task.btn || !task.blockId || task.btn[0]?.isConnected) return task.btn;
     const live = Array.from(task.btn[0]?.ownerDocument.querySelectorAll('.sl_img_btn') || []).find(n => n.dataset.slid === task.blockId);
     if (live) task.btn = jQuery(live);
     return task.btn;
