@@ -14,7 +14,7 @@ import { ScanCoordinator } from './scan-coordinator.js';
 
 let observedLatest, automaticLatest;
 let galleryIndexMemo;
-let active = false, generating = false, epoch = 0, timer, fallback, observer;
+let active = false, generating = false, epoch = 0, timer, checkAt = 0, fallback, observer;
 const handlers = [], observations = new Map(), revisions = new Map();
 
 export function generationBusy() {
@@ -71,19 +71,27 @@ function isSurfaceShown(element) {
     return display !== 'none' && visibility !== 'hidden' && visibility !== 'collapse';
 }
 
-function messageRoot(id) {
-    const message = Array.from(document.querySelectorAll('.mes')).find(n =>
-        String(n.getAttribute('mesid') ?? n.getAttribute('data-mesid')) === String(id));
+function selectMessageRoot(message) {
     const original = message?.querySelector('.mes_text');
     if (!original) return;
     const streaming = [...original.parentElement.children].filter(node => node !== original && node.matches(STREAMING_SURFACE));
     const editing = original.querySelector('#curEditTextarea,.edit_textarea');
-    const replacement = !editing && streaming.find(node =>
-        isSurfaceShown(node) && (node.childElementCount || node.textContent.trim()));
+    const ready = node => isSurfaceShown(node) && (node.childElementCount || node.textContent.trim());
+    // Release a former owner before checking siblings it may still hide.
+    for (const node of streaming) {
+        if (node.hasAttribute(ACTIVE_STREAM) && !ready(node)) node.removeAttribute(ACTIVE_STREAM);
+    }
+    const replacement = !editing && streaming.find(ready);
     // The helper owns both surfaces. Mark the displayed copy so an exposed
     // source is hidden by CSS, without writing into the helper's observed DOM.
     for (const node of streaming) node.toggleAttribute(ACTIVE_STREAM, node === replacement);
     if (!editing) return replacement || (isSurfaceShown(original) ? original : undefined);
+}
+
+function messageRoot(id) {
+    const message = Array.from(document.querySelectorAll('#chat .mes')).find(node =>
+        String(node.getAttribute('mesid') ?? node.getAttribute('data-mesid')) === String(id));
+    return selectMessageRoot(message);
 }
 
 function* renderRoots(root, depth = 0) {
@@ -163,19 +171,19 @@ function retryMessageSlot(snapshot, index, button) {
     if (!job) restore('重新解析');
 }
 
-function renderSnapshot(snapshot, enhanced, autoGenerate = true, resolvedOnly = false) {
+function renderSnapshot(snapshot, enhanced, autoGenerate = true, resolvedOnly = false, root = messageRoot(snapshot.messageId)) {
     const ids = snapshot.slots?.map(s => s.id);
     if (snapshot.slots) enhanced = snapshot.slots.map((slot, index) => slot.enhanced
         ? extractImgBlocksFromEnhanced(slot.enhanced, snapshot.key, index, ids, slot.mode || snapshot.mode)[0] : undefined);
     autoGenerate = autoGenerate && snapshot.key === automaticLatest && Number(snapshot.messageId) === latestAssistantId();
     const mountedIds = new Set();
-    for (const root of renderRoots(messageRoot(snapshot.messageId))) {
-        clearMessageCards(root, snapshot.key);
-        if (!renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source, {
+    for (const surface of renderRoots(root)) {
+        clearMessageCards(surface, snapshot.key);
+        if (!renderEnhancedLite(jQuery(surface), enhanced, snapshot.key, snapshot.source, {
             autoGenerate, resolvedOnly, mountedIds,
             onReanalyze: (index, button) => retryMessageSlot(snapshot, index, button),
         })) continue;
-        for (const button of root.querySelectorAll('.sl_img_btn[data-slid]')) {
+        for (const button of surface.querySelectorAll('.sl_img_btn[data-slid]')) {
             if (button.closest('[data-sl-slot]')?.dataset.slSlot.startsWith(snapshot.key + '#')) resumeImageButton(button);
         }
     }
@@ -337,13 +345,15 @@ export function scanAllMsgs() {
     observeLatest();
     const latest = latestAssistantId();
     const reuse = cacheReuse(getChatId(), getActiveMode());
-    for (const el of document.querySelectorAll('.mes')) {
+    for (const el of document.querySelectorAll('#chat .mes')) {
+        const root = selectMessageRoot(el);
+        if (!root) continue;
         const id = el.getAttribute('mesid') ?? el.getAttribute('data-mesid'), snapshot = readSnapshot(id);
         if (!snapshot) continue;
         const cached = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
         const revision = cached || (reuse && tokenizePlaceholders(snapshot.source).length) ? prepareRevision(snapshot) : null;
         const reused = revision && reuse?.(revision);
-        if (cached || reused) renderSnapshot(revision, null, Number(id) === latest, Number(id) !== latest);
+        if (cached || reused) renderSnapshot(revision, null, Number(id) === latest, Number(id) !== latest, root);
         else if (Number(id) !== latest) {
             const saved = sessionData(snapshot.chatId)?.revisions || {};
             const historical = Object.entries(saved)
@@ -352,7 +362,7 @@ export function scanAllMsgs() {
                 .sort(([, a], [, b]) => b.ts - a.ts)[0];
             if (historical) {
                 const [key, record] = historical;
-                renderSnapshot({ ...snapshot, key, mode: record.mode, slots: record.slots }, null, false, true);
+                renderSnapshot({ ...snapshot, key, mode: record.mode, slots: record.slots }, null, false, true, root);
             }
         }
     }
@@ -405,7 +415,16 @@ export async function runAuxImageScan(element) {
     scheduleMessage(id, true);
 }
 function requestCheck(delay = 150) {
-    clearTimeout(timer); timer = setTimeout(() => { scanAllMsgs(); checkLastMessage(); }, delay);
+    const due = Date.now() + delay;
+    // Continuously updating frontend cards must not postpone the scan indefinitely.
+    if (timer && checkAt <= due) return;
+    clearTimeout(timer);
+    checkAt = due;
+    timer = setTimeout(() => {
+        timer = undefined;
+        scanAllMsgs();
+        checkLastMessage();
+    }, delay);
 }
 export function startPolling() {
     if (active) return;
@@ -418,7 +437,7 @@ export function startPolling() {
     };
     on('GENERATION_STARTED', (_type, _options, dryRun) => {
         if (dryRun) return;
-        generating = true; epoch++; scanCoordinator.clear(); clearTimeout(timer);
+        generating = true; epoch++; scanCoordinator.clear(); clearTimeout(timer); timer = undefined;
     });
     for (const name of ['GENERATION_ENDED', 'GENERATION_STOPPED']) on(name, () => { generating = false; requestCheck(300); });
     for (const name of ['MESSAGE_RECEIVED', 'MESSAGE_UPDATED', 'CHARACTER_MESSAGE_RENDERED', 'MESSAGE_DELETED']) on(name, () => requestCheck());
@@ -447,6 +466,7 @@ export function startPolling() {
 function onFrameLoad() { requestCheck(200); }
 export function stopPolling() {
     active = false; epoch++; generating = false; clearTimeout(timer); clearInterval(fallback); observer?.disconnect();
+    timer = undefined;
     document.querySelector('#chat')?.removeEventListener('load', onFrameLoad, true);
     for (const node of document.querySelectorAll('#chat [' + ACTIVE_STREAM + ']')) node.removeAttribute(ACTIVE_STREAM);
     handlers.splice(0).forEach(off => off()); observations.clear(); revisions.clear(); scanCoordinator.clear(); jQuery(document).off('click.slScan');

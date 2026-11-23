@@ -215,6 +215,35 @@ test('TavernHelper HTML copies and repeated mode switches leave one card per fin
     }
 });
 
+test('uncached historical replies reconcile their streaming surfaces while other message DOM keeps changing', async () => {
+    show('这条历史楼层没有图片');
+    const first = document.querySelector('.mes');
+    const original = first.querySelector('.mes_text');
+    const bodyHtml = '<p>' + original.textContent + '</p>';
+    const streaming = [document.createElement('div'), document.createElement('div')];
+    for (const copy of streaming) {
+        copy.className = 'TH-streaming';
+        copy.innerHTML = bodyHtml;
+    }
+    original.after(...streaming);
+    ctx.chat.push({ mes: '较新的回复', is_user: false });
+    document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">较新的回复</div></div>');
+    scanner.startPolling();
+    const updates = setInterval(() => first.classList.toggle('changing'), 30);
+    try {
+        await waitUntil(() => streaming[0].hasAttribute('data-sl-active-stream'));
+        assert.equal(streaming[1].hasAttribute('data-sl-active-stream'), false);
+        streaming[0].style.display = 'none';
+        await waitUntil(() => streaming[1].hasAttribute('data-sl-active-stream'));
+        assert.equal(streaming[0].hasAttribute('data-sl-active-stream'), false);
+        assert.equal(streaming[0].innerHTML, bodyHtml);
+        assert.equal(streaming[1].innerHTML, bodyHtml);
+    } finally {
+        clearInterval(updates);
+        scanner.stopPolling();
+    }
+});
+
 test('a pending image follows its slot between a TavernHelper iframe and normal message text', async () => {
     const { setEnqueueGen } = await import('../modules/render.js');
     const { clearQueue, enqueueGen } = await import('../modules/queue.js');

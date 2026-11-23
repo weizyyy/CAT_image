@@ -81,6 +81,15 @@ export async function runBrowserFixture() {
             editor.remove();
             scanner.scanAllMsgs();
             if (getComputedStyle(root).display !== 'none') throw new Error('Two reply surfaces are visible after editing');
+            const overlap = streamed.cloneNode(true);
+            overlap.removeAttribute('data-sl-active-stream');
+            streamed.after(overlap);
+            scanner.scanAllMsgs();
+            if (getComputedStyle(overlap).display !== 'none') throw new Error('Two streaming copies are visible');
+            streamed.style.display = 'none';
+            await wait(() => overlap.hasAttribute('data-sl-active-stream') && getComputedStyle(overlap).display !== 'none');
+            overlap.remove();
+            streamed.style.removeProperty('display');
             const streamedHtml = streamed.innerHTML;
             streamed.hidden = true;
             await wait(() => cardIds(root) === ids.join(',') && getComputedStyle(root).display !== 'none' &&

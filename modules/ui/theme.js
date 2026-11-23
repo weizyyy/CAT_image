@@ -117,9 +117,10 @@ export function applyTextTheme(doc) {
   }
   const { background, color, border } = TEXT_THEMES[name];
   style.dataset.theme = name;
+  const activeStream = ':is(.TH-streaming,.mes_streaming)[data-sl-active-stream]:not([hidden],.hidden\\!,[aria-hidden="true"],[inert])';
   style.textContent = `
-    #chat :is(.mes,.mes *):has(> :is(.TH-streaming,.mes_streaming)[data-sl-active-stream]:not([hidden],.hidden\\!,[aria-hidden="true"],[inert])) >
-        .mes_text:not(:has(#curEditTextarea,.edit_textarea)) { display:none !important; }
+    #chat :is(.mes,.mes *):has(> ${activeStream}) > .mes_text:not(:has(#curEditTextarea,.edit_textarea)),
+    #chat .mes ${activeStream} ~ :is(.TH-streaming,.mes_streaming) { display:none !important; }
     .sl_img_block {
       display:block;
       margin:8px 0; padding:10px 12px; border-radius:10px;
