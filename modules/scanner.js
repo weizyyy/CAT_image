@@ -8,7 +8,7 @@ import { messageKey, tokenizePlaceholders } from './placeholders.js';
 import { reconcileSlots } from './slot-revisions.js';
 import { resetSlots } from './dom-placeholders.js';
 import { imgCacheGetById } from './cache.js';
-import { isImagePending } from './queue.js';
+import { isImagePending, resumeImageButton } from './queue.js';
 import { galleryAdd, galleryCacheSource } from './gallery.js';
 import { ScanCoordinator } from './scan-coordinator.js';
 
@@ -62,13 +62,52 @@ export function resetAutomaticBacklog() {
     automaticLatest = undefined;
 }
 
-export function messageRoot(id) {
+const STREAMING_SURFACE = '.TH-streaming,.mes_streaming';
+
+function isSurfaceShown(element) {
+    if (element.closest('[hidden],.hidden\\!,[aria-hidden="true"],[inert]')) return false;
+    const { display, visibility } = element.ownerDocument.defaultView.getComputedStyle(element);
+    return display !== 'none' && visibility !== 'hidden' && visibility !== 'collapse';
+}
+
+function messageSurfaces(id) {
     const message = Array.from(document.querySelectorAll('.mes')).find(n =>
         String(n.getAttribute('mesid') ?? n.getAttribute('data-mesid')) === String(id));
     const original = message?.querySelector('.mes_text');
-    // TavernHelper teleports the streaming HTML into a sibling of the hidden original.
-    return Array.from(original?.parentElement.children || []).find(node =>
-        node !== original && node.matches('.TH-streaming,.mes_streaming') && !node.hidden) || original;
+    if (!original) return { active: undefined, inactive: [] };
+    // TavernHelper copies .mes_text into a sibling. During a switch, both
+    // surfaces may still exist, or the replacement may still be empty.
+    const streaming = [...original.parentElement.children].filter(node => node !== original && node.matches(STREAMING_SURFACE));
+    const active = streaming.find(node => isSurfaceShown(node) && (node.childElementCount || node.textContent.trim()))
+        || (isSurfaceShown(original) ? original : undefined);
+    return { active, inactive: [...streaming, original].filter(node => node !== active) };
+}
+
+function* renderRoots(root, includeHidden = false, depth = 0) {
+    if (!root) return;
+    yield root;
+    if (depth >= 4) return;
+    for (const frame of root.querySelectorAll('iframe')) {
+        if (!includeHidden && !isSurfaceShown(frame)) continue;
+        try {
+            yield* renderRoots(frame.contentDocument?.body, includeHidden, depth + 1);
+        } catch { /* Cross-origin frames cannot be modified. */ }
+    }
+}
+
+function clearMessageCards(root, keepKey) {
+    // Older cards used a div inside a paragraph. HTML parsing could leave
+    // that card outside its slot while keeping the empty slot in the paragraph.
+    for (const card of root.querySelectorAll('div.sl_img_block')) {
+        if (!card.closest('[data-sl-slot]')) card.remove();
+    }
+    resetSlots(root, slot => {
+        const id = slot.dataset.slSlot;
+        if (keepKey && id.startsWith(keepKey + '#')) return false;
+        // The frontend bridge owns its own slots, even inside a message iframe.
+        try { return /^\d+$/.test(JSON.parse(id.slice(0, id.lastIndexOf('#')))[1]); }
+        catch { return false; }
+    });
 }
 
 export function reanalyzeSlot({ id, source, origin, isCurrent, onSuccess, onError, onCancel, onSettled }) {
@@ -85,8 +124,13 @@ export function reanalyzeSlot({ id, source, origin, isCurrent, onSuccess, onErro
 }
 
 function retryMessageSlot(snapshot, index, button) {
-    if (!snapshot.isCurrent() || !settings.auxUrl || !settings.auxModel) return;
-    const revision = prepareRevision(readSnapshot(snapshot.messageId));
+    if (!settings.auxUrl || !settings.auxModel) return;
+    // A later reply can finish before the existing cards are rebound. Validate
+    // the displayed reply against the current chat and start from a fresh snapshot.
+    const current = readSnapshot(snapshot.messageId);
+    if (!current?.isCurrent() || current.chatId !== snapshot.chatId ||
+        current.source !== snapshot.source || current.swipe !== snapshot.swipe) return;
+    const revision = prepareRevision(current);
     const slot = revision.slots[index];
     const token = tokenizePlaceholders(revision.source)[index];
     if (!token || !slot || !(slot.enhanced || snapshot.slots?.[index]?.enhanced)) return;
@@ -106,7 +150,8 @@ function retryMessageSlot(snapshot, index, button) {
             revision.slots[index] = updated;
             revision.results.set(index, { ok: true, enhanced });
             saveImageRevision(revision);
-            renderSnapshot(revision, null);
+            const isLatest = Number(revision.messageId) === latestAssistantId();
+            renderSnapshot(revision, null, isLatest, !isLatest);
         },
         onError: () => restore('重新解析失败 · 重试'),
         onCancel: () => restore('重新解析'),
@@ -115,36 +160,27 @@ function retryMessageSlot(snapshot, index, button) {
     if (!job) restore('重新解析');
 }
 
-function renderMessageRoot(root, snapshot, enhanced, autoGenerate, resolvedOnly) {
-    if (root.dataset.slRevision !== snapshot.key) {
-        resetSlots(root);
-        root.dataset.slRevision = snapshot.key;
-    }
-    return renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source, autoGenerate,
-        (index, button) => retryMessageSlot(snapshot, index, button), resolvedOnly);
-}
 function renderSnapshot(snapshot, enhanced, autoGenerate = true, resolvedOnly = false) {
     const ids = snapshot.slots?.map(s => s.id);
     if (snapshot.slots) enhanced = snapshot.slots.map((slot, index) => slot.enhanced
         ? extractImgBlocksFromEnhanced(slot.enhanced, snapshot.key, index, ids, slot.mode || snapshot.mode)[0] : undefined);
-    const root = messageRoot(snapshot.messageId);
-    if (!root) return false;
+    const surfaces = messageSurfaces(snapshot.messageId);
+    for (const inactive of surfaces.inactive) {
+        for (const root of renderRoots(inactive, true)) clearMessageCards(root);
+    }
     autoGenerate = autoGenerate && snapshot.key === automaticLatest && Number(snapshot.messageId) === latestAssistantId();
-    let mounted = renderMessageRoot(root, snapshot, enhanced, autoGenerate, resolvedOnly);
-    const visit = (node, depth = 0) => {
-        if (depth > 3) return;
-        for (const frame of node.querySelectorAll('iframe')) {
-            try {
-                const doc = frame.contentDocument;
-                if (doc?.body) {
-                    mounted = renderMessageRoot(doc.body, snapshot, enhanced, autoGenerate, resolvedOnly) || mounted;
-                    visit(doc.body, depth + 1);
-                }
-            } catch { /* Cross-origin frames cannot be modified. */ }
+    const mountedIds = new Set();
+    for (const root of renderRoots(surfaces.active)) {
+        clearMessageCards(root, snapshot.key);
+        if (!renderEnhancedLite(jQuery(root), enhanced, snapshot.key, snapshot.source, {
+            autoGenerate, resolvedOnly, mountedIds,
+            onReanalyze: (index, button) => retryMessageSlot(snapshot, index, button),
+        })) continue;
+        for (const button of root.querySelectorAll('.sl_img_btn[data-slid]')) {
+            if (button.closest('[data-sl-slot]')?.dataset.slSlot.startsWith(snapshot.key + '#')) resumeImageButton(button);
         }
-    };
-    visit(root);
-    return mounted;
+    }
+    return mountedIds.size > 0;
 }
 export const scanCoordinator = new ScanCoordinator({
     run: (snapshot, isCurrent, signal) => snapshot.run ? snapshot.run(isCurrent, signal)
@@ -163,13 +199,13 @@ export const scanCoordinator = new ScanCoordinator({
     onError(error, snapshot) {
         slErr('配图分析失败: ' + error.message);
         if (snapshot.onError) return snapshot.onError(error);
-        messageRoot(snapshot.messageId)?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
+        messageSurfaces(snapshot.messageId).active?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
             slot.textContent = '🐱 分析失败，点击重试'; slot.classList.add('sl_scan_retry'); slot.style.cursor = 'pointer';
         });
     },
     onCancel(snapshot) {
         if (snapshot.onCancel) return snapshot.onCancel();
-        messageRoot(snapshot.messageId)?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
+        messageSurfaces(snapshot.messageId).active?.querySelectorAll('[role="status"][data-sl-slot]').forEach(slot => {
             slot.textContent = '🐱 分析已取消，点击继续'; slot.classList.add('sl_scan_retry'); slot.style.cursor = 'pointer';
         });
     }
@@ -333,11 +369,7 @@ function scheduleMessage(id, immediate = false) {
     if (!snapshot || !snapshot.isCurrent()) return;
     const tokens = tokenizePlaceholders(snapshot.source);
     if (!tokens.length) {
-        const root = messageRoot(id);
-        if (root && root.dataset.slRevision !== snapshot.key) {
-            resetSlots(root);
-            root.dataset.slRevision = snapshot.key;
-        }
+        renderSnapshot(snapshot, [], false, true);
         prepareRevision(snapshot);
         return;
     }
@@ -396,12 +428,20 @@ export function startPolling() {
     });
     on('CHAT_CHANGED', () => { epoch++; generating = false; observations.clear(); revisions.clear(); scanCoordinator.clear(); resetAutomaticBacklog(); refreshCoopCards(); requestCheck(500); });
     observer = new MutationObserver(mutations => {
-        if (mutations.every(m => (m.target.nodeType === 1 ? m.target : m.target.parentElement)?.closest?.('[data-sl-slot],.sl_img_block'))) return;
+        if (mutations.every(m => {
+            const element = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+            return element?.closest('[data-sl-slot],.sl_img_block') ||
+                (m.type === 'attributes' && m.attributeName !== 'class' && !element?.matches('.mes_text,iframe,' + STREAMING_SURFACE));
+        })) return;
         requestCheck(250);
     });
     const chatRoot = document.querySelector('#chat');
-    if (chatRoot) { observer.observe(chatRoot, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] }); chatRoot.addEventListener('load', onFrameLoad, true); }
-    jQuery(document).off('click.slScan', '.sl_scan_retry').on('click.slScan', '.sl_scan_retry', function () { runAuxImageScan(jQuery(this).closest('.mes_text')); });
+    if (chatRoot) {
+        observer.observe(chatRoot, { subtree: true, childList: true, characterData: true, attributes: true,
+            attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'inert'] });
+        chatRoot.addEventListener('load', onFrameLoad, true);
+    }
+    jQuery(document).off('click.slScan', '.sl_scan_retry').on('click.slScan', '.sl_scan_retry', function () { runAuxImageScan(jQuery(this)); });
     fallback = setInterval(() => requestCheck(), 3000); requestCheck(500);
     slLog('占位符扫描器已启动');
 }

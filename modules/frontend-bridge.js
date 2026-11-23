@@ -91,9 +91,10 @@ function renderRecord(record) {
     const ids = record.slots.map(slot => slot.id);
     const blocks = record.slots.map((slot, index) => slot.enhanced && extractImgBlocksFromEnhanced(
         slot.enhanced, record.key, index, ids, record.mode)[0]);
-    return renderEnhancedLite(jQuery(record.root), blocks || null, record.key, record.text,
-        record === newestRecord && record.callId > autoAfterCall && record.autoEligible,
-        (index, button) => retryFrontendSlot(record, index, button));
+    return renderEnhancedLite(jQuery(record.root), blocks, record.key, record.text, {
+        autoGenerate: record === newestRecord && record.callId > autoAfterCall && record.autoEligible,
+        onReanalyze: (index, button) => retryFrontendSlot(record, index, button),
+    });
 }
 
 function retryFrontendSlot(record, index, button) {

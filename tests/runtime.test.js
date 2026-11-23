@@ -113,6 +113,163 @@ test('TavernHelper visible streaming sibling restores finished slots and reanaly
     } finally { scanner.stopPolling(); }
 });
 
+test('a historical card reanalyzes immediately after another reply finishes, before the next redraw', async () => {
+    const source = '开头[img:旧提示]中间[img:保留提示]结尾';
+    show(source);
+    const oldReply = document.querySelector('.mes_text');
+    const requests = [];
+    fetch = async (_url, options) => {
+        requests.push(JSON.parse(options.body).messages.at(-1).content);
+        return response('Scene number ' + requests.length + '.');
+    };
+    scanner.startPolling();
+    try {
+        await scanner.runAuxImageScan(jQuery(oldReply));
+        await waitUntil(() => oldReply.querySelectorAll('.sl_img_btn').length === 2 && !scanner.scanCoordinator.running);
+        const untouched = oldReply.querySelectorAll('.sl_img_btn')[1].dataset.slid;
+        galleryAdd('/untouched.png', { blockId: untouched });
+        scanner.scanAllMsgs();
+        const retry = oldReply.querySelector('.sl_img_reanalyze');
+        eventSource.emit(types.GENERATION_STARTED, 'normal', {}, false);
+        ctx.chat.push({ mes: '新的回复，无图', is_user: false, swipe_id: 0 });
+        document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">新的回复，无图</div></div>');
+        eventSource.emit(types.GENERATION_ENDED);
+        retry.click();
+        assert.equal(retry.disabled, true);
+        await waitUntil(() => oldReply.querySelector('.sl_img_btn').dataset.prompt === 'Scene number 3.' && !scanner.scanCoordinator.running);
+
+        oldReply.textContent = source;
+        scanner.scanAllMsgs();
+        const buttons = oldReply.querySelectorAll('.sl_img_btn');
+        assert.equal(buttons[0].dataset.prompt, 'Scene number 3.');
+        assert.equal(buttons[1].dataset.slid, untouched);
+        assert.equal(oldReply.querySelector('.sl_img_result').getAttribute('src'), '/untouched.png');
+        assert.equal(requests.length, 3);
+        assert.ok(requests[2].includes('旧提示'));
+        assert.ok(!requests[2].includes('保留提示'));
+    } finally {
+        scanner.stopPolling();
+    }
+});
+
+test('TavernHelper HTML copies and repeated mode switches leave one card per finished marker', async () => {
+    const source = '[img:第一处]中间[img:第二处]结尾';
+    show(source);
+    const original = document.querySelector('.mes_text');
+    original.innerHTML = '<p>' + source + '</p>';
+    let requests = 0;
+    fetch = async () => response('Scene number ' + ++requests + '.');
+    const buttonsIn = root => [...root.querySelectorAll('.sl_img_btn')];
+    scanner.startPolling();
+    try {
+        await scanner.runAuxImageScan(jQuery(original));
+        await waitUntil(() => buttonsIn(original).length === 2 && !scanner.scanCoordinator.running);
+        const ids = buttonsIn(original).map(button => button.dataset.slid);
+        galleryAdd('/first.png', { blockId: ids[0] });
+        galleryAdd('/second.png', { blockId: ids[1] });
+        scanner.scanAllMsgs();
+
+        for (let pass = 0; pass < 3; pass++) {
+            // TavernHelper serializes .mes_text before hiding it and reparses the copy.
+            const streamed = document.createElement('div');
+            streamed.className = 'TH-streaming';
+            streamed.innerHTML = original.innerHTML;
+            original.classList.add('hidden!');
+            original.after(streamed);
+            await waitUntil(() => buttonsIn(original).length === 0 && buttonsIn(streamed).length === 2 &&
+                buttonsIn(streamed).every(button => button.closest('[data-sl-slot]')));
+            assert.equal(buttonsIn(original).length, 0);
+            assert.deepEqual(buttonsIn(streamed).map(button => button.dataset.slid), ids);
+            assert.deepEqual([...streamed.querySelectorAll('.sl_img_result')].map(img => img.getAttribute('src')),
+                ['/first.png', '/second.png']);
+            assert.equal(streamed.querySelector('p').lastChild.textContent, '结尾');
+            const slot = buttonsIn(streamed)[0].closest('[data-sl-slot]');
+            slot.after(slot.cloneNode(true));
+            scanner.scanAllMsgs();
+            assert.deepEqual(buttonsIn(streamed).map(button => button.dataset.slid), ids);
+
+            // The old host may survive briefly while the original is shown again.
+            streamed.style.display = 'none';
+            original.classList.remove('hidden!');
+            await waitUntil(() => buttonsIn(original).length === 2);
+            assert.equal(buttonsIn(streamed).length, 0);
+            assert.deepEqual(buttonsIn(original).map(button => button.dataset.slid), ids);
+            streamed.remove();
+        }
+        const legacyCard = original.querySelector('.sl_img_block');
+        const div = document.createElement('div');
+        div.className = legacyCard.className;
+        div.innerHTML = legacyCard.innerHTML;
+        legacyCard.replaceWith(div);
+        original.innerHTML = original.innerHTML;
+        assert.ok(buttonsIn(original).some(button => !button.closest('[data-sl-slot]')));
+        scanner.scanAllMsgs();
+        assert.equal(buttonsIn(original).length, 2);
+        assert.ok(buttonsIn(original).every(button => button.closest('[data-sl-slot]')));
+
+        assert.equal(requests, 2);
+    } finally {
+        scanner.stopPolling();
+    }
+});
+
+test('a pending image follows its slot between a TavernHelper iframe and normal message text', async () => {
+    const { setEnqueueGen } = await import('../modules/render.js');
+    const { clearQueue, enqueueGen } = await import('../modules/queue.js');
+    const source = '前文[img:栈桥]后文';
+    show(source);
+    const original = document.querySelector('.mes_text');
+    const rendered = document.createElement('div');
+    rendered.className = 'mes_streaming';
+    rendered.innerHTML = '<iframe></iframe>';
+    original.after(rendered);
+    original.hidden = true;
+    const frameBody = rendered.querySelector('iframe').contentDocument.body;
+    frameBody.textContent = source;
+
+    let analysisRequests = 0, imageRequests = 0, finishImage;
+    fetch = async url => {
+        if (String(url).includes('analysis.local')) {
+            analysisRequests++;
+            return response('A view from the pier.');
+        }
+        if (String(url).endsWith('/generate')) {
+            imageRequests++;
+            await new Promise(resolve => { finishImage = resolve; });
+            return { ok: true, json: async () => ({ data: 'AA==', format: 'png' }) };
+        }
+        return { ok: true, json: async () => ({ path: '/pier.png' }) };
+    };
+    setEnqueueGen(enqueueGen);
+    scanner.startPolling();
+    try {
+        await scanner.runAuxImageScan(jQuery(rendered));
+        await waitUntil(() => frameBody.querySelector('.sl_img_btn') && !scanner.scanCoordinator.running);
+        const button = frameBody.querySelector('.sl_img_btn'), id = button.dataset.slid;
+        button.click();
+        await waitUntil(() => finishImage);
+        rendered.hidden = true;
+        original.hidden = false;
+        await waitUntil(() => original.querySelector('.sl_img_btn')?.dataset.slState === 'queued');
+        assert.equal(frameBody.querySelectorAll('.sl_img_block').length, 0);
+        assert.equal(original.querySelector('.sl_img_btn').dataset.slid, id);
+        finishImage();
+        await waitUntil(() => original.querySelector('.sl_img_result')?.getAttribute('src') === '/pier.png');
+
+        original.hidden = true;
+        rendered.hidden = false;
+        await waitUntil(() => frameBody.querySelector('.sl_img_result')?.getAttribute('src') === '/pier.png');
+        assert.equal(original.querySelectorAll('.sl_img_block').length, 0);
+        assert.equal(frameBody.querySelector('.sl_img_btn').dataset.slid, id);
+        assert.equal(analysisRequests, 1);
+        assert.equal(imageRequests, 1);
+    } finally {
+        scanner.stopPolling();
+        clearQueue();
+        finishImage?.();
+    }
+});
+
 test('a branch uses only its selected gallery for exact marker matches', async () => {
     const { setGalleryCacheSource, galleryCacheSource } = await import('../modules/gallery.js');
     const original = ctx.chatId;
@@ -184,28 +341,80 @@ test('the archive page opens the exact current and historical sessions', async (
     const saved = { fetch, frame: globalThis.requestAnimationFrame };
     const historyFile = 'Tester - 2026-11-16 @ T08:00:00';
     const historyKey = keyFor(historyFile);
+    const emptyFile = 'Tester - 2026-11-20 @ T14:00:00';
+    let returnChatList;
     try {
         sessionData(keyFor('test'), true).roster.Alice = { key: 'Alice', name: 'Alice', anchor: 'eyes:green', portraitViews: { front: '/existing.png' } };
         sessionData(historyKey, true).roster.Robin = { key: 'Robin', name: 'Robin', anchor: 'eyes:blue' };
         sessionData(sessionKey('other.png', 'test'), true).roster.Hidden = { key: 'Hidden', name: 'Hidden' };
         const before = JSON.stringify(archive.sessions);
         globalThis.requestAnimationFrame = callback => callback();
-        fetch = async url => url === '/api/characters/chats'
-            ? { ok: true, json: async () => [{ file_name: historyFile + '.jsonl' }] }
-            : { ok: false, status: 404 };
+        fetch = async url => {
+            if (url !== '/api/characters/chats') return { ok: false, status: 404 };
+            await new Promise(resolve => { returnChatList = resolve; });
+            return { ok: true, json: async () => [historyFile, emptyFile].map(file => ({ file_name: file + '.jsonl' })) };
+        };
         createExpandedPanel();
         renderArchivePage();
         const page = document.querySelector('.sl_page_body');
-        assert.equal(page.querySelector('details[open] .sl_pcard').dataset.char, 'Alice');
-        const history = () => [...page.querySelectorAll("details[data-chat]")].find(node => node.dataset.chat === historyKey);
-        await waitUntil(history);
+        assert.equal(page.querySelector(':scope > details[open] .sl_pcard').dataset.char, 'Alice');
+        const other = () => page.querySelector(':scope > details.sl_other_chats');
+        assert.equal(other().open, false);
+        assert.equal(other().querySelector(':scope > summary').textContent, '其他');
+        const history = () => [...other().querySelectorAll("details[data-chat]")].find(node => node.dataset.chat === historyKey);
         assert.equal(history().open, false);
         assert.ok(history().querySelector('summary').textContent.includes(historyFile));
-        history().open = true;
+        other().querySelector('summary').click();
+        returnChatList();
+        await waitUntil(() => other().textContent.includes(emptyFile));
+        assert.equal(other().open, true);
+        assert.ok(history().querySelector('.sl_chat_switch'));
+        history().querySelector('summary').click();
         history().querySelector('.sl_pcard').click();
         assert.equal(page.querySelector('.sl_anchor_input').value, 'eyes:blue');
         assert.equal(JSON.stringify(archive.sessions), before);
         assert.equal(page.textContent.includes("Hidden"), false);
+    } finally {
+        jQuery('#sl_panel_body').empty();
+        fetch = saved.fetch; globalThis.requestAnimationFrame = saved.frame;
+    }
+});
+
+test('the gallery folds historical chats under Other and still lets users select and clear their cache source', async () => {
+    const { createExpandedPanel } = await import('../modules/ui/panel.js');
+    const { renderGalleryPage } = await import('../modules/ui/tabs.js');
+    const { galleryCacheSource } = await import('../modules/gallery.js');
+    const saved = { fetch, frame: globalThis.requestAnimationFrame };
+    const historyFile = 'Gallery branch';
+    const historyKey = keyFor(historyFile);
+    try {
+        globalThis.requestAnimationFrame = callback => callback();
+        fetch = async () => ({ ok: true, json: async () => [{ file_name: historyFile + '.jsonl' }] });
+        galleryAdd('/current.png');
+        galleryAdd('/historical.png', { chatKey: historyKey });
+        createExpandedPanel();
+        renderGalleryPage();
+        const page = document.querySelector('.sl_page_body');
+        const other = () => page.querySelector('details.sl_other_chats');
+        const historical = () => other().querySelector(':scope > details');
+        const button = () => historical().querySelector('.sl_gallery_source');
+        assert.equal(other().querySelector('summary').textContent, '其他');
+        assert.equal(other().open, false);
+        assert.equal(historical().open, false);
+        assert.equal(historical().querySelector('summary').textContent, historyFile);
+        assert.equal(page.querySelector('details[open] .sl_gal_img').dataset.url, '/current.png');
+
+        other().querySelector('summary').click();
+        historical().querySelector('summary').click();
+        button().click();
+        await waitUntil(() => button().getAttribute('aria-pressed') === 'true');
+        assert.equal(galleryCacheSource(), historyKey);
+        assert.equal(other().open, true);
+        assert.equal(historical().open, true);
+        button().click();
+        await waitUntil(() => button().getAttribute('aria-pressed') === 'false');
+        assert.equal(galleryCacheSource(), '');
+        assert.equal(other().open, true);
     } finally {
         jQuery('#sl_panel_body').empty();
         fetch = saved.fetch; globalThis.requestAnimationFrame = saved.frame;
@@ -235,7 +444,7 @@ test('the reading theme recolors complete cards and newly generated cards use ma
         frame.contentDocument.body.textContent = source;
         let reanalyzed;
         for (const root of [document.querySelector('.mes_text'), frame.contentDocument.body])
-            renderEnhancedLite(jQuery(root), enhanced, 'themed-card', source, false, index => { reanalyzed = index; });
+            renderEnhancedLite(jQuery(root), enhanced, 'themed-card', source, { onReanalyze: index => { reanalyzed = index; } });
         const card = document.querySelector('.sl_img_block');
         const framedCard = frame.contentDocument.querySelector('.sl_img_block');
         assert.equal(getComputedStyle(card).backgroundColor, 'rgb(245, 245, 247)');
@@ -484,14 +693,14 @@ test('cancel image queue aborts active request, drops waiting/portrait tasks and
         assert.fail('a cancelled result must not be uploaded');
     };
     const blocks = '[image:甲]【提示词】甲画面【/提示词】[image:乙]【提示词】乙画面【/提示词】';
-    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, true);
+    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, { autoGenerate: true });
     enqueueTask('portrait-cancel', '立绘', () => assert.fail('cancelled portrait succeeded'), error => portraitError = error);
     assert.deepEqual(getQueueStatus(), { queued: 2, running: true });
     assert.equal(clearQueue(), 3); assert.equal(abortSignal.aborted, true); assert.equal(portraitError.name, 'AbortError');
     // Simulate a server ignoring the disconnect and returning late.
     release(); await waitUntil(() => !getQueueStatus().running);
     await new Promise(r => setTimeout(r, 0));
-    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, true);
+    renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, { autoGenerate: true });
     assert.equal(requests, 1); assert.equal(imgCacheGetById('cancel-image-test#0'), undefined);
     assert.equal(document.querySelectorAll('.sl_img_block img').length, 0);
     enqueueGen(jQuery('.sl_img_btn').first(), '手动继续'); assert.equal(requests, 2);
@@ -567,7 +776,7 @@ test('H3 mode cannot reuse another model prompt; edits within H3 still reuse unc
     } finally { scanner.stopPolling(); settings.modelType = savedMode; }
 });
 
-test('switching to H3 still restores historical images from another mode without generating them', async () => {
+test('a historical image from another mode restores from cache and can be reanalyzed in the current mode', async () => {
     const savedMode = settings.modelType; settings.modelType = 'zit';
     let calls = 0; fetch = async () => response('Historical image caption ' + ++calls);
     show('[img:历史图]'); scanner.startPolling();
@@ -580,6 +789,11 @@ test('switching to H3 still restores historical images from another mode without
         settings.modelType = 'minimax_h3_image'; scanner.scanAllMsgs();
         assert.equal(calls, 1); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
         assert.equal(document.querySelector('.sl_img_block img').getAttribute('src'), '/history.png');
+        document.querySelector('.sl_img_reanalyze').click();
+        await waitUntil(() => document.querySelector('.sl_img_btn').dataset.prompt === 'Historical image caption 2');
+        assert.equal(document.querySelector('.sl_img_btn').dataset.slMode, 'minimax_h3_image');
+        assert.equal(calls, 2);
+        assert.notEqual(document.querySelector('.sl_img_btn').dataset.slid, oldId);
     } finally { scanner.stopPolling(); settings.modelType = savedMode; }
 });
 

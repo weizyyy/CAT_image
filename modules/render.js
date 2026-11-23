@@ -43,15 +43,16 @@ export function buildImgCard(scene, fullPrompt, cachedImage, blockId, mode) {
     var truncated = shortTitle.length > 14;
     if (truncated) shortTitle = shortTitle.slice(0, 14);
     var titleText = shortTitle + (truncated ? '…' : '');
-    return '<div class="sl_img_block"' + (cachedImage ? ' data-sl-generated' : '') +
+    // Phrasing elements keep the slot intact when a message paragraph is serialized and reparsed.
+    return '<span class="sl_img_block"' + (cachedImage ? ' data-sl-generated' : '') +
         ' style="--sl-image-width:' + escapeHtml(settings.imgBlockWidth || '55%') + '" title="' + escapeHtml(titleText) + '">' +
-        '<div class="sl_img_title">🖼️ ' + escapeHtml(titleText) + '</div>' +
+        '<span class="sl_img_title">🖼️ ' + escapeHtml(titleText) + '</span>' +
         (cachedImage ? '<img class="sl_img_result" src="' + escapeHtml(cachedImage) + '">' : '') +
         '<button type="button" class="sl_img_action sl_img_btn" data-prompt="' + escapeHtml(fullPrompt) + '"' +
         (blockId ? ' data-slid="' + escapeHtml(blockId) + '"' : '') + (mode ? ' data-sl-mode="' + escapeHtml(mode) + '"' : '') + '>' + imageActionLabel(cachedImage) + '</button>' +
         (blockId ? '<button type="button" class="sl_img_action sl_img_reanalyze">重新解析</button>' : '') +
-        (settings.showGenPrompt && fullPrompt !== scene ? '<div class="sl_img_prompt">🐱 ' + escapeHtml(fullPrompt) + '</div>' : '') +
-        '</div>';
+        (settings.showGenPrompt && fullPrompt !== scene ? '<span class="sl_img_prompt">🐱 ' + escapeHtml(fullPrompt) + '</span>' : '') +
+        '</span>';
 }
 
 // ── 绑定生图按钮（事件委托：绑定一次永久有效，不受 DOM 重建影响） ──
@@ -113,19 +114,23 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
     return blocks;
 }
 
-export function renderEnhancedLite(element, enhancedText, blockKey, sourceText, autoGenerate = false, onReanalyze, resolvedOnly = false) {
+export function renderEnhancedLite(element, enhancedText, blockKey, sourceText,
+    { autoGenerate = false, onReanalyze, resolvedOnly = false, mountedIds } = {}) {
     const root = element?.[0];
     if (!root) return;
     if (onReanalyze) reanalysisHandlers.set(root, onReanalyze);
     const tokens = tokenizePlaceholders(sourceText ?? root.textContent);
     const blocks = Array.isArray(enhancedText) ? enhancedText : enhancedText ? extractImgBlocksFromEnhanced(enhancedText, blockKey) : null;
-    mountSlots(root, tokens, blockKey, blocks, resolvedOnly);
+    mountSlots(root, tokens, blockKey, blocks, resolvedOnly, mountedIds);
     bindImageButtonsIn(root.ownerDocument);
     if (blocks) updateSlots(root, blockKey, blocks);
+    const slots = [...root.querySelectorAll('[data-sl-slot]')].filter(slot => slot.dataset.slSlot.startsWith(blockKey + '#'));
     if (autoGenerate && blocks && settings.autoGen === 1 && settings.pluginOn !== false) {
-        for (const btn of root.querySelectorAll('.sl_img_btn')) {
+        for (const slot of slots) {
+            const btn = slot.querySelector('.sl_img_btn');
+            if (!btn) continue;
             if (btn.textContent.includes('生成图片') && !btn.closest('.sl_img_block')?.querySelector('img')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'), { automatic: true });
         }
     }
-    return Array.from(root.querySelectorAll('[data-sl-slot]')).some(n => n.dataset.slSlot.startsWith(blockKey + '#'));
+    return slots.length > 0;
 }

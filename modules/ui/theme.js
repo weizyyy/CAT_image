@@ -119,10 +119,11 @@ export function applyTextTheme(doc) {
   style.dataset.theme = name;
   style.textContent = `
     .sl_img_block {
+      display:block;
       margin:8px 0; padding:10px 12px; border-radius:10px;
       background:${background}; color:${color}; border:1px solid ${border};
     }
-    .sl_img_block .sl_img_title { font-size:11px; color:inherit; margin-bottom:4px; }
+    .sl_img_block .sl_img_title { display:block; font-size:11px; color:inherit; margin-bottom:4px; }
     .sl_img_block .sl_img_result { max-width:var(--sl-image-width, 55%); border-radius:12px; margin-top:6px; display:block; }
     .sl_img_block .sl_img_action {
       display:inline-block; appearance:none; border:0; box-shadow:none; vertical-align:middle;
@@ -135,7 +136,7 @@ export function applyTextTheme(doc) {
     .sl_img_block .sl_img_btn[data-sl-state="queued"] { background:${COLORS.orange}; color:#fff; cursor:wait; }
     .sl_img_block .sl_img_btn[data-sl-state="error"] { background:${COLORS.red}; color:#fff; }
     .sl_img_block .sl_img_prompt {
-      font:10px/1.4 Consolas,monospace; color:inherit; margin-top:6px;
+      display:block; font:10px/1.4 Consolas,monospace; color:inherit; margin-top:6px;
       padding-top:4px; border-top:1px dotted ${border}; overflow-wrap:anywhere;
     }
   `;

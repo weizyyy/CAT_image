@@ -268,6 +268,20 @@ function collectArchivePeople(chatId = getChatId()) {
 const chatViewTokens = new WeakMap();
 const chatSummaryStyle = 'cursor:pointer;font-size:12px;line-height:1.45;overflow-wrap:anywhere;';
 
+function renderChatGroups(body, groups, summaryStyle, groupStyle = '') {
+  let current = '', other = '';
+  for (const group of groups) {
+    if (group.current) current += group.html;
+    else other += group.html;
+  }
+  if (!other) return current;
+  const chatId = getChatId(), previous = body.find('details.sl_other_chats')[0];
+  const open = previous?.dataset.chatContext === chatId && previous.open;
+  return current + '<details class="sl_other_chats" data-chat-context="' + escAttr(chatId) +
+    '" style="' + groupStyle + '"' + (open ? ' open' : '') + '><summary style="' +
+    summaryStyle + '">其他</summary>' + other + '</details>';
+}
+
 function bindChatSwitch(body, sessions, render) {
   const byKey = new Map(sessions.map(session => [session.key, session]));
   const character = currentCard().id;
@@ -313,17 +327,14 @@ function renderArchiveInto(body, sessions) {
     chatViewTokens.set(node, token);
     renderArchiveInto(body, describeCharacterChats());
     void listCharacterChats().then(list => {
-      if (node.isConnected && chatViewTokens.get(node) === token && getCharacterName() === character && getChatId() === current)
+      if (node.isConnected && chatViewTokens.get(node) === token && currentCard().id === character && getChatId() === current)
         renderArchiveInto(body, list);
     });
     return;
   }
-  var h = archiveSaveNotice();
-  // 当前角色卡（只显示卡名）
-  h += '<div style="' + card() + ';padding:11px 14px;margin-bottom:10px;"><span style="font-weight:700;font-size:13.5px;color:' + CAT.text + ';">🐾 ' + esc(name) + '</span></div>';
-  for (const session of sessions) {
+  const groups = sessions.map(session => {
     const people = collectArchivePeople(session.key);
-    h += '<details style="' + card() + '" data-chat="' + escAttr(session.key) + '"' + (session.current ? ' open' : '') + '>';
+    let h = '<details style="' + card() + '" data-chat="' + escAttr(session.key) + '"' + (session.current ? ' open' : '') + '>';
     h += '<summary style="' + chatSummaryStyle + 'padding:8px;">' + esc(session.label) + ' · ' + people.length + ' 人' +
         (session.current ? ' · 当前聊天' : '') + '</summary>';
     h += chatSwitchButton(session);
@@ -345,8 +356,11 @@ function renderArchiveInto(body, sessions) {
       h += '<div style="color:' + CAT.mute + ';font-size:15px;padding-right:2px;">›</div>';
       h += '</div></div>';
     }
-    h += '</details>';
-  }
+    return { current: session.current, html: h + '</details>' };
+  });
+  let h = archiveSaveNotice();
+  h += '<div style="' + card() + ';padding:11px 14px;margin-bottom:10px;"><span style="font-weight:700;font-size:13.5px;color:' + CAT.text + ';">🐾 ' + esc(name) + '</span></div>';
+  h += renderChatGroups(body, groups, card('padding:24px;') + chatSummaryStyle);
   body.html(h); bindArchiveEvents(body);
   bindArchiveSave(body, renderArchiveInto);
   bindChatSwitch(body, sessions, renderArchiveInto);
@@ -650,7 +664,7 @@ function renderGalleryInto(body, sessions) {
     chatViewTokens.set(node, token);
     renderGalleryInto(body, describeCharacterChats());
     void listCharacterChats().then(list => {
-      if (node.isConnected && chatViewTokens.get(node) === token && getCharacterName() === character && getChatId() === current)
+      if (node.isConnected && chatViewTokens.get(node) === token && currentCard().id === character && getChatId() === current)
         renderGalleryInto(body, list);
     });
     return;
@@ -672,11 +686,11 @@ function renderGalleryInto(body, sessions) {
   if (!total) {
     h += empty('还没有出过图，出图后会自动进这里', '🖼️');
   } else {
-    for (var g = 0; g < list.length; g++) {
-      var grp = list[g];
+    const groupStyle = 'margin-top:14px;', summaryStyle = chatSummaryStyle + 'margin-bottom:6px;';
+    const groups = list.map(grp => {
       const session = sessionByKey.get(grp.chatKey);
-      h += '<details style="margin-top:14px;"' + (grp.current || grp.chatKey === source ? ' open' : '') + '>';
-      h += '<summary style="' + chatSummaryStyle + 'margin-bottom:6px;">' + esc(session?.label || grp.label) + '</summary>';
+      let h = '<details style="' + groupStyle + '"' + (grp.current || grp.chatKey === source ? ' open' : '') + '>';
+      h += '<summary style="' + summaryStyle + '">' + esc(session?.label || grp.label) + '</summary>';
       h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">';
       if (!grp.current && grp.selectable) {
         const selected = grp.chatKey === source;
@@ -698,14 +712,15 @@ function renderGalleryInto(body, sessions) {
         if (grp.selectable) h += '<button class="sl_gal_del" data-chat="' + escAttr(grp.chatKey) + '" data-url="' + escAttr(it.url) + '" style="position:absolute;top:3px;right:3px;width:18px;height:18px;border:none;border-radius:9px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;line-height:18px;padding:0;cursor:pointer;">✕</button>';
         h += '</div>';
       }
-      h += '</div></details>';
-    }
+      return { current: grp.current, html: h + '</div></details>' };
+    });
+    h += renderChatGroups(body, groups, summaryStyle, groupStyle);
   }
   h += '</div>';
   body.html(archiveSaveNotice() + h);
   bindArchiveSave(body, renderGalleryInto);
   body.off('click.slGallerySource', '.sl_gallery_source').on('click.slGallerySource', '.sl_gallery_source', async function () {
-    if (getCharacterName() !== character || getChatId() !== current) { renderGalleryInto(body); return; }
+    if (currentCard().id !== character || getChatId() !== current) { renderGalleryInto(body); return; }
     const selected = this.dataset.chat;
     if (!setGalleryCacheSource(selected === source ? '' : selected)) return;
     scanAllMsgs();

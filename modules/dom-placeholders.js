@@ -33,8 +33,15 @@ export function locateMarkers(root) {
     }).filter(Boolean);
 }
 
-export function mountSlots(root, tokens, key, blocks, resolvedOnly = false) {
+export function mountSlots(root, tokens, key, blocks, resolvedOnly = false, mountedIds = new Set()) {
     const doc = root.ownerDocument;
+    const existing = new Set();
+    for (const slot of root.querySelectorAll('[data-sl-slot]')) {
+        const id = slot.dataset.slSlot;
+        if (!id.startsWith(key + '#')) continue;
+        if (mountedIds.has(id)) slot.remove();
+        else { existing.add(id); mountedIds.add(id); }
+    }
     const markers = locateMarkers(root);
     // Match exact source tokens in DOM order. Never attach unmatched images to
     // another marker or append them at an arbitrary end-of-message position.
@@ -42,7 +49,7 @@ export function mountSlots(root, tokens, key, blocks, resolvedOnly = false) {
     const matches = [];
     for (const token of tokens) {
         const id = key + '#' + token.index;
-        if (Array.from(root.querySelectorAll('[data-sl-slot]')).some(n => n.dataset.slSlot === id)) continue;
+        if (existing.has(id)) continue;
         let at = -1;
         for (let i = cursor; i < markers.length; i++) {
             const normalize = s => s.replace(/<[^>]*>/g, '').replace(/[*`]/g, '').replace(/\s+/g, '');
@@ -50,8 +57,9 @@ export function mountSlots(root, tokens, key, blocks, resolvedOnly = false) {
         }
         if (at < 0) continue;
         cursor = at + 1;
-        if (resolvedOnly && !blocks?.[token.index]) continue;
+        if (mountedIds.has(id) || (resolvedOnly && !blocks?.[token.index])) continue;
         matches.push({ token, marker: markers[at], id });
+        mountedIds.add(id);
     }
     for (const { token, marker, id } of matches.reverse()) {
         const slot = doc.createElement('span');
@@ -73,15 +81,15 @@ export function updateSlots(root, key, blocks) {
         const index = Number(slot.dataset.slSlot.slice((key + '#').length));
         if (blocks[index]) {
             const hash = fingerprint(blocks[index].html);
-            if (slot.dataset.slRendered !== hash) slot.innerHTML = blocks[index].html;
+            if (slot.dataset.slRendered !== hash || !slot.firstElementChild) slot.innerHTML = blocks[index].html;
             slot.dataset.slRendered = hash;
             slot.removeAttribute('role'); slot.classList.remove('sl_scan_retry');
         }
     }
 }
 
-export function resetSlots(root) {
+export function resetSlots(root, shouldReset = () => true) {
     for (const slot of root.querySelectorAll('[data-sl-slot]')) {
-        slot.replaceWith(root.ownerDocument.createTextNode(slot.dataset.slOriginal || ''));
+        if (shouldReset(slot)) slot.replaceWith(root.ownerDocument.createTextNode(slot.dataset.slOriginal || ''));
     }
 }

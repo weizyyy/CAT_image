@@ -111,6 +111,13 @@ export function enqueueTask(id, prompt, onSuccess, onFail) {
 
 export function isImagePending(blockId) { return pendingBlocks.has(blockId); }
 
+export function resumeImageButton(button) {
+    const task = pendingBlocks.get(button.dataset.slid);
+    if (!task) return;
+    task.btn = jQuery(button);
+    if (button.dataset.slState !== 'queued') setImageActionState(button, 'queued');
+}
+
 export function getQueueLength() {
     return imageQueue.length;
 }

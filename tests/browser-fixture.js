@@ -57,10 +57,28 @@ export async function runBrowserFixture() {
         const prompts = Array.from(root.querySelectorAll('.sl_img_btn'), b => b.dataset.prompt);
         checks.push({ name: 'webview-real-pipeline-distinct-slots', ok: calls === 2 && prompts[0] === 'RED-FIXTURE-PROMPT' && prompts[1] === 'BLUE-FIXTURE-PROMPT' });
         const before = calls;
-        root.textContent = source; scanner.scanAllMsgs();
+        const paragraph = document.createElement('p');
+        paragraph.textContent = source;
+        root.replaceChildren(paragraph); scanner.scanAllMsgs();
         checks.push({ name: 'webview-message-redraw-restores-without-api', ok: calls === before && root.querySelectorAll('.sl_img_btn').length === 2 });
         const ids = Array.from(root.querySelectorAll('.sl_img_btn'), b => b.dataset.slid);
         const beforeGen = generations;
+        const cardIds = surface => Array.from(surface.querySelectorAll('p [data-sl-slot] .sl_img_result'), image =>
+            image.closest('.sl_img_block').querySelector('.sl_img_btn').dataset.slid).join(',');
+        for (let pass = 0; pass < 3; pass++) {
+            const streamed = document.createElement('div');
+            streamed.className = 'TH-streaming';
+            streamed.innerHTML = jQuery('<div>').append(jQuery(root.innerHTML).toArray()).html();
+            root.classList.add('hidden!');
+            root.after(streamed);
+            await wait(() => cardIds(streamed) === ids.join(',') && !root.querySelector('.sl_img_block'));
+            streamed.hidden = true;
+            root.classList.remove('hidden!');
+            await wait(() => cardIds(root) === ids.join(',') && !streamed.querySelector('.sl_img_block'));
+            streamed.remove();
+        }
+        checks.push({ name: 'webview-tavernhelper-streaming-toggles-preserve-two-cached-cards', ok: calls === before && generations === beforeGen });
+
         ctx.chat[0].mes = source.replace('蓝衣', '绿衣'); root.textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery(root));
         await wait(() => root.querySelectorAll('.sl_img_block img').length === 2 && !scanner.scanCoordinator.running);
