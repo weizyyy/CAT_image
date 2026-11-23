@@ -160,7 +160,9 @@ export async function runBrowserFixture() {
         root.querySelector('.sl_scan_retry').click();
         await wait(() => !!root.querySelector('.sl_img_btn') && !scanner.scanCoordinator.running);
         checks.push({ name: 'webview-cancelled-analysis-explicit-resume', ok: calls === oldCalls + 3 });
-        const manualForm = document.querySelector('#sl_comp_manual');
+        const panel = await import('../modules/ui/panel.js'), tabs = await import('../modules/ui/tabs.js');
+        panel.showPanel();
+        const manualForm = document.querySelector('#sl_panel #sl_manual_queue');
         const manualField = manualForm.querySelector('input');
         const manualRect = manualForm.getBoundingClientRect();
         const beforeManual = generations;
@@ -168,10 +170,11 @@ export async function runBrowserFixture() {
         manualForm.querySelector('button').click();
         await wait(() => root.querySelector('.sl_img_result') && !queue.getQueueStatus().running);
         checks.push({ name: 'webview-manual-floor-control-queues-existing-prompt',
-            ok: calls === oldCalls + 3 && generations === beforeManual + 1 && manualRect.top >= cancelRect.bottom && manualRect.bottom <= barRect.bottom });
+            ok: calls === oldCalls + 3 && generations === beforeManual + 1 &&
+                manualRect.top >= document.querySelector('#sl_btn_gen_all').getBoundingClientRect().bottom &&
+                !document.querySelector('#sl_compact form') });
         compact.setPluginEnabled(false);
-        const panel = await import('../modules/ui/panel.js'), tabs = await import('../modules/ui/tabs.js');
-        panel.showPanel(); tabs.renderSettingsPage();
+        tabs.renderSettingsPage();
         jQuery('#sl_model_type').val('minimax_h3_image').trigger('change');
         checks.push({ name: 'webview-h3-model-selection-and-guidance-card', ok: settings.modelType === 'minimax_h3_image' &&
             !!document.querySelector('#sl_model_type option[value="minimax_h3_image"]') && document.querySelector('#sl_minimax_h3_card').style.display !== 'none' &&

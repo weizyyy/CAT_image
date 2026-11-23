@@ -6,7 +6,7 @@ import { toast, esc, escAttr, fi, chkProf } from './utils.js';
 import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge } from '../settings.js';
 import { KREA2_STYLES, krea2StyleById } from '../style-presets.js';
 import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
-import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, scanAllMsgs } from '../scanner.js';
+import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, queueMessageFloors, scanAllMsgs } from '../scanner.js';
 import { getQueueLength, enqueueTask } from '../queue.js';
 import { cleanPromptForMode } from '../text-utils.js';
 import { rosterEntries, rosterForChat, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry, getEnglishAnchor, editRosterAnchor, deleteRosterPerson, copyRosterToCurrent } from '../roster.js';
@@ -51,6 +51,9 @@ export function renderHomeTab() {
   h += '</div></div>';
   // 快捷操作：一键补排（建档已改为聊天中自动完成，不再需要手动扫描）
   h += '<div style="display:flex;gap:8px;"><button id="sl_btn_gen_all" style="flex:1;' + btnMain() + '">一键排图</button></div>';
+  h += '<form id="sl_manual_queue" style="display:flex;align-items:stretch;gap:8px;margin-top:8px;">';
+  h += '<input id="sl_manual_floors" type="text" aria-label="手动排图楼层" placeholder="56,58-60,62" autocomplete="off" spellcheck="false" style="' + fi() + 'flex:1;min-width:0;width:0;">';
+  h += '<button type="submit" style="' + btnSm('flex-shrink:0;white-space:nowrap;') + '">手动排图</button></form>';
   h += '<div style="font-size:10px;color:' + CAT.mute + ';text-align:center;margin:2px 0 10px;">🎬 占位符配图：主模型在正文写 [img:] 占位符（位置+画面要点），插件 AI 只负责把要点写成生图提示词（最省 token，需角色卡配置指令）</div>';
   // 设置与工具（分组列表）
   h += groupTitle('角色与世界');
@@ -77,6 +80,21 @@ export function renderHomeTab() {
   body.html(h);
   // 交互绑定
   body.off('click', '#sl_btn_gen_all').on('click', '#sl_btn_gen_all', compact.triggerGenAll);
+  body.find('#sl_manual_floors').on('keydown', event => event.stopPropagation());
+  body.find('#sl_manual_queue').on('submit', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      const { queued, analysing, skipped, needsArtist } = queueMessageFloors(this.querySelector('#sl_manual_floors').value);
+      const status = [
+        queued && ('已排队 ' + queued + ' 张'),
+        analysing && (analysing + ' 层正在解析，完成后自动入队'),
+        skipped && ('跳过 ' + skipped + ' 层（非 AI 回复或无占位符）'),
+        needsArtist && (needsArtist + ' 层需要配置画师模型'),
+      ].filter(Boolean).join(' · ');
+      toast(queued || analysing ? 'success' : 'info', status || '指定图位已有图片或已在队列中');
+    } catch (error) { toast('warning', error.message); }
+  });
   body.off('click', '.sl-cell[data-nav]').on('click', '.sl-cell[data-nav]', function () {
     var nav = jQuery(this).data('nav');
     if (nav === 'archive') renderArchivePage();
