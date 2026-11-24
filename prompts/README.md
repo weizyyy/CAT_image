@@ -4,4 +4,5 @@
 - `roster/system.txt` 给聊天分析模型使用，定义人物一致性、回传结构与画面规则。
 - `atomic-vocab.txt`、`wardrobe-vocab.txt`、`wardrobe-expand.txt` 定义锚点与造型。
 - `pipeline/*-overlay.txt` 定义所选图像模型的写法。每次只装入一个模型的 overlay。
+- `pipeline/moss-image-layout.txt` 提供两个 MOSS-Image 模式共用的字段、坐标与框选规则。画风和构图示例由各自的 overlay 定义。
 - 当前聊天的档案、造型及占位符通过 user 消息传入独立的分析请求。

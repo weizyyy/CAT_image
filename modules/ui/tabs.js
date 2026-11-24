@@ -3,7 +3,7 @@ import { CAT, CAT_THEMES, TEXT_THEMES, applyTheme, getTextTheme, refreshTextThem
 import { card, groupTitle, cell, cardHead, lbl, chip, btnMain, btnGhost, btnSm, btnDanger, switchHTML, empty } from './primitives.js';
 import { catSVG, catStatusText } from './cat.js';
 import { toast, esc, escAttr, fi, chkProf } from './utils.js';
-import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge, MOSS_IMAGE_MODE, getMossCanvas, isMossDimension } from '../settings.js';
+import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge, isMossImageMode, getMossCanvas, isMossDimension } from '../settings.js';
 import { KREA2_STYLES, krea2StyleById } from '../style-presets.js';
 import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
 import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, queueMessageFloors, scanAllMsgs } from '../scanner.js';
@@ -175,8 +175,8 @@ export function renderSettingsPage() {
     h += '<div style="' + card() + ';padding:14px 16px;">' + switchHTML('sl_show_prompt', settings.showGenPrompt === true, '图块显示完整提示词', '默认关闭：图块只显示短标题（详细字段只进生成链，用户看不到）；调试时打开可看到每张图的完整生成提示词') + '</div>';
     h += '<div id="sl_krea2_style_card" style="' + card() + ';' + (settings.modelType === 'krea2' ? '' : 'display:none;') + '">' + cardHead('🎨', 'Krea 2 风格', '锁定本场画风 · 插件统一前置，跨轮不漂') + '<select id="sl_krea2_style" style="' + f + '">' + krea2StyleOptionsHTML(settings.krea2Style) + '</select>' + '<div id="sl_krea2_style_note" style="font-size:10px;color:' + CAT.sub + ';margin-top:6px;line-height:1.7;">' + esc((krea2StyleById(settings.krea2Style) || {}).note || '') + '</div>' + '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.7;">官方没有固定的内置风格清单：Krea 2 的风格靠<b>提示词 / 风格参考图 / 情绪板 / LoRA</b> 四条路。这里是从官方示例归纳出的风格句 —— 选中后由插件加在每张提示词最前，辅助 AI 只写人物与场景，不再另写画风。<br>画风由插件统一拼接，不再自动注入质量前缀。</div></div>';
     const { width, height } = getMossCanvas();
-    h += '<div id="sl_moss_card" style="' + card() + (settings.modelType === MOSS_IMAGE_MODE ? '' : 'display:none;') + '">' +
-      cardHead('🎬', 'MOSS-Image · Galgame CG', '二维事件 CG · 人物标签与分区构图') +
+    h += '<div id="sl_moss_card" style="' + card() + (isMossImageMode(settings.modelType) ? '' : 'display:none;') + '">' +
+      cardHead('🎬', 'MOSS-Image · 布局画布', 'Galgame CG 与画风自由共用') +
       '<div style="display:flex;gap:8px;">' +
       '<label style="flex:1;min-width:0;"><span style="' + lbl() + '">画布宽度（px）</span><input id="sl_moss_width" type="number" min="16" step="16" value="' + width + '" style="' + f + '"></label>' +
       '<label style="flex:1;min-width:0;"><span style="' + lbl() + '">画布高度（px）</span><input id="sl_moss_height" type="number" min="16" step="16" value="' + height + '" style="' + f + '"></label></div>' +
@@ -188,7 +188,14 @@ export function renderSettingsPage() {
   }, '模型与偏好', { key: '模型与偏好' });
 }
 export function bindSettingsEvents(b) {
-  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); b.find('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); b.find('#sl_moss_card').toggle(settings.modelType === MOSS_IMAGE_MODE); saveSettings(); refreshCoopCards(); checkLastMessage(); });
+  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () {
+    settings.modelType = this.value;
+    b.find('#sl_krea2_style_card').toggle(settings.modelType === 'krea2');
+    b.find('#sl_moss_card').toggle(isMossImageMode(settings.modelType));
+    saveSettings();
+    refreshCoopCards();
+    checkLastMessage();
+  });
   b.off('change', '#sl_moss_width, #sl_moss_height').on('change', '#sl_moss_width, #sl_moss_height', function () {
     const isWidth = this.id === 'sl_moss_width';
     if (!isMossDimension(this.valueAsNumber)) {

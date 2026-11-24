@@ -3,7 +3,7 @@
 // position = 2 (BEFORE_PROMPT, ST script.js extension_prompt_types.BEFORE_PROMPT)
 
 import { slLog } from './log.js';
-import { settings, getSTContext, getActiveMode, MOSS_IMAGE_MODE } from './settings.js';
+import { settings, getSTContext, getActiveMode, isMossImageMode } from './settings.js';
 import { rosterEntries, rosterIndexText } from './roster.js';
 import { wardrobeIndexText } from './wardrobe.js';
 
@@ -16,7 +16,7 @@ function modeDesc(m) {
     if (m === 'anime') return 'anime（纯英文自然语言）';
     if (m === 'anime_tag') return 'anime_tag（纯 Danbooru 英文标签）';
     if (m === 'krea2') return 'krea2（英文自然语言段落：一段连贯描述，不吃标签链与权重语法）';
-    if (m === MOSS_IMAGE_MODE) return 'MOSS-Image（单幅二维 Galgame CG；请在占位符里写清画面主体、动作、视点与相对位置，画师负责布局坐标）';
+    if (isMossImageMode(m)) return 'MOSS-Image（单幅事件图构图；请在占位符里写清画面主体、动作、视点与相对位置，画师负责布局坐标）';
     return 'zit（中文提示词）';
 }
 

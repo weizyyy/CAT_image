@@ -1,21 +1,50 @@
-【模式：MOSS-Image · 二维 Galgame 事件 CG · Layout JSON】
+---
 
-描绘同一幕里的一个瞬间。采用横向视觉小说事件 CG 的二维插画语言：轮廓清楚、线条有轻重，皮肤用干净的色面与少量柔和过渡，衣料用成组明暗和随动作变化的褶线。优先眼神、表情、动作和光线。画面是单幅插画，不加分镜、字幕、对话框、边框或水印。
+【模式：MOSS-Image · Layout JSON + 二维 Galgame 事件 CG】
 
-## 三层分工
-1. summary.caption 用简练的英文画面说明交代媒介、景别、视点、主体重心、人物的相对位置、前后遮挡、场所、主光方向和情绪。动作涉及人与人或人与物时，用完整句写清谁看向谁、谁用哪只手接触哪一处，以及承重或接触点。可用 summary.meta 标记 "anime illustration"、"visual novel event CG" 等画面类别。summary.canvas 写 "single"。
-2. items 中每个实际入镜的人各占一个 character。把识别这个人所需的可见外貌、年龄、发型、衣着及姿势写成简短英文标签，逐项放进该人的 tags 数组，不用权重语法。每项只表达一个具体特征。该人的 caption 写表情、视线、动作或朝向，并补足局部光影。身份和穿戴特征应随同一个人物框走，跨图用词一致。保持明确给出的年龄和可见外貌；肤色、脸型和瞳色保留辨识度，肤质由细腻色面和柔和层次表现。按景别选择细节，衣服遮住或裁出画外的部分留在画外。
-3. 只给位置影响叙事的物件、建筑形体或可见背景标志建立 object 项。普通环境、光斑和气氛留在 summary.caption。多个框可以合理相交，例如手叠到包裹上、背后窗框被人物遮住。跨框关系在全局句里写清，局部用词与该关系一致。文字确实入镜且有指定原文时，用独立 text 项写排版和承载表面的 caption，把原文（语言、引号、换行和标点）放进 text。
+一张图取同一幕里的一个瞬间。**人物标签定结构，英文 caption 写光影与关系，Layout 框定位置。** 横幅里优先给表情、目光和动作留画幅，再用场所线索交代背景。
 
-## 横幅构图与框选
-- 先按占位符选景别。对话或情绪镜头让脸和手势成为首要阅读区，主角给足画幅，地点只留一两处可辨的线索。需要交代完整动作或场所时再用中全景或全景。不要为塞入更多服饰细节缩小主体。
-- 正构图、轻微侧身、明显侧倾、前景透视或镜头滚转都按场景选。要用侧倾填进横幅时，在 caption 写清头与躯干的实际方向和视点，让脸、肩、手势沿有用的方向舒展；角度由叙事决定，不固定方向，也不强制沿对角线。人物框仍是轴对齐矩形，只圈住该人物在画面里可见的整体。镜头滚转时，同一画面内的地平线、建筑线和重力方向使用一致的视点。
-- 为主要表情和动作留出轮廓分离及边缘余量，允许有意裁切的部分碰边。画外视点人物不另画身体。接触手、肘和物件的空间关系写入 caption，别拆成额外的手、眼、发梢或衣物框。由背景和次要元素到前景主体排列 items，保持图中有意义的层次。
+## 提示词结构（三层分工）
 
-## IMAGES 输出
-每个占位符对应一个原生 Layout JSON 对象，在 IMAGES 段单独占一行；对象之外不加说明、围栏、标签链或编号。其他回传段沿用原协议。
-- 顶层只用 summary、items、bbox_coord_space、bbox_format。items 是非空的平铺数组。每项至少有 label、caption、bbox，label 只能是 character、object、text；tags 为英文短语数组。text 项另有原样 text 字段。
-- bbox_coord_space 固定为 "abs_centralized"，bbox_format 固定为 "yxyx"。使用本轮【布局画布】给的实际像素，原点在画布中心；x 向右、y 向下。bbox 为 [上,左,下,右] 四个整数；上 < 下、左 < 右，全框位于画布内。无需在 JSON 中写宽高或比例。
-- 示例仅展示格式与一种中景安排（1536×864）；人物、角度、位置和坐标依本画面重算。
+    ① 全局画面（summary.caption）—— 画风 → 景别 / 机位 → 人物位置与相互关系 → 地点 / 光影
+    ② 局部形象（items[].tags / caption）—— 英文短标签定可见外貌与服饰，英文句子写动作与局部光影
+    ③ 元素位置（items[].bbox）—— 用画布中心为原点的绝对像素，按 [上,左,下,右] 定位可见元素
 
-{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"In an eye-level waist-up shot, a courier on the right offers a parcel into the lower center. Their gaze follows the recipient just outside the frame. The station window on the left casts a cool rim over the hair, while reflected lamplight softens the face."},"items":[{"label":"object","caption":"Tall rain-streaked station window in the background.","bbox":[-390,-690,240,-280]},{"label":"object","caption":"A paper parcel resting on the courier's left palm in the foreground.","bbox":[95,-155,280,178]},{"label":"character","caption":"The courier inclines toward the recipient, left palm under the parcel and right hand lightly steadying the side.","tags":["28 years old","short black hair","hazel eyes","round glasses","olive canvas coat","waist-up"],"bbox":[-390,-115,432,640]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+| 内容 | 用什么写 |
+|---|---|
+| 二维视觉小说事件 CG、共同的画面语言 | `summary.caption`；`summary.meta` 可用 `anime illustration`、`visual novel event CG` |
+| 脸型 / 瞳色 / 发型 / 年龄 / 可见体型 / 衣着 | 对应 `character` 的 `tags`，一项一个特征短语 |
+| 表情 / 目光 / 朝向 / 手与物的接触 | 对应人物的 `caption`；两人互动的前后关系也在全局写清 |
+| 关键道具 / 辨识地点的建筑或陈设 | 独立的 `object` 项；其他环境与光线留在全局句 |
+| 画内确实可读的招牌或标记 | `text` 项，原文与排版描述分开 |
+
+## 书写规则
+
+1. **人物标签**按年龄与身份特征 → 五官与发型 → 入镜体型 → 衣饰材质 → 姿态排列。优先准确的 Danbooru 常用词，细节用同风格英文短语补足。简短、具体，一项一义，不写分类前缀、权重或无关质量词。
+2. **固定特征逐项照用**，例如 `low nose bridge` 不换成 `straight nose bridge`，可见的疤痕或痣要保留位置。年龄照本轮明确给出的数字或文字写，气色、汗水、红晕取本轮可见状态。按景别写体型：胸像保留肩颈和脸，腰部以上不写鞋袜，全景才交代完整轮廓。多人各写一套，不把 A 的衣物或发色混入 B 的框。
+3. **自然语言写可见关系**。写清谁朝谁、哪只手托住哪里，手掌与物件如何接触、谁遮挡谁。局部 `caption` 补全动作，避免逐项复述 `tags`。取景、视点和主光方向以 `summary.caption` 统一。
+4. **二维画风**。用有轻重的清楚轮廓、平整色面、成组的赛璐璐阴影及局部柔和渐变。眼睛用清楚的虹膜分区和少量高光表达眼神。皮肤保留原有肤色和五官，用柔和的明暗面过渡；布料用成组褶线、材质轮廓和受光表现细节。背景细节与对比低于脸和手势。整幅按同一媒介描绘。
+
+## 示例（两种构图，坐标按 1536×864 示范）
+
+**示例 A · 中景 · 人物前倾，递物形成斜向动作线**
+
+{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"A 2D visual novel illustration in a waist-up shot at counter height. A courier fills the right side and leans left into the frame, guiding a parcel toward someone just outside the lower left. A rain-streaked station window catches cool light behind the courier, and warm bounce light picks out the face and hands in broad cel-shaded planes."},"items":[{"label":"object","caption":"A tall rain-streaked station window behind the counter.","bbox":[-400,-715,220,-310]},{"label":"object","caption":"A paper parcel resting on the courier's left palm.","bbox":[135,-330,302,-75]},{"label":"character","caption":"The courier's shoulders lean left while the chin turns toward the recipient, with the left palm supporting the parcel and right fingertips steadying its side.","tags":["28 years old","short black hair","hazel eyes","round glasses","olive canvas coat"],"bbox":[-388,-325,432,649]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+
+**示例 B · 近景 · 稳定的正构图，右侧留出店铺线索**
+
+{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"An eye-level 2D visual novel close-up at a quiet tea counter. The shopkeeper fills the left half, pausing mid-turn with her gaze held toward the right. Warm window light makes a clean break between the lit cheek and its soft shadow. A small wall sign stays readable behind her on the right."},"items":[{"label":"text","caption":"Two short rows of light lettering on a dark wooden sign at the rear wall.","text":"茶汤\n慢饮","bbox":[-247,300,-22,564]},{"label":"character","caption":"The shopkeeper turns her head slightly toward the right; a restrained half-smile lifts one corner of her mouth.","tags":["47 years old","round face","wide jaw","dark brown eyes","short salt-and-pepper hair","cream linen collar"],"bbox":[-391,-594,432,138]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+
+## 场景与构图约束
+
+- **优先按本轮占位符定景别与视点。** 近景和中景让脸与主要动作占足画幅。只有动作范围或场景本身需要时才拉远；用一两处入镜标志交代剩余空间。
+- **侧倾是可选构图手法。** 正面、侧身、前倾或镜头滚转按动作选。侧倾时写清头、肩、躯干或伸手方向，人物框仍为轴对齐矩形。若用镜头滚转，背景透视与重力方向按同一视点表达。不固定沿画面对角线摆放人物。
+- 单幅事件插画。对白与心理活动化为可见表情或动作，不画对白框、字幕、分镜边框或水印。只使用本轮可见场景和要点。
+
+## 自检
+
+1. 是否一幅图一个 Layout 对象，字段与中心像素坐标都合法？
+2. 主角的神态、手势和叙事动作是否得到足够画幅？有无为了交代服饰或背景而拉远镜头？
+3. 年龄、五官、固定特征和衣饰是否在同一人框内？有没有写到裁出画外或被遮住的细节？
+4. 目光和接触点是否自洽？有侧倾时，方向是由这一幕决定的吗？
+5. 全图的线条、色面与阴影是否统一为二维插画？画内文字是否逐字保留？

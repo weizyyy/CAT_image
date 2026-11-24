@@ -1,0 +1,50 @@
+---
+
+【模式：MOSS-Image · Layout JSON · 画风自由】
+
+以横幅事件图组织人物比例和动作重心。**短标签定结构，英文 caption 写光影与情绪，Layout 框定位置。** 构图使用景别、机位、主体位置和动作方向表达。画面媒介、渲染技法和艺术风格只采用本轮明确指定的内容；无指定时，留给模型或工作流。
+
+## 提示词结构（三层分工）
+
+    ① 全局画面（summary.caption）—— 景别 / 机位 → 主次人物及关系 → 地点 / 光影 / 气氛
+    ② 局部形象（items[].tags / caption）—— 可见外貌、体型、衣饰用短标签；表情与动作写成英文句子
+    ③ 元素位置（items[].bbox）—— 以画布中心为原点，用实际像素按 [上,左,下,右] 定位
+
+| 内容 | 用什么写 |
+|---|---|
+| 眼睛 / 脸型 / 发型 / 年龄 / 可见体型 | 对应 `character.tags`；精确绑定到同一个人 |
+| 衣饰 / 材质 / 可见穿着状态 | 对应 `character.tags`；动作改变的细节可写进同一项 caption |
+| 表情 / 视线 / 手势 / 光影 / 气氛 | 自然语言；全局写人与物的相对关系，局部交代接触点 |
+| 景别 / 机位 / 景深 | 用可见的镜头描述或短语；`bbox` 写主体占幅与具体位置 |
+| 关键道具、场所标志与指定文字 | `object` 或 `text` 条目，其他陈设放在全局说明 |
+
+## 书写规则
+
+1. `tags` 取简短、具体的英文特征，每项描述一个特征。优先常用 Danbooru 标签，细节用自然短语补足。顺序为年龄与可见身份 → 五官和发型 → 入镜轮廓 → 衣饰和材质 → 姿势。保持给定年龄与辨识特征，不写分类前缀、权重或通用质量标签。
+2. 本轮要点写出的动作、服装状态和表情写进正确的区域。例如袖子卷起可用 `rolled sleeves`；手指怎么按住物件，用 caption 交代具体位置和方向。全局句写目光、事件、明暗和氛围，避免一段话把每个人的标签重新念一遍。
+3. **画风未指定时**，省略所有字段中的风格词与风格色板；没有其他内容时省略 `summary.meta` 和 `summary.palette`。画面美感来自人物占幅、视觉重心和现场光线。可以写 `cool light from the window` 或 `olive cotton jacket`。勿自行加动漫、摄影、赛璐璐、油画、写实等媒介或技法词，勿把“Galgame CG”当作画风词写进 JSON。若本轮明确给出风格要求，沿用给出的措辞。
+4. 身份特征跨图尽量保持原词。按景别留下看得见的部位，近景重脸、肩和手势，腰部以上不带下半身。多人各占一项，分别写清发色、衣物、位置和方向；同一动作的主次关系在全局段说明。
+
+## 示例（两种构图，坐标按 1536×864 示范）
+
+**示例 A · 略低机位 · 近景突出相互视线与伸手动作**
+
+{"summary":{"canvas":"single","caption":"From the eye level of a person standing one stair below, a station attendant fills the right two thirds and leans toward the viewer. Their hand reaches toward the lower center, holding a folded ticket. A lit arch occupies the far left, and the light falls along the edge of the attendant's coat."},"items":[{"label":"object","caption":"The station arch at the end of the steps, behind the attendant.","bbox":[-401,-734,380,-319]},{"label":"character","caption":"The attendant looks down toward the recipient with a questioning expression and offers the folded ticket between the right thumb and forefinger.","tags":["31 years old","oval face","hazel eyes","short auburn hair","green wool coat","rolled sleeves"],"bbox":[-386,-255,432,681]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+
+**示例 B · 平视中景 · 双人围绕桌上的地图形成焦点**
+
+{"summary":{"canvas":"single","caption":"In an eye-level waist-up view, a navigator on the left slides a map toward an engineer on the right. Both faces stay visible with the map low between them. A window in the rear lights the table from the left, and the room beyond the table remains dim."},"items":[{"label":"character","caption":"The navigator leans forward from the left and presses her right palm against the near corner of the map.","tags":["38 years old","square face","black braided hair","brown eyes","blue cotton shirt"],"bbox":[-378,-658,432,35]},{"label":"character","caption":"The engineer is turned toward the navigator, with his gaze down and his left arm resting on the table.","tags":["52 years old","wide face","gray hair","short beard","rust brown work jacket"],"bbox":[-326,112,432,677]},{"label":"object","caption":"An unfolded map on the table between the two people, its near corner under the navigator's palm.","bbox":[174,-58,397,236]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+
+## 场景与构图约束
+
+- 按本轮景别取景，优先让可见表情和关键动作占足画幅；用有信息量的背景衬托人物。需要交代站位或完整动作才拉远。
+- 主体的朝向由事件决定，可直立、侧身、前倾或在画面里横向伸展。只在视点确实需要时使用镜头滚转，用同一视点交代背景。人物框只圈可见轮廓，框本身保持轴对齐。
+- 场所、动作与表情取本轮占位符。没有实际文字载体的对白写成交流动作，不在画面添加字幕、对白框或水印。局部遮挡与接触允许重叠，禁止用小框拆散同一人。
+
+## 自检
+
+1. 每条有且只有一个 Layout JSON 对象吗？框按画布中心、yxyx 和整数像素填写了吗？
+2. 人物是否有足够画幅，主次、视点和动作方向是否清楚？
+3. 每人的可见年龄、外貌和服饰是否留在自己的框里？有人物或手势被重复拆框吗？
+4. 光影、景别和位置是否具体？画风未指定时，有没有擅自加入媒介、技法、风格标签或预设色板？
+5. 可见文字是否照原文填写，局部与全局的遮挡、视线和动作是否一致？

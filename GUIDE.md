@@ -8,7 +8,10 @@
 
 ### MOSS-Image 布局配图
 
-选择「MOSS-Image（Layout JSON · Galgame CG）」。横图默认 1536×864，在 ComfyUI 和插件的「模型与偏好」中使用同一宽高。布局框按采样画布的像素计算；调整尺寸后，可对旧图卡点「重新解析」更新坐标。
+- 「MOSS-Image（Layout JSON · Galgame CG）」采用二维视觉小说插画的线条、色面和光影。
+- 「MOSS-Image（Layout JSON · 画风自由）」保留事件图的镜头、主体占幅和布局控制，把画风交给工作流或用户指定的风格。使用画风 LoRA 时，「艺术家风格」可按需留空或填写触发词。
+
+两个模式共用画布尺寸，默认 1536×864。请在 ComfyUI 和插件的「模型与偏好」中使用同一宽高。布局框按采样画布的像素计算。调整尺寸或切换模式后，可对旧图卡点「重新解析」应用新设置。
 
 在 MOSS-Image API 工作流中，把 `%prompt%` 放在直接送给正向编码的完整文本输入。关闭 `enable_prompt_enhancer`，并绕过会再次打包边界框的节点。插件会把画师给出的 `summary` 与 `items` 一起传入。参见 [OpenMOSS 用户指南](https://github.com/OpenMOSS/MOSS-Image/blob/main/USERGUIDE.md#layout-prompts-experimental) 和 [ComfyUI 布局模板说明](https://github.com/Comfy-Org/docs/blob/main/tutorials/image/moss-image/moss-image.mdx)。
 

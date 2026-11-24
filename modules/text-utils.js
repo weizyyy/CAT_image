@@ -1,5 +1,5 @@
 import { tokenizePlaceholders } from './placeholders.js';
-import { MOSS_IMAGE_MODE } from './settings.js';
+import { isMossImageMode } from './settings.js';
 // ── SillyImage Lab 文本处理工具 ──
 
 // 清洗 AI 模型输出的 XML/思考标签
@@ -55,7 +55,7 @@ export function cleanAnimePrompt(prompt) {
 
 export function cleanPromptForMode(prompt, mode) {
     // Layout JSON contains literal text fields, while standalone portraits use plain prompts.
-    return mode === MOSS_IMAGE_MODE && String(prompt || '').trimStart().startsWith('{') ? prompt : cleanAnimePrompt(prompt);
+    return isMossImageMode(mode) && String(prompt || '').trimStart().startsWith('{') ? prompt : cleanAnimePrompt(prompt);
 }
 
 // ══════════════════════════════

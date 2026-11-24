@@ -4,7 +4,7 @@ import { tokenizePlaceholders, replaceTokens } from '../placeholders.js';
 // 起为唯一管线（旧画师管线 runAuxPipeline 已移除）
 
 import { slLog, slErr } from '../log.js';
-import { settings, getActiveMode, isEnglishMode, MOSS_IMAGE_MODE, getMossCanvas } from '../settings.js';
+import { settings, getActiveMode, isEnglishMode, isMossImageMode, MOSS_IMAGE_CG_MODE, MOSS_IMAGE_FREE_MODE, getMossCanvas } from '../settings.js';
 import { parseMossLayout } from '../moss-layout.js';
 import { auxApiCallRaw } from './api.js';
 import { isPromptsLoaded, getPrompt } from '../../prompts/loader.js';
@@ -52,7 +52,7 @@ export function classifyPipelineFailure(out, expectCount, meta, mode = getActive
         }
         for (var i = 0; i < lines.length; i++) {
             if (lines[i] && lines[i].length < 120 && REFUSAL_RE.test(lines[i])) return 'refusal';
-            if (mode === MOSS_IMAGE_MODE && !parseMossLayout(lines[i], canvas)) return 'layoutformat';
+            if (isMossImageMode(mode) && !parseMossLayout(lines[i], canvas)) return 'layoutformat';
         }
     }
     return '';
@@ -77,7 +77,7 @@ export function findLostNumbersInPrompts(placeholders, prompts, mode = getActive
         var src = [ph.scene || '', ph.topic || ''];
         for (var j = 0; j < segs.length; j++) src.push(segs[j].appearance || '');
         let text = prompts[i] || '';
-        if (mode === MOSS_IMAGE_MODE) {
+        if (isMossImageMode(mode)) {
             const layout = parseMossLayout(text);
             text = layout ? [layout.summary.caption, ...layout.items.flatMap(item => [item.caption, ...(item.tags || [])])].join(' ') : '';
         }
@@ -154,7 +154,8 @@ var MODE_OVERLAY = {
     anime:     'pipeline/anime-overlay.txt',
     anime_tag: 'pipeline/anime-tag-overlay.txt',
     krea2:     'pipeline/krea2-overlay.txt',
-    [MOSS_IMAGE_MODE]: 'pipeline/moss-image-overlay.txt',
+    [MOSS_IMAGE_CG_MODE]: 'pipeline/moss-image-overlay.txt',
+    [MOSS_IMAGE_FREE_MODE]: 'pipeline/moss-image-free-overlay.txt',
 };
 
 function buildPurgeMessages(pipeMode) {
@@ -187,6 +188,7 @@ function buildPurgeMessages(pipeMode) {
     push(['atomic-vocab.txt', 'wardrobe-vocab.txt', 'wardrobe-expand.txt']
         .map(_p).filter(Boolean).join('\n\n'));
     // ⑥ 模式 overlay
+    if (isMossImageMode(pipeMode)) push(_p('pipeline/moss-image-layout.txt'));
     push(_p(MODE_OVERLAY[pipeMode] || MODE_OVERLAY.zit));
     if (settings.nsfwEnhance) push(_p('pipeline/nsfw-overlay.txt'));
 
@@ -204,7 +206,7 @@ function buildPurgeMessages(pipeMode) {
 // ── 用户消息：人物表 + 占位符（不发送正文——占位符配图插件AI 只做"档案+酒馆AI要点 → 提示词"的编辑） ──
 function buildRosterUserContent(placeholders, wardrobeInfo, mode, canvas) {
     var lines = [];
-    const moss = mode === MOSS_IMAGE_MODE;
+    const moss = isMossImageMode(mode);
     lines.push('【任务】为每个 [img:] 占位符输出 1 条提示词，按【占位符】编号一一对应。人物外貌必须引用【人物档案】，禁止用名字代替外貌。禁止偷懒：每一幅图都要写完整详情（人物当前状态+衣着发型+表情+动作+场景+光影），不允许省略/概括/一句话带过。');
     if (moss) lines.push('【布局画布】实际宽 ' + canvas.width + ' px，高 ' + canvas.height + ' px。以画布中心为原点，x 范围 ±' +
         canvas.width / 2 + '、y 范围 ±' + canvas.height / 2 + '；bbox 顺序 [y_min,x_min,y_max,x_max]。');
@@ -467,7 +469,7 @@ function _parseImageLines(text) {
 }
 
 export function parseRosterImages(output, expectedCount, mode = getActiveMode()) {
-    if (mode === MOSS_IMAGE_MODE) {
+    if (isMossImageMode(mode)) {
         // Match section markers on their own lines so literal lettering inside JSON is preserved.
         const section = /(?:^|\n)[ \t]*---IMAGES---[ \t]*\r?\n([\s\S]*?)(?=\n[ \t]*---(?:END|PROFILE|IMAGES|CHECK|WARDROBE)---[ \t]*(?:\r?\n|$)|$)/.exec(output);
         const part = section?.[1].trim().replace(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i, '$1');
@@ -514,7 +516,7 @@ export function fillPlaceholders(bodyText, placeholders, prompts, mode = getActi
         try { _auditFacts(ph, prompt, phIdx); } catch (eAudit) {}
         // 英文模式：字面出现的事实原样保护，避免被中文清洗吃掉（机械替换，不做语义判断）
         try {
-            if (isEnglishMode(mode) && mode !== MOSS_IMAGE_MODE) {
+            if (isEnglishMode(mode) && !isMossImageMode(mode)) {
                 var _fs2 = ph.facts || [];
                 for (var _fi = 0; _fi < _fs2.length; _fi++) {
                     var _f = String(_fs2[_fi] || '');
@@ -817,7 +819,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
 
         // 4. 解析提示词并填充
         var prompts = parseRosterImages(output, 1, mode);
-        if (mode === MOSS_IMAGE_MODE) prompts = prompts.map(prompt => JSON.stringify(JSON.parse(prompt)));
+        if (isMossImageMode(mode)) prompts = prompts.map(prompt => JSON.stringify(JSON.parse(prompt)));
         // 地点保真：不阻断、不重试，只点名（场景对不上就是这里漏的）
         try {
             var _lostPlace = findLostPlaces(placeholders, prompts);

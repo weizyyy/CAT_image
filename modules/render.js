@@ -2,7 +2,7 @@ import { tokenizePlaceholders } from './placeholders.js';
 import { mountSlots, updateSlots } from './dom-placeholders.js';
 // ── SillyImage Lab 渲染 ──
 import { slErr } from './log.js';
-import { settings, escapeHtml, getActiveMode, isEnglishMode, MOSS_IMAGE_MODE } from './settings.js';
+import { settings, escapeHtml, getActiveMode, isEnglishMode, isMossImageMode } from './settings.js';
 import { applyTextTheme } from './ui/theme.js';
 
 import { imgCacheGetById } from './cache.js';
@@ -97,7 +97,7 @@ export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex 
     var blocks = [];
     if (!enhancedText) return blocks;
     // Consume the entire JSON field, including any bracketed lettering in its strings.
-    var re = mode === MOSS_IMAGE_MODE
+    var re = isMossImageMode(mode)
         ? /\[image:\s*([^\]]*)\]\r?\n【提示词】(\{[^\r\n]*\})【\/提示词】/g
         : /\[image:\s*([\s\S]*?)\]/g;
     var m;

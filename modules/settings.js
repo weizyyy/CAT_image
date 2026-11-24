@@ -1,7 +1,12 @@
 // ── SillyImage Lab 设置中心 ──
 export var settings = {};
-export const MOSS_IMAGE_MODE = 'moss_image';
+export const MOSS_IMAGE_CG_MODE = 'moss_image';
+export const MOSS_IMAGE_FREE_MODE = 'moss_image_free';
 const defaultMossCanvas = { width: 1536, height: 864 };
+
+export function isMossImageMode(mode) {
+    return mode === MOSS_IMAGE_CG_MODE || mode === MOSS_IMAGE_FREE_MODE;
+}
 
 export function isMossDimension(value) {
     return Number.isSafeInteger(value) && value > 0 && value % 16 === 0;
@@ -99,7 +104,7 @@ function preferences(source) {
 
 export function loadPreferences() {
     Object.assign(settings, preferences(_extensionSettings?.cat_image || {}));
-    if (settings.modelType === 'minimax_h3_image') settings.modelType = MOSS_IMAGE_MODE;
+    if (settings.modelType === 'minimax_h3_image') settings.modelType = MOSS_IMAGE_CG_MODE;
 }
 
 export function saveSettings() {
@@ -118,7 +123,8 @@ export var MODES = [
     { id: 'anime',     label: 'Anime（纯英文描述）',                                        short: 'Anime（纯英文描述）',          badge: '🎬 Anime' },
     { id: 'anime_tag', label: 'Anime Tag（纯英文标签）',                                    short: 'Anime Tag（纯英文标签）',      badge: '🎬 Tag' },
     { id: 'krea2',     label: '🎬 Krea 2（英文自然语言段落）★ Krea 2 / 通用基座模型推荐',      short: 'Krea 2（英文自然语言段落）',   badge: '🎬 Krea2' },
-    { id: MOSS_IMAGE_MODE, label: '🎬 MOSS-Image（Layout JSON · Galgame CG）', short: 'MOSS-Image（Galgame CG）', badge: '🎬 MOSS CG' },
+    { id: MOSS_IMAGE_CG_MODE, label: '🎬 MOSS-Image（Layout JSON · Galgame CG）', short: 'MOSS-Image（Galgame CG）', badge: '🎬 MOSS CG' },
+    { id: MOSS_IMAGE_FREE_MODE, label: '🎬 MOSS-Image（Layout JSON · 画风自由）', short: 'MOSS-Image（画风自由）', badge: '🎬 MOSS Layout' },
 ];
 
 export function modeLabel(id) {
@@ -135,5 +141,5 @@ export function modeBadge(id) {
 // 统一入口：以后新增英文模式只改这里，不用再去各处撒 if
 export function isEnglishMode(mode) {
     var m = mode || getActiveMode();
-    return m === 'anime' || m === 'anime_tag' || m === 'anima' || m === 'krea2' || m === MOSS_IMAGE_MODE;
+    return m === 'anime' || m === 'anime_tag' || m === 'anima' || m === 'krea2' || isMossImageMode(m);
 }

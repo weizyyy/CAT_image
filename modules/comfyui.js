@@ -1,7 +1,7 @@
 import { workflowRequest } from './workflow-template.js';
 // ── SillyImage Lab 🎨 ComfyUI连接 通信 ──
 import { slLog } from './log.js';
-import { settings, getSTHeaders, saveSettings, escapeHtml, getActiveMode, isEnglishMode, MOSS_IMAGE_MODE } from './settings.js';
+import { settings, getSTHeaders, saveSettings, escapeHtml, getActiveMode, isEnglishMode, isMossImageMode } from './settings.js';
 import { uploadImageToST } from './cache.js';
 import { getCharacterName } from './archive.js';
 import { rosterEntries } from './roster.js';
@@ -120,7 +120,7 @@ export async function deleteWorkflow(name) {
 // 目的：面板里"复制提示词"必须等于**实际发给 ComfyUI 的那一条**（走一遍真实管线，而不是只给裸提示词）
 // 仅保留模型输出、画风和艺术家风格，不注入通用前缀或负面词。
 export function composeFinalPrompt(prompt, curMode = getActiveMode()) {
-    if (curMode === MOSS_IMAGE_MODE && String(prompt).trimStart().startsWith('{')) {
+    if (isMossImageMode(curMode) && String(prompt).trimStart().startsWith('{')) {
         const layout = parseMossLayout(prompt);
         if (!layout) throw new Error('MOSS-Image 布局格式不正确，请重新解析图卡');
         if (!settings.animeArtist?.trim()) return prompt.trim();

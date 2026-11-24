@@ -833,25 +833,31 @@ const mossLayout = (caption, text) => ({
     bbox_format: 'yxyx',
 });
 
-test('MOSS layout passes from its own overlay through the real image button and opaque workflow without altering lettering', async () => {
+const mossOverlays = { moss_image: 'moss-image', moss_image_free: 'moss-image-free' };
+
+for (const [mode, overlayName] of Object.entries(mossOverlays)) test(mode + ': overlay and native layout reach the image button and workflow intact', async () => {
     const { MODES, isEnglishMode } = await import('../modules/settings.js');
     const { setEnqueueGen, extractImgBlocksFromEnhanced } = await import('../modules/render.js');
     const { enqueueGen, getQueueStatus } = await import('../modules/queue.js');
     const saved = { modelType: settings.modelType, animeArtist: settings.animeArtist, cWf: settings.cWf, mossWidth: settings.mossWidth };
-    Object.assign(settings, { modelType: 'moss_image', animeArtist: 'ink and restrained cel shading', mossWidth: 1600 });
+    const cg = mode === 'moss_image';
+    Object.assign(settings, { modelType: mode, animeArtist: cg ? 'ink and restrained cel shading' : '', mossWidth: 1600 });
     try {
         assert.equal(MODES.filter(m => m.id === settings.modelType).length, 1);
         assert.equal(isEnglishMode(), true);
         const caption = 'A courier supports a parcel with both hands in a rainlit station.';
         const text = 'Tester的茶铺\n"欢迎" <茶> [image:牌] 【/提示词】 ---END---';
         const layout = mossLayout(caption, text);
+        if (!cg) delete layout.summary.meta;
         let request;
         fetch = async (_url, options) => { request = JSON.parse(options.body); return response(JSON.stringify(layout, null, 2)); };
         const result = await runRosterPipeline('[img:茶铺|要点:手托包裹，招牌文字Tester的茶铺]', 'moss');
         assert.equal(result.ok, true);
         const system = request.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
         const { getPrompt } = await import('../prompts/loader.js');
-        assert.ok(system.includes(getPrompt('pipeline/moss-image-overlay.txt').trim()));
+        assert.ok(system.includes(getPrompt('pipeline/' + overlayName + '-overlay.txt').trim()));
+        const otherName = cg ? mossOverlays.moss_image_free : mossOverlays.moss_image;
+        assert.ok(!system.includes(getPrompt('pipeline/' + otherName + '-overlay.txt').trim()));
         assert.equal(system.includes('【模式：Krea 2'), false);
         assert.match(request.messages.at(-1).content, /实际宽 1600 px，高 864 px/);
         const blocks = extractImgBlocksFromEnhanced(result.enhanced, 'moss');
@@ -867,15 +873,15 @@ test('MOSS layout passes from its own overlay through the real image button and 
         document.querySelector('#chat').innerHTML = blocks[0].html;
         document.querySelector('.sl_img_btn').click();
         await waitUntil(() => document.querySelector('.sl_img_result') && !getQueueStatus().running);
-        layout.summary.caption += ', ' + settings.animeArtist;
+        if (cg) layout.summary.caption += ', ' + settings.animeArtist;
         assert.deepEqual(JSON.parse(sent.prompt.text.inputs.text), layout);
         assert.deepEqual(sent.prompt.canvas.inputs, { width: 1600, height: 864 });
         assert.equal(sent.prompt.untouched, '%negative_prompt%');
     } finally { Object.assign(settings, saved); }
 });
 
-test('MOSS retries bad coordinate layouts and leaves the marker intact if it still receives prose', async () => {
-    const savedMode = settings.modelType; settings.modelType = 'moss_image'; let calls = 0;
+test('the free-style MOSS slot retries bad coordinates and leaves the marker untouched if it still receives prose', async () => {
+    const savedMode = settings.modelType; settings.modelType = 'moss_image_free'; let calls = 0;
     try {
         const layout = mossLayout('A painted courier scene.');
         const bad = structuredClone(layout);
@@ -897,22 +903,21 @@ test('MOSS retries bad coordinate layouts and leaves the marker intact if it sti
     } finally { settings.modelType = savedMode; }
 });
 
-test('MOSS mode cannot reuse another model prompt; edits within MOSS still reuse unchanged slots', async () => {
-    const savedMode = settings.modelType; settings.modelType = 'zit';
-    let calls = 0; fetch = async () => response('Independent image caption ' + ++calls);
+test('the MOSS slots have distinct cached prompts and preserve unchanged image slots after editing', async () => {
+    const savedMode = settings.modelType; settings.modelType = 'moss_image';
+    let calls = 0; fetch = async () => response(JSON.stringify(mossLayout('Independent layout ' + ++calls)));
     show('[img:甲][img:乙]'); scanner.startPolling();
     try {
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
         const oldId = document.querySelector('.sl_img_btn').dataset.slid;
-        settings.modelType = 'moss_image';
-        fetch = async () => response(JSON.stringify(mossLayout('Independent layout ' + ++calls)));
+        settings.modelType = 'moss_image_free';
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
         const mossId = document.querySelector('.sl_img_btn').dataset.slid;
         assert.equal(calls, 4); assert.notEqual(mossId, oldId);
         ctx.chat[0].mes = '[img:甲][img:丙]'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
         assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, mossId);
-        settings.modelType = 'zit'; ctx.chat[0].mes = '[img:甲][img:乙]'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
+        settings.modelType = 'moss_image'; ctx.chat[0].mes = '[img:甲][img:乙]'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
         assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
     } finally { scanner.stopPolling(); settings.modelType = savedMode; }
@@ -942,12 +947,13 @@ test('a historical image from another mode restores from cache and can be reanal
 });
 
 test('assembled requests keep shared policies, model overlays and per-call records in their own layers', async () => {
-    const { MODES } = await import('../modules/settings.js');
+    const { MODES, isMossImageMode } = await import('../modules/settings.js');
+    const { parseMossLayout } = await import('../modules/moss-layout.js');
     const { getPrompt } = await import('../prompts/loader.js');
     const { upsertPerson, setEnglishAnchor } = await import('../modules/roster.js');
     const { upsertEntry } = await import('../modules/wardrobe.js');
     const saved = { mode: settings.modelType, layered: settings.slPurgeLayered };
-    const overlayPaths = { zit: 'zit', anima: 'anima', anime: 'anime', anime_tag: 'anime-tag', krea2: 'krea2', moss_image: 'moss-image' };
+    const overlayPaths = { zit: 'zit', anima: 'anima', anime: 'anime', anime_tag: 'anime-tag', krea2: 'krea2', ...mossOverlays };
     const anchor = 'race:LayerTestOrigin | age:forty-two | nose:LayerTestNose | skin_tone:LayerTestTone';
     const detail = 'LayerTestBlue cotton jacket, LayerTestRound collar';
     const source = '[img:递出包裹|人物:LayerActor（层次测试）|造型:服装=LayerOutfit|要点:腰部以上，左手托住包裹]';
@@ -960,7 +966,7 @@ test('assembled requests keep shared policies, model overlays and per-call recor
         fetch = async (_url, options) => {
             request = JSON.parse(options.body);
             const caption = 'A waist-up view shows a courier supporting a parcel with the left hand.';
-            return response(settings.modelType === 'moss_image' ? JSON.stringify(mossLayout(caption)) : caption);
+            return response(isMossImageMode(settings.modelType) ? JSON.stringify(mossLayout(caption)) : caption);
         };
         for (const mode of MODES) for (const layered of [true, false]) {
             settings.modelType = mode.id; settings.slPurgeLayered = layered;
@@ -979,10 +985,23 @@ test('assembled requests keep shared policies, model overlays and per-call recor
             assert.ok(user.includes('【造型库】') && user.includes(detail));
             assert.equal(system.includes(anchor) || system.includes(detail), false, 'records belong to the user payload');
             assert.equal(user.includes('只用光学与肤质词') || user.includes('重写四条 portrait'), false);
-            if (mode.id === 'moss_image') {
+            const layoutRules = getPrompt('pipeline/moss-image-layout.txt').trim();
+            assert.equal(system.split(layoutRules).length - 1, Number(isMossImageMode(mode.id)));
+            if (isMossImageMode(mode.id)) {
                 assert.doesNotMatch(overlay, /【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/);
+                assert.ok(system.indexOf(layoutRules) < system.indexOf(overlay));
                 assert.match(user, /MOSS-Image Layout JSON/);
                 assert.doesNotMatch(user, /第1条纯文本提示词/);
+            }
+        }
+        for (const [mode, overlayName] of Object.entries(mossOverlays)) {
+            const overlay = getPrompt('pipeline/' + overlayName + '-overlay.txt');
+            const examples = overlay.split(/\r?\n/).filter(line => line.startsWith('{"summary"'));
+            assert.equal(examples.length, 2, mode);
+            for (const example of examples) {
+                const layout = parseMossLayout(example, { width: 1536, height: 864 });
+                assert.ok(layout, mode);
+                assert.equal(layout.summary.meta !== undefined, mode === 'moss_image');
             }
         }
     } finally {

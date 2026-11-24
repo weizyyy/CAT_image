@@ -37,7 +37,7 @@ export async function runBrowserFixture() {
         lastAnalysis = JSON.parse(options.body);
         const user = JSON.parse(options.body).messages.at(-1).content;
         const prompt = user.includes('MOSS-FIXTURE') ? JSON.stringify({
-            summary: { meta: ['anime illustration'], canvas: 'single', caption: 'A painted scene with cool light across the face and warm light on the cup.' },
+            summary: { canvas: 'single', caption: 'A waist-up view with cool light across the face and warm light on the cup.' },
             items: [
                 { label: 'text', caption: 'A shop sign on the left', text: 'Fixture的茶铺\n"欢迎"', bbox: [-290, -790, -155, -370] },
                 { label: 'character', caption: 'The woman holds a cup in her left palm', tags: ['42 years old', 'blue cotton jacket'], bbox: [-410, -190, 432, 630] },
@@ -264,7 +264,9 @@ export async function runBrowserFixture() {
         mossWidth.dispatchEvent(new Event('change', { bubbles: true }));
         mossWidth.value = '1601';
         mossWidth.dispatchEvent(new Event('change', { bubbles: true }));
-        checks.push({ name: 'webview-moss-model-selection-and-canvas-settings', ok: settings.modelType === 'moss_image' &&
+        const cgSelected = settings.modelType === 'moss_image' && document.querySelector('#sl_moss_card').style.display !== 'none';
+        jQuery('#sl_model_type').val('moss_image_free').trigger('change');
+        checks.push({ name: 'webview-moss-model-selection-and-canvas-settings', ok: cgSelected && extensionSettings.cat_image.modelType === 'moss_image_free' &&
             document.querySelector('#sl_moss_card').style.display !== 'none' && document.querySelector('#sl_krea2_style_card').style.display === 'none' &&
             mossWidth.value === '1600' && extensionSettings.cat_image.mossWidth === 1600 && document.querySelector('#sl_moss_height').value === '864' });
         settings.autoGen = 1;
@@ -280,10 +282,12 @@ export async function runBrowserFixture() {
         await scanner.runAuxImageScan(jQuery(root));
         await wait(() => !!root.querySelector('.sl_img_block img') && !scanner.scanCoordinator.running);
         const mossSystem = lastAnalysis.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-        const mossOverlay = getPrompt('pipeline/moss-image-overlay.txt').trim();
+        const mossOverlay = getPrompt('pipeline/moss-image-free-overlay.txt').trim();
         const mossPrompt = root.querySelector('.sl_img_btn').dataset.prompt;
         checks.push({ name: 'webview-moss-overlay-reaches-analysis-and-keeps-quoted-lettering', ok: mossSystem.includes(mossOverlay) &&
-            !mossSystem.includes('【模式：Krea 2') && JSON.parse(mossPrompt).items[0].text === 'Fixture的茶铺\n"欢迎"' });
+            !mossSystem.includes(getPrompt('pipeline/moss-image-overlay.txt').trim()) &&
+            !mossSystem.includes('【模式：Krea 2') && JSON.parse(mossPrompt).items[0].text === 'Fixture的茶铺\n"欢迎"' &&
+            !Object.hasOwn(JSON.parse(mossPrompt).summary, 'meta') });
         checks.push({ name: 'webview-moss-layout-reaches-comfy-with-unchanged-canvas', ok: lastWorkflow.native.inputs.text === mossPrompt &&
             lastWorkflow.canvas.inputs.width === 1600 && lastWorkflow.canvas.inputs.height === 864 });
         const wardrobeRules = getPrompt('wardrobe-expand.txt').trim();
