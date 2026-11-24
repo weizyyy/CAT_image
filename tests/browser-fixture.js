@@ -221,6 +221,28 @@ export async function runBrowserFixture() {
         await toggleSwitch(reopened);
         checks.push({ name: 'webview-reopen-panel-and-enable-while-paused', ok: stillOff && reopened.checked &&
             extensionSettings.cat_image.pluginOn === true && scanner.getScannerStatus() !== 'off' && dot() !== 'rgb(255, 159, 10)' });
+        const home = document.querySelector('#sl_panel_home'), panelBody = home.parentElement;
+        home.scrollTop = home.scrollHeight;
+        const homeScroll = home.scrollTop;
+        tabs.renderSettingsPage();
+        const preferences = panelBody.querySelector('.sl-page');
+        preferences.scrollTop = preferences.scrollHeight;
+        const preferencesScroll = preferences.scrollTop;
+        panelBody.scrollTop = 10000;
+        const frameRect = panelBody.getBoundingClientRect(), pageRect = preferences.getBoundingClientRect();
+        const coversPanel = homeScroll > 0 && preferencesScroll > 0 && panelBody.scrollTop === 0 &&
+            home.getClientRects().length === 0 && Math.abs(frameRect.top - pageRect.top) < 1 &&
+            Math.abs(frameRect.bottom - pageRect.bottom) < 1 &&
+            Math.abs(preferences.querySelector('.sl_page_back').parentElement.getBoundingClientRect().top - pageRect.top) < 1;
+        panel.pushPage(body => body.text('短子页'), '测试子页');
+        const nested = [...panelBody.querySelectorAll('.sl-page')].at(-1);
+        const topOnly = preferences.getClientRects().length === 0 && home.getClientRects().length === 0 &&
+            Math.abs(nested.getBoundingClientRect().bottom - frameRect.bottom) < 1;
+        nested.querySelector('.sl_page_back').click();
+        const preferencesRestored = preferences.scrollTop === preferencesScroll && preferences.getClientRects().length > 0;
+        preferences.querySelector('.sl_page_back').click();
+        checks.push({ name: 'webview-subpages-cover-drawer-and-scroll-independently',
+            ok: coversPanel && topOnly && preferencesRestored && home.getClientRects().length > 0 && home.scrollTop === homeScroll });
         tabs.renderSettingsPage();
         const promptSwitch = document.querySelector('#sl_show_prompt');
         await toggleSwitch(promptSwitch);
@@ -272,6 +294,33 @@ export async function runBrowserFixture() {
             !/【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/.test(mossOverlay) &&
             mossUser.includes('实际宽 1600 px，高 864 px') &&
             mossUser.includes(fixtureAnchor) && mossUser.includes(fixtureOutfit) && !mossSystem.includes(fixtureAnchor) && !mossSystem.includes(fixtureOutfit) });
+
+        const { sessionData, sessionKey } = await import('../modules/archive.js');
+        const historyTitle = 'Fixture - older chat';
+        const historical = sessionData(sessionKey('fixture.png', historyTitle), true);
+        historical.roster.Alex = { key: 'Alex', name: 'Alex' };
+        historical.gallery['/img/ai4.png'] = { url: '/img/ai4.png', ts: Date.now() };
+        window.fetch = (url, options) => url === '/api/characters/chats'
+            ? Promise.resolve(Response.json([{ file_name: historyTitle + '.jsonl' }])) : mockFetch(url, options);
+        panel.popPage();
+        tabs.renderArchivePage();
+        const historyRow = () => document.querySelector('[data-roster-context] .sl_other_chats details[data-chat]');
+        await wait(() => !!historyRow()?.querySelector('.sl_chat_switch'));
+        historyRow().parentElement.open = true;
+        historyRow().open = true;
+        const density = group => {
+            const row = getComputedStyle(group), title = getComputedStyle(group.querySelector('summary'));
+            return [row.marginTop, row.paddingTop, title.paddingTop, title.marginBottom, title.fontSize].join(' ');
+        };
+        const rosterDensity = density(historyRow());
+        const actions = [...historyRow().querySelector('.sl_roster_delete').parentElement.children];
+        const redDelete = actions.map(button => button.textContent).join('|') === '切换聊天|复制档案到当前聊天|删除本档案' &&
+            getComputedStyle(actions.at(-1)).backgroundColor === 'rgb(255, 59, 48)';
+        panel.popPage();
+        tabs.renderGalleryPage();
+        const galleryGroup = document.querySelector('.sl-page .sl_other_chats');
+        galleryGroup.open = true;
+        checks.push({ name: 'webview-archive-chat-spacing-matches-gallery', ok: redDelete && rosterDensity === density(galleryGroup.querySelector('details')) });
         return { ok: checks.every(c => c.ok), checks, mockedAnalysisRequests: calls, mockedImageRequests: generations, externalRequests: 0 };
     } finally { compact.removeCompactBar(); scanner.stopPolling(); bridge.stopFrontendBridge(); }
 }

@@ -91,7 +91,7 @@ export function injectThemeStyle() {
     rules += '#sl_panel_body{background:radial-gradient(120% 90% at 85% 0%,rgba(127,176,105,0.12),transparent 55%)}'
     + '#sl_compact{background:linear-gradient(160deg,#ffffff,#f6f9ef)!important}';
   } else if (th === '云朵棉花猫') {
-    rules += '#sl_compact,#sl_panel_body>div{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}'
+    rules += '#sl_compact,#sl_panel_home>div{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}'
     + '#sl_panel_header{background:linear-gradient(120deg,rgba(124,140,248,0.14),rgba(255,255,255,0))!important}'
     + '#sl_panel{background:#eef1fd!important}';
   } else if (th === '焦糖布丁猫') {

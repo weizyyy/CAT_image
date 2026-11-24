@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
 import { initSettings, loadPreferences, saveSettings, settings } from '../modules/settings.js';
 import { galleryAdd, galleryList, galleryPrune, galleryRemove } from '../modules/gallery.js';
-import { archive, archiveFiles, archiveSaveError, loadArchive, saveArchive, sessionData, sessionKey } from '../modules/archive.js';
+import { archive, archiveFiles, archiveSaveError, flushArchive, loadArchive, saveArchive, sessionData, sessionKey } from '../modules/archive.js';
+import { deleteChatRoster } from '../modules/roster.js';
 
 test('the archive preserves complete snapshots through retries and loads the newest readable checkpoint', async () => {
     const files = new Map();
@@ -68,6 +69,40 @@ test('archive pruning follows complete filenames and never drops a different car
     assert.deepEqual(galleryList().flatMap(g => g.items.map(i => i.url)), ['/active.png']);
     assert.ok(sessionData(otherKey).gallery['/other.png']);
     globalThis.fetch = previousFetch;
+});
+
+test('deleting one historical roster persists without removing its image data or other chat rosters', async () => {
+    const context = { chatId: 'active', characterId: 0, characters: [{ avatar: 'card.png' }], getRequestHeaders: () => ({}) };
+    initSettings(() => context, {});
+    const savedFetch = fetch;
+    let checkpoint;
+    globalThis.fetch = async (url, options) => {
+        if (url !== '/api/files/upload') return new Response(null, { status: 404 });
+        checkpoint = JSON.parse(gunzipSync(Buffer.from(JSON.parse(options.body).data, 'base64')));
+        return new Response(null, { status: 200 });
+    };
+    try {
+        await loadArchive();
+        const current = sessionKey('card.png', 'active');
+        const historical = sessionKey('card.png', 'deleted');
+        const foreign = sessionKey('unrelated.png', 'deleted');
+        for (const key of [current, historical, foreign]) sessionData(key, true).roster.Alice = { anchor: 'eyes:green' };
+        const record = sessionData(historical);
+        record.wardrobe.coat = { detail: 'wool coat' };
+        record.gallery['/archive.png'] = { url: '/archive.png' };
+        record.images.slot = '/archive.png';
+        record.revisions.revision = { source: '[img:test]', messageId: '1', slots: [{ id: 'slot' }] };
+        const retained = structuredClone({ ...record, roster: {} });
+        assert.equal(deleteChatRoster(current), false);
+        assert.equal(deleteChatRoster(foreign), false);
+        assert.equal(deleteChatRoster(historical), true);
+        assert.equal(await flushArchive(), true);
+        assert.deepEqual(checkpoint.sessions[historical], retained);
+        assert.ok(checkpoint.sessions[current].roster.Alice);
+        assert.ok(checkpoint.sessions[foreign].roster.Alice);
+    } finally {
+        globalThis.fetch = savedFetch;
+    }
 });
 
 test('preferences write only to the host namespace and request a host save', () => {

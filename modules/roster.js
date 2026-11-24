@@ -510,6 +510,15 @@ export function deleteRosterPerson(chatId, key) {
     return true;
 }
 
+export function deleteChatRoster(chatId) {
+    const current = currentSession();
+    const session = sessionData(chatId);
+    if (chatId === current.key || !ownsSession(session, current.card) || !Object.keys(session.roster).length) return false;
+    session.roster = {};
+    void saveArchive();
+    return true;
+}
+
 export function copyRosterToCurrent(sourceId) {
     const current = currentSession();
     const sourceSession = sessionData(sourceId);

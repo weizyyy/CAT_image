@@ -429,10 +429,10 @@ test('chat filenames switch without normalization and roster copies can be edite
     } finally { ctx.openCharacterChat = oldOpen; }
 });
 
-test('the archive pins the current session and sorts historical titles descending before and after loading the host list', async () => {
-    const { createExpandedPanel } = await import('../modules/ui/panel.js');
+test('the archive sorts chat titles and can delete an orphaned roster without touching the other chats or gallery', async () => {
+    const { createExpandedPanel, popPage } = await import('../modules/ui/panel.js');
     const { renderArchivePage } = await import('../modules/ui/tabs.js');
-    const saved = { fetch, frame: globalThis.requestAnimationFrame };
+    const saved = { fetch, confirm: globalThis.confirm };
     const olderFile = 'Tester - 2026-11-12 @ T10:00:00';
     const historyFile = 'Tester - 2026-11-16 @ T08:00:00';
     const historyKey = keyFor(historyFile);
@@ -440,11 +440,11 @@ test('the archive pins the current session and sorts historical titles descendin
     let returnChatList;
     try {
         sessionData(keyFor('test'), true).roster.Alice = { key: 'Alice', name: 'Alice', anchor: 'eyes:green', portraitViews: { front: '/existing.png' } };
-        sessionData(keyFor(olderFile), true);
+        const orphan = sessionData(keyFor(olderFile), true);
+        orphan.roster.June = { key: 'June', name: 'June', anchor: 'eyes:hazel' };
+        orphan.gallery['/orphan.png'] = { url: '/orphan.png' };
         sessionData(historyKey, true).roster.Robin = { key: 'Robin', name: 'Robin', anchor: 'eyes:blue' };
         sessionData(sessionKey('other.png', 'test'), true).roster.Hidden = { key: 'Hidden', name: 'Hidden' };
-        const before = JSON.stringify(archive.sessions);
-        globalThis.requestAnimationFrame = callback => callback();
         fetch = async url => {
             if (url !== '/api/characters/chats') return { ok: false, status: 404 };
             await new Promise(resolve => { returnChatList = resolve; });
@@ -453,9 +453,13 @@ test('the archive pins the current session and sorts historical titles descendin
         createExpandedPanel();
         renderArchivePage();
         const page = document.querySelector('.sl_page_body');
-        assert.equal(page.querySelector(':scope > details').dataset.chat, keyFor('test'));
-        assert.equal(page.querySelector(':scope > details[open] .sl_pcard').dataset.char, 'Alice');
-        const other = () => page.querySelector(':scope > details.sl_other_chats');
+        const list = page.querySelector('[data-roster-context]');
+        const current = list.querySelector(':scope > details');
+        assert.equal(current.dataset.chat, keyFor('test'));
+        assert.equal(current.open, true);
+        assert.equal(current.querySelector('.sl_pcard').dataset.char, 'Alice');
+        assert.equal(current.querySelector('.sl_roster_delete'), null);
+        const other = () => page.querySelector('details.sl_other_chats');
         const historicalKeys = () => [...other().querySelectorAll(':scope > details[data-chat]')].map(node => node.dataset.chat);
         assert.equal(other().open, false);
         assert.equal(other().querySelector(':scope > summary').textContent, '其他');
@@ -468,27 +472,41 @@ test('the archive pins the current session and sorts historical titles descendin
         await waitUntil(() => other().textContent.includes(emptyFile));
         assert.equal(other().open, true);
         assert.deepEqual(historicalKeys(), [keyFor(emptyFile), historyKey, keyFor(olderFile)]);
-        assert.ok(history().querySelector('.sl_chat_switch'));
+        assert.deepEqual([...history().querySelectorAll('.sl_chat_switch,.sl_roster_copy,.sl_roster_delete')].map(b => b.textContent),
+            ['切换聊天', '复制档案到当前聊天', '删除本档案']);
+        const older = [...other().querySelectorAll('details[data-chat]')].find(node => node.dataset.chat === keyFor(olderFile));
+        older.querySelector('summary').click();
+        const deleteButton = older.querySelector('.sl_roster_delete');
+        globalThis.confirm = () => false;
+        deleteButton.click();
+        assert.ok(orphan.roster.June);
+        globalThis.confirm = message => { assert.ok(message.includes(olderFile)); return true; };
+        deleteButton.click();
+        await waitUntil(() => !historicalKeys().includes(keyFor(olderFile)));
+        assert.equal(other().open, true);
+        assert.deepEqual(orphan.roster, {});
+        assert.ok(orphan.gallery['/orphan.png']);
+        assert.equal(archive.sessions[keyFor('test')].roster.Alice.anchor, 'eyes:green');
+        const before = JSON.stringify(archive.sessions);
         history().querySelector('summary').click();
         history().querySelector('.sl_pcard').click();
         assert.equal(page.querySelector('.sl_anchor_input').value, 'eyes:blue');
         assert.equal(JSON.stringify(archive.sessions), before);
         assert.equal(page.textContent.includes("Hidden"), false);
     } finally {
-        jQuery('#sl_panel_body').empty();
-        fetch = saved.fetch; globalThis.requestAnimationFrame = saved.frame;
+        popPage();
+        fetch = saved.fetch; globalThis.confirm = saved.confirm;
     }
 });
 
 test('the gallery folds historical chats under Other and still lets users select and clear their cache source', async () => {
-    const { createExpandedPanel } = await import('../modules/ui/panel.js');
+    const { createExpandedPanel, popPage } = await import('../modules/ui/panel.js');
     const { renderGalleryPage } = await import('../modules/ui/tabs.js');
     const { galleryCacheSource } = await import('../modules/gallery.js');
-    const saved = { fetch, frame: globalThis.requestAnimationFrame };
+    const savedFetch = fetch;
     const historyFile = 'Gallery branch';
     const historyKey = keyFor(historyFile);
     try {
-        globalThis.requestAnimationFrame = callback => callback();
         fetch = async () => ({ ok: true, json: async () => [{ file_name: historyFile + '.jsonl' }] });
         galleryAdd('/current.png');
         galleryAdd('/historical.png', { chatKey: historyKey });
@@ -516,23 +534,22 @@ test('the gallery folds historical chats under Other and still lets users select
         assert.equal(galleryCacheSource(), '');
         assert.equal(other().open, true);
     } finally {
-        jQuery('#sl_panel_body').empty();
-        fetch = saved.fetch; globalThis.requestAnimationFrame = saved.frame;
+        popPage();
+        fetch = savedFetch;
     }
 });
 
 test('the reading theme recolors complete cards and newly generated cards use matching secondary actions', async () => {
-    const { createExpandedPanel } = await import('../modules/ui/panel.js');
+    const { createExpandedPanel, popPage } = await import('../modules/ui/panel.js');
     const { renderThemePage } = await import('../modules/ui/tabs.js');
     const { renderEnhancedLite, setEnqueueGen } = await import('../modules/render.js');
     const { refreshTextThemes } = await import('../modules/ui/theme.js');
     const { enqueueGen } = await import('../modules/queue.js');
-    const saved = { fetch, theme: settings.enhancedTheme, frame: globalThis.requestAnimationFrame };
+    const saved = { fetch, theme: settings.enhancedTheme };
     const frame = document.createElement('iframe');
     document.body.append(frame);
     try {
         settings.enhancedTheme = '紧凑模式';
-        globalThis.requestAnimationFrame = callback => callback();
         createExpandedPanel();
         renderThemePage();
         const picker = document.querySelector('#sl_text_theme');
@@ -589,11 +606,10 @@ test('the reading theme recolors complete cards and newly generated cards use ma
         assertGenerated(frame.contentDocument.querySelector('.sl_img_block'));
     } finally {
         frame.remove();
-        jQuery('#sl_panel_body').empty();
+        popPage();
         settings.enhancedTheme = saved.theme;
         refreshTextThemes();
         fetch = saved.fetch;
-        globalThis.requestAnimationFrame = saved.frame;
     }
 });
 

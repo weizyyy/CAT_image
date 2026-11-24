@@ -9,7 +9,7 @@ import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
 import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, queueMessageFloors, scanAllMsgs } from '../scanner.js';
 import { getQueueLength, enqueueTask } from '../queue.js';
 import { cleanPromptForMode } from '../text-utils.js';
-import { rosterEntries, rosterForChat, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry, getEnglishAnchor, editRosterAnchor, deleteRosterPerson, copyRosterToCurrent } from '../roster.js';
+import { rosterEntries, rosterForChat, atomValues, atomCount, getAtomAnchor, getPortraitPrompt, portraitPromptsMode, isUnderageEntry, getEnglishAnchor, editRosterAnchor, deleteRosterPerson, deleteChatRoster, copyRosterToCurrent } from '../roster.js';
 import { describeCharacterChats, listCharacterChats, openCharacterSession } from '../chat-sessions.js';
 import { archiveSaveError, currentCard, flushArchive, getCharacterName, getChatId, saveArchive } from '../archive.js';
 import { composeFinalPrompt } from '../comfyui.js';
@@ -35,8 +35,7 @@ function refreshHomeStatus(body) {
 }
 
 export function renderHomeTab() {
-  var body = jQuery('#sl_panel_body'); if (!body.length) return;
-  body.find('.sl-page').remove();
+  var body = jQuery('#sl_panel_home'); if (!body.length) return;
   var cn = getCharacterName() || '未选择角色', ql = getQueueLength(),
     ha = !!(settings.auxUrl && settings.auxModel), hc = !!settings.cUrl, h = '';
   // 顶部：状态猫大卡
@@ -317,9 +316,12 @@ function collectArchivePeople(chatId = getChatId()) {
 }
 
 const chatViewTokens = new WeakMap();
-const chatSummaryStyle = 'cursor:pointer;font-size:12px;line-height:1.45;overflow-wrap:anywhere;';
+const chatGroupStyle = 'margin-top:14px;';
+const chatSummaryStyle = 'cursor:pointer;font-size:12px;line-height:1.45;overflow-wrap:anywhere;margin-bottom:6px;';
+const chatActionsStyle = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;';
+const rosterButtonStyle = 'font-size:10px;padding:6px 12px;box-shadow:none;';
 
-function renderChatGroups(body, groups, summaryStyle, groupStyle = '') {
+function renderChatGroups(body, groups) {
   let current = '', other = '';
   for (const group of groups) {
     if (group.current) current += group.html;
@@ -329,8 +331,8 @@ function renderChatGroups(body, groups, summaryStyle, groupStyle = '') {
   const chatId = getChatId(), previous = body.find('details.sl_other_chats')[0];
   const open = previous?.dataset.chatContext === chatId && previous.open;
   return current + '<details class="sl_other_chats" data-chat-context="' + escAttr(chatId) +
-    '" style="' + groupStyle + '"' + (open ? ' open' : '') + '><summary style="' +
-    summaryStyle + '">其他</summary>' + other + '</details>';
+    '" style="' + chatGroupStyle + '"' + (open ? ' open' : '') + '><summary style="' +
+    chatSummaryStyle + '">其他</summary>' + other + '</details>';
 }
 
 function bindChatSwitch(body, sessions, render) {
@@ -353,7 +355,7 @@ function bindChatSwitch(body, sessions, render) {
 
 function chatSwitchButton(session) {
   return session.file && !session.current
-    ? '<button type="button" class="sl_chat_switch" data-chat="' + escAttr(session.key) + '" style="' + btnSm() + '">切换聊天</button>'
+    ? '<button type="button" class="sl_chat_switch" data-chat="' + escAttr(session.key) + '" style="' + btnSm(rosterButtonStyle) + '">切换聊天</button>'
     : '';
 }
 
@@ -383,16 +385,27 @@ function renderArchiveInto(body, sessions) {
     });
     return;
   }
+  const context = getChatId();
+  const previousList = body.find('[data-roster-context]')[0];
+  const openChats = new Set(previousList?.dataset.rosterContext === context
+    ? [...previousList.querySelectorAll('details[data-chat][open]')].map(details => details.dataset.chat) : []);
   const sortedSessions = [...sessions].sort((a, b) => b.label.localeCompare(a.label, 'zh'));
-  const groups = sortedSessions.map(session => {
+  const groups = sortedSessions.flatMap(session => {
     const people = collectArchivePeople(session.key);
-    let h = '<details style="' + card() + '" data-chat="' + escAttr(session.key) + '"' + (session.current ? ' open' : '') + '>';
-    h += '<summary style="' + chatSummaryStyle + 'padding:8px;">' + esc(session.label) + ' · ' + people.length + ' 人' +
+    if (!session.current && !session.file && !people.length) return [];
+    const key = escAttr(session.key);
+    let h = '<details style="' + chatGroupStyle + '" data-chat="' + key + '"' + (session.current || openChats.has(session.key) ? ' open' : '') + '>';
+    h += '<summary style="' + chatSummaryStyle + '">' + esc(session.label) + ' · ' + people.length + ' 人' +
         (session.current ? ' · 当前聊天' : '') + '</summary>';
-    h += chatSwitchButton(session);
-    if (!session.current && people.length) h += '<button type="button" class="sl_roster_copy" data-chat="' + escAttr(session.key) +
-        '" style="' + btnSm() + '">复制档案到当前聊天</button>';
-    if (!people.length) h += empty('此聊天暂无人物档案', '🐾');
+    if (!session.current) {
+      h += '<div style="' + chatActionsStyle + '">' + chatSwitchButton(session);
+      if (people.length) {
+        h += '<button type="button" class="sl_roster_copy" data-chat="' + key + '" style="' + btnSm(rosterButtonStyle) + '">复制档案到当前聊天</button>';
+        h += '<button type="button" class="sl_roster_delete" data-chat="' + key + '" style="' + btnDanger(rosterButtonStyle) + '">删除本档案</button>';
+      }
+      h += '</div>';
+    }
+    if (!people.length) h += '<div style="font-size:11px;color:' + CAT.sub + ';">此聊天暂无人物档案</div>';
     // 人物卡片：点击查看该聊天中的完整档案。
     for (const ppl of people) {
       var ck = ppl.key, purl = getPortraitUrl(ppl.ent);
@@ -408,11 +421,12 @@ function renderArchiveInto(body, sessions) {
       h += '<div style="color:' + CAT.mute + ';font-size:15px;padding-right:2px;">›</div>';
       h += '</div></div>';
     }
-    return { current: session.current, html: h + '</details>' };
+    return [{ current: session.current, html: h + '</details>' }];
   });
   let h = archiveSaveNotice();
-  h += '<div style="' + card() + ';padding:11px 14px;margin-bottom:10px;"><span style="font-weight:700;font-size:13.5px;color:' + CAT.text + ';">🐾 ' + esc(name) + '</span></div>';
-  h += renderChatGroups(body, groups, card('padding:24px;') + chatSummaryStyle);
+  h += '<div data-roster-context="' + escAttr(context) + '" style="' + card('padding:12px 14px;') + '">';
+  h += '<div style="font-weight:700;font-size:13px;color:' + CAT.text + ';">🐾 ' + esc(name) + '</div>';
+  h += renderChatGroups(body, groups) + '</div>';
   body.html(h); bindArchiveEvents(body);
   bindArchiveSave(body, renderArchiveInto);
   bindChatSwitch(body, sessions, renderArchiveInto);
@@ -420,6 +434,16 @@ function renderArchiveInto(body, sessions) {
     const count = copyRosterToCurrent(this.dataset.chat);
     if (await flushArchive()) toast('info', count ? '已复制 ' + count + ' 份档案' : '当前聊天已有这些人物');
     renderArchiveInto(body, sessions);
+  });
+  body.off('click.slRosterDelete', '.sl_roster_delete').on('click.slRosterDelete', '.sl_roster_delete', async function () {
+    const session = sessions.find(item => item.key === this.dataset.chat);
+    if (!session || getChatId() !== context || session.current) return;
+    if (!confirm('删除「' + session.label + '」的全部人物档案？')) return;
+    if (!deleteChatRoster(session.key)) return;
+    this.disabled = true;
+    const token = chatViewTokens.get(body[0]);
+    if (await flushArchive()) toast('success', '已删除本档案');
+    if (body[0].isConnected && getChatId() === context && chatViewTokens.get(body[0]) === token) renderArchiveInto(body, sessions);
   });
 }
 
@@ -727,7 +751,7 @@ function renderGalleryInto(body, sessions) {
   var list = [], total = 0;
   try { list = galleryList(); } catch (e) {}
   for (var i = 0; i < list.length; i++) total += list[i].items.length;
-  var h = '<div style="' + card() + ';padding:12px 14px;">';
+  var h = '<div style="' + card('padding:12px 14px;') + '">';
   h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
   h += '<span style="flex:1;font-size:11px;color:' + CAT.sub + ';">' + total + ' 张 · ' + list.length + ' 场聊天</span>';
   h += '<button id="sl_gal_prune" style="' + btnSm() + 'font-size:10px;padding:6px 12px;">清理已删聊天</button>';
@@ -738,12 +762,11 @@ function renderGalleryInto(body, sessions) {
   if (!total) {
     h += empty('还没有出过图，出图后会自动进这里', '🖼️');
   } else {
-    const groupStyle = 'margin-top:14px;', summaryStyle = chatSummaryStyle + 'margin-bottom:6px;';
     const groups = list.map(grp => {
       const session = sessionByKey.get(grp.chatKey);
-      let h = '<details style="' + groupStyle + '"' + (grp.current || grp.chatKey === source ? ' open' : '') + '>';
-      h += '<summary style="' + summaryStyle + '">' + esc(session?.label || grp.label) + '</summary>';
-      h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">';
+      let h = '<details style="' + chatGroupStyle + '"' + (grp.current || grp.chatKey === source ? ' open' : '') + '>';
+      h += '<summary style="' + chatSummaryStyle + '">' + esc(session?.label || grp.label) + '</summary>';
+      h += '<div style="' + chatActionsStyle + '">';
       if (!grp.current && grp.selectable) {
         const selected = grp.chatKey === source;
         h += '<button type="button" class="sl_gallery_source" data-chat="' + escAttr(grp.chatKey) +
@@ -766,7 +789,7 @@ function renderGalleryInto(body, sessions) {
       }
       return { current: grp.current, html: h + '</div></details>' };
     });
-    h += renderChatGroups(body, groups, summaryStyle, groupStyle);
+    h += renderChatGroups(body, groups);
   }
   h += '</div>';
   body.html(archiveSaveNotice() + h);
