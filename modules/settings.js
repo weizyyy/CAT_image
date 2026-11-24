@@ -40,7 +40,6 @@ export function getDefaults() {
         mossHeight: defaultMossCanvas.height,
         uiTheme: '雪白猫',
         debugMode: false,
-        historyRounds: 5,
         storyMode: 'narrative',
         animeArtist: '',
         workflows: {},

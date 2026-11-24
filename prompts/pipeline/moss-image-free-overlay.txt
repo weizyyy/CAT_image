@@ -13,27 +13,44 @@
 | 内容 | 用什么写 |
 |---|---|
 | 眼睛 / 脸型 / 发型 / 年龄 / 可见体型 | 对应 `character.tags`；精确绑定到同一个人 |
-| 衣饰 / 材质 / 可见穿着状态 | 对应 `character.tags`；动作改变的细节可写进同一项 caption |
+| 造型库的衣饰 / 发型 / 鞋袜 / 配饰 / 妆容 | 固定特征拆入穿戴者的 `character.tags`；本轮可见的穿戴状态放同一项 caption |
 | 表情 / 视线 / 手势 / 光影 / 气氛 | 自然语言；全局写人与物的相对关系，局部交代接触点 |
 | 景别 / 机位 / 景深 | 用可见的镜头描述或短语；`bbox` 写主体占幅与具体位置 |
 | 关键道具、场所标志与指定文字 | `object` 或 `text` 条目，其他陈设放在全局说明 |
 
 ## 书写规则
 
-1. `tags` 取简短、具体的英文特征，每项描述一个特征。优先常用 Danbooru 标签，细节用自然短语补足。顺序为年龄与可见身份 → 五官和发型 → 入镜轮廓 → 衣饰和材质 → 姿势。保持给定年龄与辨识特征，不写分类前缀、权重或通用质量标签。
-2. 本轮要点写出的动作、服装状态和表情写进正确的区域。例如袖子卷起可用 `rolled sleeves`；手指怎么按住物件，用 caption 交代具体位置和方向。全局句写目光、事件、明暗和氛围，避免一段话把每个人的标签重新念一遍。
+1. `tags` 取简短、具体的英文特征，每项描述一个特征。优先能准确表达原值的 Danbooru 标签，词表 `atomic-vocab.txt` 是参考；缺少对应词时用自然短语补足。顺序为美学基调 → 年龄与可见身份 → 五官和发型 → 入镜轮廓 → 衣饰和材质 → 姿势。不写分类前缀、权重或通用质量标签。
+2. 局部 `caption` 写姿态、朝向、视线、穿戴变化、手的运动与接触点。全局句写目光交汇、事件、明暗和氛围，避免一段话把每个人的标签重新念一遍。
 3. **画风未指定时**，省略所有字段中的风格词与风格色板；没有其他内容时省略 `summary.meta` 和 `summary.palette`。画面美感来自人物占幅、视觉重心和现场光线。可以写 `cool light from the window` 或 `olive cotton jacket`。勿自行加动漫、摄影、赛璐璐、油画、写实等媒介或技法词，勿把“Galgame CG”当作画风词写进 JSON。若本轮明确给出风格要求，沿用给出的措辞。
-4. 身份特征跨图尽量保持原词。按景别留下看得见的部位，近景重脸、肩和手势，腰部以上不带下半身。多人各占一项，分别写清发色、衣物、位置和方向；同一动作的主次关系在全局段说明。
+4. 先按景别裁剪，再分主体详略。近景重脸、肩颈、手势与领口，中景写躯干轮廓、衣着和动作，全景才写完整体型与鞋袜。主要人物补全入镜特征；次要人物写足辨识所需的年龄、衣着和体态。多人各占一项，同一动作的主次关系在全局段说明。
+
+## 档案锚点 → character.tags
+
+- **英文权威锚点**取实际入镜的值去掉维度名前缀，逐项放进人物自己的 `tags`。比如 `face_shape:square face` 与 `iris:brown eyes` → `["square face","brown eyes"]`。可见的痣、疤痕和异色瞳写全位置与左右，其他图仍用同一组词。尤其保留给定的年龄数值、年龄段、族裔及能辨认的身形。
+- **仅有中文原始锚点**时，按共用规则具象化为英文特征并用于本帧；建档和回传走共有规范。人物名、原始字段名和造型索引只用于匹配，不进入生图 JSON。
+- **皮相三个来源分开。** `aura` 取能画出来的人物调性，可以落实为站姿、神情或视线，由该人的标签或 `caption` 表达；已有 `skin_tone`、`skin_texture` 的可见值做稳定标签；红晕、汗、湿痕和亮面反光按本轮要点和光源写。避免用 `beautiful face` 或一套妆感替代具体五官和肤质，也不因气质标签擅自指定渲染风格。
+
+## 造型库 detail → 穿戴者的 tags
+
+- 【造型库】已解析 detail 的**入镜值逐项复用**，跨语种只等义译入本张图。按穿戴者与层次拆分衣服、发型、鞋袜、配饰和妆容，保留同一件造型的颜色、材质、剪裁、纹样和局部细节。条目不合成泛称，也不当作无主的场景词。例如 `blue cotton shirt, narrow stand collar, pearl buttons` → `["blue cotton shirt","narrow stand collar","pearl buttons"]`。
+- 待具象化条目按共用造型规则完成，确定的入镜特征写入当前人物项。未入镜的设计留在库中，不能因为镜头只到腰部就补画裤脚或鞋子。衣饰穿在身上时归在人物框；单独摆放且有位置意义时用 `object`。
+- **穿戴变化属于本帧。** 衣料材质、衣领版型、扣子等固定特征照用；卷袖、纽扣解开、发带松动和雨水打湿，写进穿戴者的 `caption`，允许用一项简短英语标签补充。若本帧明确改了穿法、换了衣物或改了发型，画当前状态，其他相容的细节照用，临时变化不写回固定造型。
+
+## 动态要点与事实 → 同帧 caption
+
+- 从本轮要点提取可见的动作、表情、临时衣发状态和光线变化。用动词和接触关系写清楚哪只手压住哪里、目光朝向谁、重心靠在何处；场景全局交代方向、距离和遮挡。种子用来选取体态和神情，不复制抽象设定或叙事原文。
+- 本轮入镜的 `事实:` 项按共用事实规则保留所指和数字，在相关人物或物件的 `caption` 用英文写清结果，避免把事实省成模糊状态。文字条目只描述画面实际要印出的字。地点给出能把场景认出来的实物线索。
 
 ## 示例（两种构图，坐标按 1536×864 示范）
 
 **示例 A · 略低机位 · 近景突出相互视线与伸手动作**
 
-{"summary":{"canvas":"single","caption":"From the eye level of a person standing one stair below, a station attendant fills the right two thirds and leans toward the viewer. Their hand reaches toward the lower center, holding a folded ticket. A lit arch occupies the far left, and the light falls along the edge of the attendant's coat."},"items":[{"label":"object","caption":"The station arch at the end of the steps, behind the attendant.","bbox":[-401,-734,380,-319]},{"label":"character","caption":"The attendant looks down toward the recipient with a questioning expression and offers the folded ticket between the right thumb and forefinger.","tags":["31 years old","oval face","hazel eyes","short auburn hair","green wool coat","rolled sleeves"],"bbox":[-386,-255,432,681]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+{"summary":{"canvas":"single","caption":"From the eye level of a person standing one stair below, a station attendant fills the right two thirds and leans toward the viewer. Their hand reaches toward the lower center, holding a folded ticket. A lit arch occupies the far left, and the light falls along the edge of the attendant's coat."},"items":[{"label":"object","caption":"The station arch at the end of the steps, behind the attendant.","bbox":[-401,-734,380,-319]},{"label":"character","caption":"The attendant looks down toward the recipient with a questioning expression and offers the folded ticket between the right thumb and forefinger. The left cuff is damp where it brushes the stair rail.","tags":["31 years old","oval face","hazel eyes","small scar above the left eyebrow","short auburn hair","green wool coat","double-breasted cut","dark horn buttons"],"bbox":[-386,-255,432,681]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
 
 **示例 B · 平视中景 · 双人围绕桌上的地图形成焦点**
 
-{"summary":{"canvas":"single","caption":"In an eye-level waist-up view, a navigator on the left slides a map toward an engineer on the right. Both faces stay visible with the map low between them. A window in the rear lights the table from the left, and the room beyond the table remains dim."},"items":[{"label":"character","caption":"The navigator leans forward from the left and presses her right palm against the near corner of the map.","tags":["38 years old","square face","black braided hair","brown eyes","blue cotton shirt"],"bbox":[-378,-658,432,35]},{"label":"character","caption":"The engineer is turned toward the navigator, with his gaze down and his left arm resting on the table.","tags":["52 years old","wide face","gray hair","short beard","rust brown work jacket"],"bbox":[-326,112,432,677]},{"label":"object","caption":"An unfolded map on the table between the two people, its near corner under the navigator's palm.","bbox":[174,-58,397,236]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+{"summary":{"canvas":"single","caption":"In an eye-level waist-up view, a navigator on the left slides a map toward an engineer on the right. Both faces stay visible with the map low between them. A window in the rear lights the table from the left, and the room beyond the table remains dim."},"items":[{"label":"character","caption":"The navigator leans forward from the left and presses her right palm against the near corner of the map. Her shirt cuff is unfastened and drapes over the wrist.","tags":["38 years old","square face","black braided hair","brown eyes","blue cotton shirt","narrow stand collar","pearl buttons"],"bbox":[-378,-658,432,35]},{"label":"character","caption":"The engineer turns toward the navigator with his gaze lowered, resting his left forearm beside the map.","tags":["52 years old","wide face","gray hair","short beard","broad shoulders","rust brown work jacket","corduroy collar","square chest pocket"],"bbox":[-326,112,432,677]},{"label":"object","caption":"An unfolded map on the table between the two people, its near corner under the navigator's palm.","bbox":[174,-58,397,236]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
 
 ## 场景与构图约束
 
@@ -48,3 +65,4 @@
 3. 每人的可见年龄、外貌和服饰是否留在自己的框里？有人物或手势被重复拆框吗？
 4. 光影、景别和位置是否具体？画风未指定时，有没有擅自加入媒介、技法、风格标签或预设色板？
 5. 可见文字是否照原文填写，局部与全局的遮挡、视线和动作是否一致？
+6. 固定造型的入镜项是否按目标语种准确留在正确人物的标签里？本帧的动态衣发、动作和事实是否各自有明确落点？

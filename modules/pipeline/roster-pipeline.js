@@ -207,7 +207,7 @@ function buildPurgeMessages(pipeMode) {
 function buildRosterUserContent(placeholders, wardrobeInfo, mode, canvas) {
     var lines = [];
     const moss = isMossImageMode(mode);
-    lines.push('【任务】为每个 [img:] 占位符输出 1 条提示词，按【占位符】编号一一对应。人物外貌必须引用【人物档案】，禁止用名字代替外貌。禁止偷懒：每一幅图都要写完整详情（人物当前状态+衣着发型+表情+动作+场景+光影），不允许省略/概括/一句话带过。');
+    lines.push('【任务】只处理本请求的一个占位符。按当前模式写出本图的入镜人物、造型、动作、场景和光影。');
     if (moss) lines.push('【布局画布】实际宽 ' + canvas.width + ' px，高 ' + canvas.height + ' px。以画布中心为原点，x 范围 ±' +
         canvas.width / 2 + '、y 范围 ±' + canvas.height / 2 + '；bbox 顺序 [y_min,x_min,y_max,x_max]。');
     // Krea 2 风格锁定 —— 风格句由插件统一前置（跨轮稳定），这里告诉模型"别再自己写媒介"
@@ -215,83 +215,49 @@ function buildRosterUserContent(placeholders, wardrobeInfo, mode, canvas) {
         var _kstyle = krea2StyleById(settings.krea2Style);
         if (_kstyle && _kstyle.prompt) {
             lines.push('【风格·已由插件锁定】' + _kstyle.prompt);
-            lines.push('· 上句会由插件加在**每张提示词最前面**，本场所有图共用 —— 这就是本场的媒介 / 质感 / 画风。');
-            lines.push('· 你只写：景别+机位、人物与外貌、衣着、动作表情、场景与光。⛔ **不要另写媒介与画风词**（photograph / anime / oil painting / cinematic / 3D render 等）——会和锁定的风格打架；构图词（close-up / waist-up / from below）照写。');
+            lines.push('· 插件会在生图前拼接此预设。按 Krea 2 锁定画风时的写法交稿。');
         } else {
-            lines.push('【风格】未锁定：你必须自己写清媒介（photograph / anime illustration / digital painting / 3D render…），并在本轮所有图里用**同一套词**。');
+            lines.push('【风格】未锁定：依本图要点写媒介与质感。');
         }
     }
-    // [Fix] 格式硬约束（格式缺失=整轮作废，是此前 0 条提示词/串味的主因）
-    lines.push('【输出格式·必须严格遵守·PROFILE 与 IMAGES 漏一段整轮作废】');
-    // 模型会把 workflow 的「对每一个占位符依次执行」理解成"每个占位符各输出一份三段"，
-    // 于是 3 个占位符 → 3 个 PROFILE/IMAGES/END（实测 14707 字被误判 short）。
-    // 解析器已经能合并多段；这里再把源头堵上，省掉重复输出的 token。
-    lines.push('⚠️ **整轮只输出一次三段**：占位符有 N 个，就在**同一个** `---IMAGES---` 段里写 N 行。禁止"每个占位符各写一份 PROFILE/IMAGES/END"。');
-    const imageLine = moss ? '每条占位符输出一个紧凑的 MOSS-Image Layout JSON 对象，使用该模式规定的字段和坐标。'
-        : '第1条纯文本提示词（禁止 [image:]、禁止【提示词】包裹、禁止解释性文字）\n第2条……';
-    lines.push('---PROFILE---\n{人物建档 JSON，无更新写{}}---END---\n\n[---WARDROBE---\n{造型具象化 JSON}---END---  ← **仅当【造型库】有「待具象化」条目时才输出这一段；没有就整段省略**]\n\n---IMAGES---\n' + imageLine +
-        '\n（条数=占位符数；零图写：（无））\n---END---');
-    lines.push('只输出以上段落，禁止任何其他内容：禁止图块、禁止复述正文/占位符原文、禁止聊天口吻、禁止 Markdown 代码块。');
-    lines.push('');
-    lines.push('【事实段·必须由你写进提示词】`事实:` 段里的每一条，都是**前提**不是描写，插件**不会**替你补写。');
-    lines.push(moss ? '  · 将原词与可见后果写进相关人物或物件的 caption。'
-        : '  · ✅ 你要做的：把它**原词**写进提示词的**主体句（②）**，前 1/3 内、不晚于第三句（例：`她，怀孕16周的孕妇，白衬衫被胸口与隆起的小腹撑起`）；');
-    lines.push('  · ✅ 允许同义同指（`怀孕16周` ≈ `身孕四个月`），但**所指不能变**；');
-    lines.push('  · ⛔ 不许换成体征或模糊词（「怀孕16周」→「小腹微隆」、「截肢」→「手臂有伤」、「化疗」→「气色不好」）；⛔ 不许省略、不许否认；');
-    lines.push('  · ✅ 同时写它的**可见后果**：孕肚的弧度与位置、空袖管怎么别进腰带、头巾的包法、义眼的反光 —— 二者不冲突；');
-    lines.push('  · 每条提示词交稿前，逐条对照该占位符的【事实】找原词，找不到就回去改（写进 `---CHECK---`）。');
-    lines.push('  · 提示词最前面那串事实是既定前提，你的描写必须能跟它同时成立。');
+    lines.push('【输出格式】按系统的「输出格式」交稿。IMAGES 只写' +
+        (moss ? '一个 MOSS-Image Layout JSON 对象。' : '本图的一条文本提示词。'));
     lines.push('');
     lines.push('【人物档案】（按本轮占位符注明的人物名字过滤，插件自动匹配——同名不同身份全部给出，由你按场景选用；写提示词必须引用外貌锚点，禁止只写名字）');
     var _phNames = [];
     for (var nI = 0; nI < placeholders.length; nI++) { for (var nJ = 0; nJ < placeholders[nI].personSegments.length; nJ++) { _phNames.push(placeholders[nI].personSegments[nJ].name); } }
-    var rosterTxt = rosterDataTextFor(_phNames);
+    var rosterTxt = rosterDataTextFor(_phNames, placeholders[0]?.seed);
     lines.push(rosterTxt || '（占位符未注明人物名或人物未建档；画师直接按【占位符】场景/要点描述画面，并可用 PROFILE 为新人物建档）');
     lines.push('');
     // 【造型库】—— 服装/发型/鞋袜/配饰/妆容。已解析的原样复用（零漂移），未命中的具象化后回传
     if (wardrobeInfo && wardrobeInfo.text) {
-        lines.push('【造型库】（主模型写了造型 key；你负责「原样复用」或「具象化」，规则见 wardrobe-vocab.txt / wardrobe-expand.txt）');
+        lines.push('【造型库】');
         lines.push(wardrobeInfo.text);
-        lines.push('· ✅ 已解析：入镜特征逐字复用，未入镜结构留在库中，不为展示整套造型改变景别');
-        lines.push('· ⚠️ 待具象化：按 wardrobe-vocab.txt 的维度逐项取词，写进提示词，并通过 ---WARDROBE--- 回传');
-        lines.push('· 造型保存固定结构，临时穿着状态取本轮要点；先按景别裁切，再按当前模型规则组织入镜特征。画外鞋脚等不进入本图提示词，不为展示整套造型拉远镜头，也不改写库内 detail');
-        lines.push('· 禁止把造型详情写进氛围段；禁止把「怎么穿」写进 ---WARDROBE--- 回传');
         lines.push('');
     }
 
-    // 【种子】—— 主模型给的是"取词方向"，精度由你按 roster/system.txt 的四步反推
-    var _seedLines = [];
-    for (var _sqi = 0; _sqi < placeholders.length; _sqi++) {
-        var _sdTxt = placeholders[_sqi].seed || '';
-        if (!_sdTxt) continue;
-        var _nmList = (placeholders[_sqi].personSegments || []).map(function (s) { return s.name; }).filter(Boolean).join('、');
-        _seedLines.push('  ' + (_sqi + 1) + '. ' + (_nmList ? _nmList + ' → ' : '') + _sdTxt);
-    }
-    if (_seedLines.length) {
-        lines.push('');
-        lines.push('【种子】（主模型给的**取词方向**：气质 / 调性 / 重心 / 反差 —— 按「种子 → 锚点反推」四步执行；⛔ **禁止把这行原文写进提示词**）');
-        lines.push(_seedLines.join('\n'));
-    }
-    lines.push('【占位符】（输出顺序必须与本列表一致）');
+    lines.push('【占位符】');
     if (placeholders.length) {
         for (var i = 0; i < placeholders.length; i++) {
             var ph = placeholders[i];
             lines.push((i + 1) + '. 场景：' + ph.scene);
             // 地点是**硬约束** —— 插件不给世界观，地点只能靠主模型这段字
-            if (ph.place) lines.push('   地点（**硬约束，必须体现**）：' + ph.place + ' —— 用本帧取景内可见的建筑、材质、陈设或光源线索体现地点，保留指定空间关系；不强求每类线索全部入镜，不添加不可见的温感，不为展示背景拉远主体。⛔ 不许替换成通用「室内/房间」或纯色背景');
+            if (ph.place) lines.push('   地点：' + ph.place);
             if (ph.personSegments && ph.personSegments.length) {
                 var ps = [];
                 for (var j = 0; j < ph.personSegments.length; j++) ps.push(ph.personSegments[j].name + (ph.personSegments[j].identity ? '（' + ph.personSegments[j].identity + '）' : ''));
                 lines.push('   人物：' + ps.join('、'));
             }
-            if (ph.seed) lines.push('   种子：' + ph.seed);
+            if (ph.seed) lines.push('   【种子】（本图取词方向）：' + ph.seed);
             if (ph.topic) lines.push('   要点：' + ph.topic.replace(/\n/g, '；'));
             // 这一条占位符里的状态事实（怀孕/绷带/纹身…）→ 点名要求出现事实词
-            if (ph.facts && ph.facts.length) lines.push('   事实（⛔ 必须原词写进本条提示词的主体句，不许省略/改写/换成体征；插件不会替你补）：' + ph.facts.join('；'));
-            // [Fix] 动态要素保真：酒馆AI写的本轮可变内容（衣着/发型/表情/光线/氛围/动作）逐项列出，
-            // 插件AI 必须逐项润色进提示词（这是评分重点）
-            var _dyn = extractDynamicBits((ph.scene || '') + ' ' + (ph.topic || '') + ' ' + (ph.personSegments || []).map(function (s) { return s.appearance || ''; }).join(' '));
-            if (_dyn.length) lines.push('   动态要素（必须逐项润色进提示词，禁止省略）：' + _dyn.join('、'));
+            if (ph.facts && ph.facts.length) lines.push('   事实：' + ph.facts.join('；'));
+            // 场景和要点已随请求发送。只补人物段里另行提供的可变信息。
+            for (const person of ph.personSegments || []) {
+                const cues = extractDynamicBits(person.appearance)
+                    .filter(cue => !ph.scene.includes(cue) && !ph.topic.includes(cue));
+                if (cues.length) lines.push('   人物段补充（' + person.name + '）：' + cues.join('、'));
+            }
         }
     }
     // [Fix] 占位符配图不发送【当前正文】：主模型已在占位符里写了画面要素（谁+动作+表情+可变衣着），
@@ -512,7 +478,7 @@ export function fillPlaceholders(bodyText, placeholders, prompts, mode = getActi
             slErr('⛔ 第' + phIdx + '个占位符没有提示词（模型漏回）→ 保留 [img:] 原文，不补写');
             return m;
         }
-        // 事实审计：只记录，不拦截 —— 「同义同指」代码判断不了（怀孕16周 → 身孕四个月 是合法的）
+        // 事实审计只检查字面命中；等义表达不会因此被拦截。
         try { _auditFacts(ph, prompt, phIdx); } catch (eAudit) {}
         // 英文模式：字面出现的事实原样保护，避免被中文清洗吃掉（机械替换，不做语义判断）
         try {
@@ -535,7 +501,7 @@ export function fillPlaceholders(bodyText, placeholders, prompts, mode = getActi
 }
 
 // 事实审计：只记录"给出的事实里，有几个在这条提示词里字面出现"
-// 刻意不拦截：合法同义改写（怀孕16周 → 身孕四个月）会被记成"未逐字出现"，需要人看图判断。
+// 等义翻译也可能记为未逐字出现。
 function _auditFacts(ph, prompt, idx) {
     var facts = (ph && ph.facts) || [];
     if (!facts.length) return;
@@ -581,7 +547,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
         if (nApplied) { void saveArchive(); slLog('占位符建档: ' + nApplied + ' 人'); }
 
         // 1.5 造型库：解析造型段 → 查库
-        // 已解析的（库里已有 detail）→ 交给插件AI 逐字复用；未命中的 → 交给它具象化并回传
+        // 已解析的 detail 与待具象化的 key 随单图请求发送。
         var _allStyleGroups = [];
         for (var _pi = 0; _pi < placeholders.length; _pi++) {
             var _sg = placeholders[_pi].styleGroups || [];
@@ -591,18 +557,6 @@ async function runSinglePipeline(bodyText, mesId, options) {
         if (_allStyleGroups.length) {
             wardrobeInfo = wardrobeDataTextFor(_allStyleGroups);
             slLog('造型库: 已解析 ' + wardrobeInfo.resolved.length + ' 条 / 待具象化 ' + wardrobeInfo.pending.length + ' 条');
-            // 把「已解析」按占位符挂上去，供 fillPlaceholders 兜底
-            for (var _pi2 = 0; _pi2 < placeholders.length; _pi2++) {
-                var _p = placeholders[_pi2];
-                _p._wardrobe = [];
-                var _g2 = _p.styleGroups || [];
-                for (var _gj = 0; _gj < _g2.length; _gj++) {
-                    for (var _rk = 0; _rk < wardrobeInfo.resolved.length; _rk++) {
-                        var _res = wardrobeInfo.resolved[_rk];
-                        if (_res.slot === _g2[_gj].slot && _g2[_gj].keys.indexOf(_res.query) >= 0) _p._wardrobe.push(_res);
-                    }
-                }
-            }
         }
 
         // 2. 调用插件AI
@@ -645,31 +599,23 @@ async function runSinglePipeline(bodyText, mesId, options) {
                 var _retryNote;
                 if (_fail === 'short') {
                     _retryNote = '【系统重试】你上一轮只输出了 ' + _gotN + ' 条提示词，' + _need + '。\n'
-                        + '请**只补齐缺失的那几条**（已给出的保持原样，不要改动），然后重新完整输出 ---PROFILE--- 与 ---IMAGES--- 两段'
-                        + '（IMAGES 必须正好 ' + expectN + ' 条，按占位符顺序）。';
+                        + '请补齐缺失的提示词，按「输出格式」重新交稿。';
                 } else if (_fail === 'noimage') {
-                    _retryNote = '【系统重试】你上一轮把 ---IMAGES--- 段写成了空的/（无），但本轮有 ' + expectN + ' 个占位符，必须对应 ' + expectN + ' 条提示词。\n'
-                        + '请按占位符顺序重新输出 ---PROFILE--- 与 ---IMAGES--- 两段（IMAGES 正好 ' + expectN + ' 条）。';
+                    _retryNote = '【系统重试】上一条的 IMAGES 为空。请补上本图的提示词，按「输出格式」重新交稿。';
                 } else if (_fail === 'noprofile') {
-                    _retryNote = '【系统重试】你这一轮**漏了 ---PROFILE--- 段**（只给了 IMAGES）。锚点与人物档案全靠这一段；'
-                        + '漏了它 = 这些人物之后每张图都要重新编一次脸。\n'
-                        + '请保留你上一轮的 ---IMAGES--- 内容，补出 ---PROFILE--- 段（{"persons":{…}}；每人必须带 anchor，zit 模式另带 anchor_zh），'
-                        + '然后重新完整输出 ---PROFILE--- 与 ---IMAGES--- 两段。';
+                    _retryNote = '【系统重试】上一条缺 PROFILE。需要更新人物时按档案规则填；无需更新写 {}。保留 IMAGES 内容，按「输出格式」重新交稿。';
                 } else if (_fail === 'truncated') {
-                    _retryNote = '【系统重试】上一条回复被长度限制截断。请重新完整输出本张图的 ---PROFILE--- 和 ---IMAGES---，只写本张图的一条完整提示词，不要接着写第2条。';
+                    _retryNote = '【系统重试】上一条回包被截断。按「输出格式」重新交稿，IMAGES 只写本张图的一条完整提示词。';
                 } else if (_fail === 'layoutformat') {
-                    _retryNote = '【系统重试】重新输出 PROFILE 和 IMAGES。IMAGES 须是一个原生 MOSS-Image Layout JSON 对象，含 summary、items、bbox_coord_space: "abs_centralized"、bbox_format: "yxyx"。每个元素需要 caption 及范围内的四个整数坐标；text 元素还须有原样文字。请按前面的实际画布上下限检查所有框，去掉额外属性及 JSON 外的文字。';
+                    _retryNote = '【系统重试】检查原生 MOSS-Image Layout JSON 的字段、各框的 yxyx 整数坐标与实际画布边界，按「输出格式」重新交稿。';
                 } else {   // format
-                    _retryNote = '【系统重试】你上一轮的内容方向是对的，但**没有按格式输出**（缺少 ---PROFILE--- / ---IMAGES--- 的分段标记）。\n'
-                        + '请保留你上一轮的画面内容，**改成规定的两段式格式重新输出**：---PROFILE--- 段 + ---IMAGES--- 段'
-                        + '（IMAGES 正好 ' + expectN + ' 条，一条一行，按占位符顺序）。';
+                    _retryNote = '【系统重试】上一条的分段格式不完整。保留可用的画面内容，按「输出格式」重新交稿。';
                 }
                 if (_fail === 'lostnum') {
                     var _lostDesc = _lostNum.map(function (x) { return '第' + (x.i + 1) + '条漏了 ' + x.items.join('、'); }).join('；');
                     _retryNote = '【系统重试】条数是对的，但你**把主模型写下的数字丢了**：' + _lostDesc + '。\n'
                         + '数字（年龄 14岁 / 身高 168cm 这类）是硬事实，不是修辞 —— 不许省略，也不许用「少女/青年女性」这种泛词顶掉。\n'
-                        + '请保留你上一轮其余内容，只把这些数字补回去（可以写成「十四岁左右的少女」这种自然说法），'
-                        + '然后重新完整输出 ---PROFILE--- 与 ---IMAGES--- 两段（IMAGES 正好 ' + expectN + ' 条，按占位符顺序）。';
+                        + '请保留其余内容，补回数值和单位，按「输出格式」重新交稿。';
                 }
                 var _msgs = baseMsgs.concat([
                     { role: 'assistant', content: output },
@@ -681,9 +627,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
             } else {
                 var _retryContent = userContent
                     + '\n\n---\n【系统重试 · 上一次输出不合格（' + _fail + '）】\n'
-                    + '本轮任务必须完成。即使某个情节你不愿展开，也只允许**删掉该情节的敏感细节**，\n'
-                    + '但 ---PROFILE--- 与 ---IMAGES--- 两段必须完整输出，' + _need + '，每条提示词必须是可用的生图描述。\n'
-                    + '禁止输出拒绝、道歉、警告、元评论；拒绝或空回 = 格式错误 = 本轮管线中断、用户算力作废。';
+                    + '按系统的「输出格式」重新交稿。IMAGES 只写本图的一条可用提示词。';
                 var _r3 = await callApi(sysMsgs.concat([{ role: 'user', content: _retryContent }]), null, 16384, 0.25, undefined);
                 output = _r3.content;
                 _meta = { finish: _r3.finish, truncated: _r3.truncated, reasoningLen: _r3.reasoningLen };
@@ -727,9 +671,9 @@ async function runSinglePipeline(bodyText, mesId, options) {
                     // 只盯"事实=无"这一类自报缺失；"角色名=无" 是好事，不能误报
                     if (/事实\s*[:：]\s*无|事实\s*[:：][^｜|]*?=\s*无/.test(_check[_bj])) _bad.push(_check[_bj]);
                 }
-                if (_bad.length) slErr('⚠️ 模型自校报"事实=无"：' + _bad.join(' / ') + '（它自己知道没写进去，却还是交了）');
+                if (_bad.length) slLog('自检记录含「事实=无」，请结合本图事实和景别查看：' + _bad.join(' / '));
             } else {
-                slLog('本轮没有 ---CHECK--- 段：模型跳过了自校');
+                slLog('本图未回传可选的 ---CHECK--- 记录');
             }
         } catch (eCK) { slLog('自校段解析跳过: ' + eCK.message); }
 

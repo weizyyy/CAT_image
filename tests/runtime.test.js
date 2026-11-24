@@ -956,7 +956,7 @@ test('assembled requests keep shared policies, model overlays and per-call recor
     const overlayPaths = { zit: 'zit', anima: 'anima', anime: 'anime', anime_tag: 'anime-tag', krea2: 'krea2', ...mossOverlays };
     const anchor = 'race:LayerTestOrigin | age:forty-two | nose:LayerTestNose | skin_tone:LayerTestTone';
     const detail = 'LayerTestBlue cotton jacket, LayerTestRound collar';
-    const source = '[img:递出包裹|人物:LayerActor（层次测试）|造型:服装=LayerOutfit|要点:腰部以上，左手托住包裹]';
+    const source = 'OUTSIDE_PLACEHOLDER [img:递出包裹|人物:LayerActor（层次测试）：右手戴着护腕|种子:ONE_FRAME_SEED|造型:服装=LayerOutfit；配饰=PendingOutfit|要点:腰部以上，左手托住包裹|事实:左腕装有护具]';
     let request;
     try {
         settings.modelType = 'moss_image';
@@ -972,6 +972,7 @@ test('assembled requests keep shared policies, model overlays and per-call recor
             settings.modelType = mode.id; settings.slPurgeLayered = layered;
             const result = await runRosterPipeline(source, 'layer-audit');
             assert.equal(result.ok, true, mode.id);
+            assert.doesNotMatch(result.enhanced, /LayerTestBlue cotton jacket|左腕装有护具/, 'omit outfit and facts without blocking a valid reply');
             const systems = request.messages.filter(m => m.role === 'system'), system = systems.map(m => m.content).join('\n\n');
             const user = request.messages.at(-1).content;
             const overlay = getPrompt('pipeline/' + overlayPaths[mode.id] + '-overlay.txt').trim();
@@ -983,12 +984,20 @@ test('assembled requests keep shared policies, model overlays and per-call recor
             if (layered) assert.ok(systems.some(m => m.content === overlay)); else assert.equal(systems.length, 1);
             assert.ok(user.includes('【人物档案】') && user.includes(anchor));
             assert.ok(user.includes('【造型库】') && user.includes(detail));
+            assert.match(user, /待具象化[\s\S]*PendingOutfit/);
+            assert.match(user, /人物段补充（LayerActor）：右手戴着护腕/);
+            assert.match(user, /事实：左腕装有护具/);
+            assert.equal(user.split('ONE_FRAME_SEED').length - 1, 1, 'one copy of the current seed');
+            assert.doesNotMatch(user, /OUTSIDE_PLACEHOLDER|两段式|整轮只输出一次三段/);
+            assert.match(system, /PROFILE → WARDROBE（有待具象化时）→ IMAGES → CHECK（可选）/);
             assert.equal(system.includes(anchor) || system.includes(detail), false, 'records belong to the user payload');
             assert.equal(user.includes('只用光学与肤质词') || user.includes('重写四条 portrait'), false);
             const layoutRules = getPrompt('pipeline/moss-image-layout.txt').trim();
             assert.equal(system.split(layoutRules).length - 1, Number(isMossImageMode(mode.id)));
             if (isMossImageMode(mode.id)) {
-                assert.doesNotMatch(overlay, /【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/);
+                assert.match(overlay, /^## 档案锚点 → character\.tags/m);
+                assert.match(overlay, /^## 造型库 detail →/m);
+                assert.doesNotMatch(overlay, /---(?:PROFILE|WARDROBE)---/);
                 assert.ok(system.indexOf(layoutRules) < system.indexOf(overlay));
                 assert.match(user, /MOSS-Image Layout JSON/);
                 assert.doesNotMatch(user, /第1条纯文本提示词/);

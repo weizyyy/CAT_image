@@ -20,11 +20,11 @@
 4. 禁止出现中文、禁止分类前缀（脸型:、衣着: 等）
 5. 所有持久性规则（衣着原文复制、发型合并、配饰/印记必写）跟 ZIT 一样
 6. **年龄/体型关键词必须显式写全**（示例：`mature female, tall, large breasts, narrow waist, wide hips`）
-   ⚠️ 年龄/体型缺失时动漫模型**默认偏幼态（萝莉化）**。成年角色必须把**胸部与腰臀**写出来，
+   ⚠️ 年龄/体型缺失时动漫模型**默认偏幼态（萝莉化）**。成年角色按给定年龄写，实际入镜的身形写清，
    禁止只写 `slender` / `slim` 这类体脂词了事
 7. **皮相三层分开写**：肤质用锚点 `skin_texture` 的值；气色/红晕/汗/油光**只听本轮要点**（⛔ 不从档案搬）；`aura` 只出调性，写在外貌描写的最前面。
    ⛔ 禁止写 `her skin is rough / sun-spotted / her knuckles are red / tired eyes` 这类缺陷描述
-      （除非角色卡/正文明确要求）
+      （除非本图【占位符】或匹配档案明确给出）
    ✅ 允许并鼓励 `her skin is warm and naturally supple` / `healthy complexion` / `soft even skin`（只限皮肤本体）
    ⛔ 禁用高反射词：`luminous` `lit from within` `glowing` `glass skin` —— 画出来是硅胶娃娃
    ⛔ `refined features` / `delicate features` / `perfect face` **禁止使用**（骨相美化词 = 五官偏移）
@@ -72,15 +72,13 @@
 - `要点:耳根泛红` → `slight blush on her ears`
 
 ## 造型库 detail 的处理
-【造型库】里的 **✅ 已解析** 条目：detail 里的 **原子一个不能少、一个字不能改**；但**要融进句子里写**，不要原样粘贴整串原子。
-（例：detail `披肩波浪长发，深棕色，蓬松质感，侧分，发尾自然卷曲` →
-`她的头发是及肩偏长的波浪长发，深棕色、蓬松有质感，侧分、发尾自然卷曲`）
-⛔ 不要原样粘贴整串原子（那是"堆词"）；**特征词本身不许动**。
-**⚠️ 待具象化** 条目：按 wardrobe-vocab.txt 取词后写进去，并通过 ---WARDROBE--- 回传。
+【造型库】里的 **✅ 已解析** 条目：按共用语种规则取入镜特征，**织进穿戴者的英文句子**。
+（例：detail `及肩深棕波浪发，侧分` → `Her shoulder-length dark brown waves are parted on the side.`）
+**⚠️ 待具象化** 条目：按共用造型规则取词与回传。
 造型只写"是什么"；「滑落/卷袖/湿透」属于本轮状态，写在动作描述里。
 
 ## 面部种族显式化
-动漫模型同样会漂向欧美脸。除非角色卡/正文明确写了西方特征（金发碧眼、高鼻深目），
+动漫模型同样会漂向欧美脸。除非本图档案或占位符明确给出其他族裔或脸部特征（金发碧眼、高鼻深目），
 否则提示词必须包含 `asian` / `east asian` 一类的种族词。
 
 ## 档案锚点 → 英文原子（v2）
@@ -106,30 +104,30 @@
     C罩杯           → medium breasts
     168cm / 7头身    → tall, long legs
 
-**L1 身份锚 + L2 形体锚每张必写，不受景别影响**（砍了就每张换脸）。
+**L1 身份锚 + L2 形体锚按实际入镜范围写足**，可见特征保持同词。
 **按【景别】裁剪**（表见核心规则）：中景 = A+B+D+E，**不写腿/臀/脚**；特写/近景加 C 组；全景加 G 组。
 **按【主体】分配详略**：主体（1-2 个）→ 每个维度展开成英文短语/短句；次要入镜者 → 维度不省但写短；不入镜者不写。
 **本模式用长句润色，不是堆词**：
     ❌ `almond eyes, double eyelids, brown eyes, long eyelashes`
     ✅ `her eyes are long almond-shaped with softly downturned outer corners; the upper lids are a narrow double fold that creases lightly when open; the irises are dark brown with a warm amber layer that catches a ring of gold at the edge; lashes are long and curve naturally`
-**永久标记每张必写**（`beauty mark under left eye` 之类），用词逐字一致。
-**不设字数上限**（维度写全优先于写短）；只有 3 人以上同框才拆单人图；⛔ 禁止角色名。
+**永久标记入镜时必写**（`beauty mark under left eye` 之类），用词逐字一致。
+本次只写本图一条，多人同框按主次分配详略。⛔ 禁止角色名。
 
 ## 场景约束
-每个场景描述只能从本轮【当前正文】提取，不能使用历史数据。
+场景只从本图【占位符】取材；跨图一致性来自本次提供的档案和造型。
 
 ## 提示词核心目标：人物一致性
 
 生图模型没有角色记忆。每写一个提示词，都要保证生图模型能画出和之前一致的人。
 
 ### 铁律
-1. 不可变特征（脸型/眉眼/鼻唇/肤色/发型/体型）每张图都要写全
+1. 入镜的不可变特征（脸型/眉眼/鼻唇/肤色/发型/体型）按景别写全
 2. 禁止写角色名替代外貌描述
 3. 场景图含角色时必须包含外貌描述
-4. 可变特征（衣着/状态）按正文 > 动态 > 静态优先级
+4. 可变特征（衣着/状态）按本图要点更新，固定设计照造型库保留
 
 ## 提示词自检（快速核对）
 1. 这个提示词单独给生图模型，能画出和之前一样的人吗？
-2. 所有不可变特征都写全了吗？
+2. 该入镜的固定特征都写全了吗？
 3. 可变特征是否正确更新？
-4. 场景是基于本轮正文推断的吗？
+4. 场景取材于本图【占位符】吗？

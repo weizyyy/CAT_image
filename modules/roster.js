@@ -374,7 +374,7 @@ export function setZitAnchor(name, identity, text) {
         return e.anchorZh || null;
     } catch (e2) { return null; }
 }
-export function rosterDataTextFor(nameList) {
+export function rosterDataTextFor(nameList, frameSeed = '') {
     try {
         var r = ensureRoster();
         if (!r || !nameList || !nameList.length) return '';
@@ -397,8 +397,7 @@ export function rosterDataTextFor(nameList) {
                     if (_atom) {
                         // 已有锚点 → 逐字复用（零漂移）；同时给出主模型原文供"补全缺失维度"对照
                         nmLines.push('■ ' + e.key);
-                        nmLines.push('   ✅ 已解析锚点' + (_m === 'zit' ? '（中文呈现 · 逐字复用）' : '（英文权威锚点 · 英文模式共用 · 逐字复用）')
-                            + '（**逐字写进提示词，禁止改写、禁止同义替换**）：' + _atom);
+                        nmLines.push('   ✅ 已解析锚点' + (_m === 'zit' ? '（中文呈现）' : '（英文权威锚点）') + '：' + _atom);
                         nmLines.push('   ⚠️ 原始锚点（主模型原文，**只用于对照是否缺维度，不要照抄**）：' + (e.base || e.appearance || '').slice(0, 200));
                         // Only report missing data; shared system rules define how to fill it.
                         if (!/(^|\|\s*)(aura|气质)\s*[:：]/i.test(String(_atom))) {
@@ -419,7 +418,7 @@ export function rosterDataTextFor(nameList) {
                         nmLines.push('   （以上是静态锚点；本轮衣着/状态/动作一律以【占位符】为准，**不要沿用上一轮**）');
                         // zit 模式下「有原文但还没锚点」时，原来**从来没有要求过回传 anchor**
                         // （只有英文模式那条分支要求了）→ 锚点会一直空着，每轮重新编脸。
-                        nmLines.push('   ⭐ 这位**还没有锚点** —— 本轮必须通过 ---PROFILE--- 回传 anchor（「维度:值 | …」这种格式，zit 模式收中文锚点）+ anchor_zh，之后每轮逐字复用；漏了它 = 之后每张图都要重新编脸。');
+                        nmLines.push('   ⭐ 这位还没有锚点。按档案协议回传英文 anchor 与中文呈现 anchor_zh。');
                     } else {
                         nmLines.push('■ ' + e.key + '：' + (e.appearance || '（仅有名字，无外貌信息）'));
                     }
@@ -428,9 +427,9 @@ export function rosterDataTextFor(nameList) {
                     if (_miss.length) nmLines.push('   ⚠️ 主模型没给：' + _miss.join(' / ') + ' —— 你必须按种子方向推断出具体值（推断值一旦定下就冻结复用，别每轮换）');
                     // 数字保真：主模型原文里的数字若在锚点里蒸发了 → 点名要回来
                     var _lostN = findLostNumbers((e.base || e.appearance || ''), _atom || '');
-                    if (_lostN.length) nmLines.push('   🚨 数字保真：锚点里丢了主模型给的 ' + _lostN.join('、') + ' —— 数字（年龄/身高/体重）是硬事实，不会被润色掉。① 提示词里**必须写出来**（写成「十四岁左右」这类自然说法可以，但信息不许消失，⛔ 不许用「少女/女性」这种泛词顶掉）；② 锚点里该维度若只剩档位词，本轮请把它改成带数字的值（如 `age:14`），**其余维度照旧逐字复用**');
+                    if (_lostN.length) nmLines.push('   🚨 数字保真：锚点缺 ' + _lostN.join('、') + '。在入镜描述中保留给定数值与单位，档案其他维度照旧。');
                     // 种子单独下发（四个分支都要带上 —— 它是"取词方向"，不是外貌）
-                    if (e.seed) nmLines.push('   🌱 种子（主模型给的**取词方向**：气质/调性/重心/反差 —— 按「种子 → 锚点反推」执行，⛔ 禁止把这行原文放进提示词）：' + e.seed);
+                    if (e.seed && String(e.seed).trim() !== frameSeed.trim()) nmLines.push('   🌱 档案种子（取词参考）：' + e.seed);
                     nmCount++;
                     if (e.identity) nmLabels.push(e.identity);
                     seen[k] = true;

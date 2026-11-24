@@ -14,26 +14,45 @@
 |---|---|
 | 二维视觉小说事件 CG、共同的画面语言 | `summary.caption`；`summary.meta` 可用 `anime illustration`、`visual novel event CG` |
 | 脸型 / 瞳色 / 发型 / 年龄 / 可见体型 / 衣着 | 对应 `character` 的 `tags`，一项一个特征短语 |
+| 造型库的颜色 / 材质 / 剪裁 / 层次 / 配饰 | 固定特征拆入穿戴者的 `tags`；此刻穿戴变化放同一项的 `caption` |
 | 表情 / 目光 / 朝向 / 手与物的接触 | 对应人物的 `caption`；两人互动的前后关系也在全局写清 |
 | 关键道具 / 辨识地点的建筑或陈设 | 独立的 `object` 项；其他环境与光线留在全局句 |
 | 画内确实可读的招牌或标记 | `text` 项，原文与排版描述分开 |
 
 ## 书写规则
 
-1. **人物标签**按年龄与身份特征 → 五官与发型 → 入镜体型 → 衣饰材质 → 姿态排列。优先准确的 Danbooru 常用词，细节用同风格英文短语补足。简短、具体，一项一义，不写分类前缀、权重或无关质量词。
-2. **固定特征逐项照用**，例如 `low nose bridge` 不换成 `straight nose bridge`，可见的疤痕或痣要保留位置。年龄照本轮明确给出的数字或文字写，气色、汗水、红晕取本轮可见状态。按景别写体型：胸像保留肩颈和脸，腰部以上不写鞋袜，全景才交代完整轮廓。多人各写一套，不把 A 的衣物或发色混入 B 的框。
+1. **人物标签**按美学基调 → 年龄与身份特征 → 五官与发型 → 入镜体型 → 衣饰材质 → 姿态排列。优先用能准确表达原值的 Danbooru 常用词，缺少对应词时用具体英文短语。以 `atomic-vocab.txt` 为取词参考。一项一义，不写分类前缀、权重或无关质量词。
+2. **先裁景别，再定详略。** 主角把入镜维度写全，次要人物用简短标签保留足以辨识的特征。脸部近景写五官与可见标记，胸像保留颈肩，中景补躯干轮廓和衣着，全景交代体型、站姿和鞋袜。看不见的部位留在画外，不能为补齐标签而改取景。
 3. **自然语言写可见关系**。写清谁朝谁、哪只手托住哪里，手掌与物件如何接触、谁遮挡谁。局部 `caption` 补全动作，避免逐项复述 `tags`。取景、视点和主光方向以 `summary.caption` 统一。
 4. **二维画风**。用有轻重的清楚轮廓、平整色面、成组的赛璐璐阴影及局部柔和渐变。眼睛用清楚的虹膜分区和少量高光表达眼神。皮肤保留原有肤色和五官，用柔和的明暗面过渡；布料用成组褶线、材质轮廓和受光表现细节。背景细节与对比低于脸和手势。整幅按同一媒介描绘。
+
+## 档案锚点 → character.tags
+
+- 已有英文权威锚点时，取**实际入镜的值**，去掉维度名前缀，逐项放进对应人物的 `tags`。例如 `nose:low nose bridge`、`mark:small mole below the left eye` → `["low nose bridge","small mole below the left eye"]`。瞳色、罕见发色和永久标记只要可见就跨图复用原词，位置保留本人左右。
+- 首次只有中文原始锚点时，按共用建档规则具象化成英文特征，这一张就用确定的值。档案的建档与回传仍按共享规范，图像 JSON 只收画面中可用的值，不把角色名当外貌提示词。
+- 明示的族裔、年龄和入镜身形照给出的设定写。已有年龄数字就保留数字；可见的肩线、身高感和躯干轮廓用具体词，不能用 `slim` 一词概括全部身形。夸张眼睛或柔化阴影属于画法，不能借此改年龄或统一五官。
+- **皮相分三层。** `aura` 只给该人物定调，属于可画外观的短词放在其标签前部；已有 `skin_tone`、`skin_texture` 的可见值照用；泛红、汗、潮湿与反光来自本轮动作和照明，写在局部 `caption`。用色面表现光线变化，避免玻璃皮、高反射或套用固定腮红。
+
+## 造型库 detail → 入镜标签
+
+- 【造型库】里已解析的 detail 逐项拆入**穿戴者的同一个 `character.tags`**。衣服先区分内外层，再按件保留可见的品类、版型、颜色、材质、纹样和配件；发型、鞋袜、配饰、妆容也各归其主。英文特征词逐字复用，非英文 detail 按共用语种规则等义写进本图。不把有区分度的服装压成 `school uniform`、`fancy dress` 一类概括词。
+- 待具象化条目按共用造型规则取词并回传，确定的入镜特征同步用在本张图。领口和袖口只在镜头能看见时写；中景裁掉的鞋袜仍留在库中。
+- **固定造型写是什么，本轮要点写怎么穿。** 例如库里的 `olive canvas coat, brass buttons, navy linen lining` 分成三项；本轮卷袖露出里衬，就在同一人物的 `caption` 写明哪只袖子卷起、里衬露在哪。明确换装时用本帧实际穿戴，保留相容的固定细节，临时变化不回写。人身上的衣饰随人物框，被脱下且在画面里需要单独定位的衣物才另建 `object`。
+
+## 动态要点与事实 → 同帧 caption
+
+- 把伸手、重心、朝向、视线、接触和动作造成的布料变化落到相关人物项。两人同框时，全局写谁在前、谁在后、动作朝向谁；人物项保留各自的年龄、衣物与表情，不能交换特征。
+- 本轮确实入镜的 `事实:` 项按共用事实规则保留所指和数字，在相关人物或物件的 `caption` 补上可见后果。普通事实不写成屏幕文字。地点用一两处实际可见的建筑或陈设辨认，种子只化为姿态、神情或动作，不抄原句。
 
 ## 示例（两种构图，坐标按 1536×864 示范）
 
 **示例 A · 中景 · 人物前倾，递物形成斜向动作线**
 
-{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"A 2D visual novel illustration in a waist-up shot at counter height. A courier fills the right side and leans left into the frame, guiding a parcel toward someone just outside the lower left. A rain-streaked station window catches cool light behind the courier, and warm bounce light picks out the face and hands in broad cel-shaded planes."},"items":[{"label":"object","caption":"A tall rain-streaked station window behind the counter.","bbox":[-400,-715,220,-310]},{"label":"object","caption":"A paper parcel resting on the courier's left palm.","bbox":[135,-330,302,-75]},{"label":"character","caption":"The courier's shoulders lean left while the chin turns toward the recipient, with the left palm supporting the parcel and right fingertips steadying its side.","tags":["28 years old","short black hair","hazel eyes","round glasses","olive canvas coat"],"bbox":[-388,-325,432,649]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"A 2D visual novel illustration in a waist-up shot at counter height. A courier fills the right side and leans left into the frame, guiding a parcel toward someone just outside the lower left. A rain-streaked station window catches cool light behind the courier, and warm bounce light picks out the face and hands in broad cel-shaded planes."},"items":[{"label":"object","caption":"A tall rain-streaked station window behind the counter.","bbox":[-400,-715,220,-310]},{"label":"object","caption":"A paper parcel resting on the courier's left palm.","bbox":[135,-330,302,-75]},{"label":"character","caption":"The courier leans left and turns toward the recipient, with the left palm supporting the parcel and right fingertips steadying its side. The left sleeve is rolled to the forearm, showing navy linen lining along the fold.","tags":["28 years old","short black hair","hazel eyes","low nose bridge","small mole below the left eye","straight shoulders","round glasses","olive canvas coat","brass buttons","navy linen lining"],"bbox":[-388,-325,432,649]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
 
 **示例 B · 近景 · 稳定的正构图，右侧留出店铺线索**
 
-{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"An eye-level 2D visual novel close-up at a quiet tea counter. The shopkeeper fills the left half, pausing mid-turn with her gaze held toward the right. Warm window light makes a clean break between the lit cheek and its soft shadow. A small wall sign stays readable behind her on the right."},"items":[{"label":"text","caption":"Two short rows of light lettering on a dark wooden sign at the rear wall.","text":"茶汤\n慢饮","bbox":[-247,300,-22,564]},{"label":"character","caption":"The shopkeeper turns her head slightly toward the right; a restrained half-smile lifts one corner of her mouth.","tags":["47 years old","round face","wide jaw","dark brown eyes","short salt-and-pepper hair","cream linen collar"],"bbox":[-391,-594,432,138]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
+{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"An eye-level 2D visual novel close-up at a quiet tea counter. The shopkeeper fills the left half, pausing mid-turn with her gaze held toward the right. Warm window light makes a clean break between the lit cheek and its soft shadow. A small wall sign stays readable behind her on the right."},"items":[{"label":"text","caption":"Two short rows of light lettering on a dark wooden sign at the rear wall.","text":"茶汤\n慢饮","bbox":[-247,300,-22,564]},{"label":"character","caption":"The shopkeeper turns her head slightly toward the right; a restrained half-smile lifts one corner of her mouth.","tags":["47 years old","round face","wide jaw","dark brown eyes","thin upper lip","warm brown skin","fine matte skin","short salt-and-pepper hair","cream linen blouse","narrow stand collar","small amber earring"],"bbox":[-391,-594,432,138]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
 
 ## 场景与构图约束
 
@@ -48,3 +67,4 @@
 3. 年龄、五官、固定特征和衣饰是否在同一人框内？有没有写到裁出画外或被遮住的细节？
 4. 目光和接触点是否自洽？有侧倾时，方向是由这一幕决定的吗？
 5. 全图的线条、色面与阴影是否统一为二维插画？画内文字是否逐字保留？
+6. 造型库里可见的设计是否逐项落到正确人物名下？本轮穿着变化、事实和动态状态是否保留在相应 `caption`？

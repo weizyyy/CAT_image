@@ -5,7 +5,7 @@
 ## 字段与坐标
 - 一个占位符对应一幅单画面。顶层字段只有 `summary`、`items`、`bbox_coord_space`、`bbox_format`。
 - `summary` 必有英文 `caption`，`canvas` 写 `"single"`。`meta` 和 `palette` 是可选的字符串数组，按当前模式使用。
-- `items` 是非空平铺数组。每项必有 `label`、英文 `caption`、`bbox`；`label` 只能是 `"character"`、`"object"` 或 `"text"`。可用 `tags` 或 `palette` 字符串数组补充局部特征。`text` 项必须另有 `text` 字段。
+- `items` 是非空平铺数组。每项必有 `label`、`caption`、`bbox`；`label` 只能是 `"character"`、`"object"` 或 `"text"`。`caption` 用英文描述，事实按共用事实规则随对象写入。可用 `tags` 或 `palette` 字符串数组补充局部特征。`text` 项必须另有 `text` 字段。
 - `bbox_coord_space` 写 `"abs_centralized"`，`bbox_format` 写 `"yxyx"`。原点在画布中心，x 向右为正、y 向下为正。框是 `[y_min,x_min,y_max,x_max]`，即 `[上,左,下,右]`，四项均为整数。上 < 下、左 < 右，四条边不能越出本轮【布局画布】的范围。
 - 以本轮给出的实际像素宽高为准。例如 1536×864 的 x 范围是 −768～768，y 范围是 −432～432。换画布时重算框，不照抄示例坐标。JSON 内不加宽高、比例、旋转角度或自定义字段。
 

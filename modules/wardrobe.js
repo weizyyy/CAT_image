@@ -215,14 +215,14 @@ export function wardrobeDataTextFor(styleGroups) {
         var r = resolveSlots(styleGroups);
         var lines = [];
         if (r.resolved.length) {
-            lines.push('✅ 已解析（库里已有，**逐字写进提示词，禁止改写**）：');
+            lines.push('✅ 已解析：');
             for (var i = 0; i < r.resolved.length; i++) {
                 var it = r.resolved[i];
                 lines.push('   [' + it.slot + '] ' + it.key + ' → ' + it.detail);
             }
         }
         if (r.pending.length) {
-            lines.push('⚠️ 待具象化（库里没有，你负责补全并回传 ---WARDROBE---）：');
+            lines.push('⚠️ 待具象化：');
             for (var j = 0; j < r.pending.length; j++) lines.push('   [' + r.pending[j].slot + '] ' + r.pending[j].key);
         }
         return { text: lines.join('\n'), resolved: r.resolved, pending: r.pending };

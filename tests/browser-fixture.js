@@ -295,7 +295,8 @@ export async function runBrowserFixture() {
         checks.push({ name: 'webview-shared-rules-overlay-and-records-stay-in-their-layers', ok:
             lastAnalysis.messages.some(m => m.role === 'system' && m.content === mossOverlay) &&
             mossSystem.indexOf('## 造型库具象化') < mossSystem.indexOf(wardrobeRules) && mossSystem.indexOf(wardrobeRules) < mossSystem.indexOf(mossOverlay) &&
-            !/【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/.test(mossOverlay) &&
+            mossOverlay.includes('## 档案锚点 → character.tags') && mossOverlay.includes('## 造型库 detail →') &&
+            !/---(?:PROFILE|WARDROBE)---/.test(mossOverlay) &&
             mossUser.includes('实际宽 1600 px，高 864 px') &&
             mossUser.includes(fixtureAnchor) && mossUser.includes(fixtureOutfit) && !mossSystem.includes(fixtureAnchor) && !mossSystem.includes(fixtureOutfit) });
 

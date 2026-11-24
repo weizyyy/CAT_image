@@ -11,7 +11,7 @@
 
 【造型库】区块会给你两类条目：
 
-    ✅ 已解析（库里已有，直接用，**禁止改写**）
+    ✅ 已解析（库里已有，按目标语种复用固定特征）
        XX中学·校服（夏季） → white short-sleeve sailor blouse, navy collar with double white
                              stripes, red neckerchief, navy pleated skirt, cotton blend, crisp matte
 
@@ -39,7 +39,7 @@
 | `krea2` | 英文 | 固定特征短语；写入图像提示词时逐项融入连贯句子 |
 | `anime_tag` | 英文 | 纯 Danbooru 标签 |
 
-**不要输出中文到英文模式**（会被 cleanAnimePrompt 删空）。
+**已解析 detail**：同语种时逐项沿用入镜词组；跨语种时只在本张图里等义翻译，颜色、材质、款式、数字和单位照旧。库内原值保留，已解析条目不重复回传。例如中文 detail `深蓝羊毛外套、黄铜纽扣` 用于英文模式时写 `navy wool coat, brass buttons`。
 **不要输出分类前缀**（`材质:` `款式:`），只要词。
 
 自然语言段落模式中，detail 仍保存可逐字复用的固定特征，不把整段人物、动作或场景写入造型库；图像提示词再用连接词把入镜特征写成句子。
@@ -51,6 +51,8 @@
 1. **只写"是什么"，不写"怎么穿"**
    ✅ `white cotton t-shirt, round neck, short sleeves`
    ❌ `white cotton t-shirt, sleeves rolled up, unbuttoned` ← 「卷袖/敞扣」属于本轮要点
+
+   个人造型按 key 的人名前缀归属；共享 key 按本图【要点】指明的穿戴者归属。单人镜头直接绑定该人。多人归属不明时，不把同一造型随意套给所有人。
 
 2. **原子化** —— 每个词独立可命中
    ✅ `white cotton t-shirt, short sleeves, round neck, slim fit`

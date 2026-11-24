@@ -167,14 +167,13 @@ export function fillSubPanel(type, body) {
     h += '<div style="background:' + CAT.card + ';border-radius:10px;padding:12px;border:1px solid ' + CAT.line + ';">';
     h += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="sl_debug"' + (settings.debugMode ? " checked" : "") + '><span style="font-size:12px;color:' + CAT.text + ';">🐛 Debug 模式</span></label></div>';
     h += '<div style="background:' + CAT.card + ';border-radius:10px;padding:12px;margin-top:8px;border:1px solid ' + CAT.line + ';">';
-    h += '<div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">📜 历史正文轮数（多轮记忆：每次分析额外重放最近 N 轮剧情原文，0=关闭，越大越费token）</div><input id="sl_history_rounds" type="number" min="0" max="10" value="' + (settings.historyRounds != null ? settings.historyRounds : 5) + '" style="' + f + '"></div>';
+    h += '<div style="font-size:11px;color:' + CAT.sub + ';">📜 画师每次只接收本图占位符及匹配的人物档案、造型。</div></div>';
     h += '<div style="background:' + CAT.card + ';border-radius:10px;padding:12px;margin-top:8px;border:1px solid ' + CAT.line + ';">';
     h += '<button id="sl_btn_reset" style="width:100%;' + sbtn(CAT.red) + '">重置插件偏好</button></div>';
     body.html(h);
     jQuery("#sl_nsfw").on("change", function () { settings.nsfwEnhance = jQuery(this).is(":checked"); saveSettings(); });
     jQuery("input[name=sl_story]").on("change", function () { settings.storyMode = jQuery(this).val(); saveSettings(); });
     jQuery("#sl_debug").on("change", function () { settings.debugMode = jQuery(this).is(":checked"); saveSettings(); });
-    jQuery("#sl_history_rounds").on("change input", function () { var v = parseInt(jQuery(this).val(), 10); settings.historyRounds = isNaN(v) ? 0 : Math.max(0, Math.min(10, v)); saveSettings(); });
     jQuery("#sl_btn_reset").on("click", function () {
       if (!confirm('恢复插件默认偏好？连接配置和本机工作流列表也会恢复默认值。')) return;
       Object.assign(settings, getDefaults()); saveSettings();
