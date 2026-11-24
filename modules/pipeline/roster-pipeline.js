@@ -221,7 +221,7 @@ function buildRosterUserContent(placeholders, wardrobeInfo, mode, canvas) {
         }
     }
     lines.push('【输出格式】按系统的「输出格式」交稿。IMAGES 只写' +
-        (moss ? '一个 MOSS-Image Layout JSON 对象。' : '本图的一条文本提示词。'));
+        (moss ? '一个 MOSS-Image Layout JSON 对象。描述一律使用英文，画面原字按布局协议写入 text。' : '本图的一条文本提示词。'));
     lines.push('');
     lines.push('【人物档案】（按本轮占位符注明的人物名字过滤，插件自动匹配——同名不同身份全部给出，由你按场景选用；写提示词必须引用外貌锚点，禁止只写名字）');
     var _phNames = [];

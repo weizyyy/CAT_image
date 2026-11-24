@@ -999,7 +999,9 @@ test('assembled requests keep shared policies, model overlays and per-call recor
                 assert.match(overlay, /^## 造型库 detail →/m);
                 assert.doesNotMatch(overlay, /---(?:PROFILE|WARDROBE)---/);
                 assert.ok(system.indexOf(layoutRules) < system.indexOf(overlay));
-                assert.match(user, /MOSS-Image Layout JSON/);
+                assert.match(system, /两个模式的 Layout JSON 描述一律使用英文/);
+                assert.match(overlay, /描述是否全为英文/);
+                assert.match(user, /MOSS-Image Layout JSON 对象。描述一律使用英文/);
                 assert.doesNotMatch(user, /第1条纯文本提示词/);
             }
         }
@@ -1011,6 +1013,8 @@ test('assembled requests keep shared policies, model overlays and per-call recor
                 const layout = parseMossLayout(example, { width: 1536, height: 864 });
                 assert.ok(layout, mode);
                 assert.equal(layout.summary.meta !== undefined, mode === 'moss_image');
+                const itemDescriptions = layout.items.map(({ text, ...fields }) => fields);
+                assert.doesNotMatch(JSON.stringify([layout.summary, itemDescriptions]), /\p{Script=Han}/u, mode);
             }
         }
     } finally {

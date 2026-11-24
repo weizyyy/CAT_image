@@ -2,10 +2,15 @@
 
 图像提示词按本协议和所选模式的三层分工组织。通用的景别裁剪、主体分配与事实约束仍适用，纯文本词序不用于 Layout JSON。
 
+## 输出语言
+- **两个模式的 Layout JSON 描述一律使用英文。** `summary.caption`、`summary.meta`、`summary.palette` 以及每个条目的 `caption`、`tags`、`palette` 都写英文。
+- 场景、动作、造型、事实、画风等输入来自中文或其他语言时，等义译成英文再填入布局。已有英文特征照用，译文保留原意、所指、数值和单位。比如 `左腕装有护具` 写成 `a protective brace on the left wrist`。
+- `items[].text` 专门承载确实要画出来的原字，可保留原语。文字项的 `caption` 仍用英文。
+
 ## 字段与坐标
 - 一个占位符对应一幅单画面。顶层字段只有 `summary`、`items`、`bbox_coord_space`、`bbox_format`。
-- `summary` 必有英文 `caption`，`canvas` 写 `"single"`。`meta` 和 `palette` 是可选的字符串数组，按当前模式使用。
-- `items` 是非空平铺数组。每项必有 `label`、`caption`、`bbox`；`label` 只能是 `"character"`、`"object"` 或 `"text"`。`caption` 用英文描述，事实按共用事实规则随对象写入。可用 `tags` 或 `palette` 字符串数组补充局部特征。`text` 项必须另有 `text` 字段。
+- `summary` 必有 `caption`，`canvas` 写 `"single"`。`meta` 和 `palette` 是可选的字符串数组，按当前模式使用。
+- `items` 是非空平铺数组。每项必有 `label`、`caption`、`bbox`，`label` 只能是 `"character"`、`"object"` 或 `"text"`。事实按共用事实规则随对象写入 `caption`。可用 `tags` 或 `palette` 字符串数组补充局部特征。`text` 项必须另有 `text` 字段。
 - `bbox_coord_space` 写 `"abs_centralized"`，`bbox_format` 写 `"yxyx"`。原点在画布中心，x 向右为正、y 向下为正。框是 `[y_min,x_min,y_max,x_max]`，即 `[上,左,下,右]`，四项均为整数。上 < 下、左 < 右，四条边不能越出本轮【布局画布】的范围。
 - 以本轮给出的实际像素宽高为准。例如 1536×864 的 x 范围是 −768～768，y 范围是 −432～432。换画布时重算框，不照抄示例坐标。JSON 内不加宽高、比例、旋转角度或自定义字段。
 
