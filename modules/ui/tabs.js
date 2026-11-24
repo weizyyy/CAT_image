@@ -350,7 +350,8 @@ function renderArchiveInto(body, sessions) {
     });
     return;
   }
-  const groups = sessions.map(session => {
+  const sortedSessions = [...sessions].sort((a, b) => b.label.localeCompare(a.label, 'zh'));
+  const groups = sortedSessions.map(session => {
     const people = collectArchivePeople(session.key);
     let h = '<details style="' + card() + '" data-chat="' + escAttr(session.key) + '"' + (session.current ? ' open' : '') + '>';
     h += '<summary style="' + chatSummaryStyle + 'padding:8px;">' + esc(session.label) + ' · ' + people.length + ' 人' +

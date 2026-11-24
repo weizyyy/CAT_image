@@ -13,7 +13,8 @@ export async function runBrowserFixture() {
     const eventTypes = Object.fromEntries(['GENERATION_STARTED','GENERATION_ENDED','MESSAGE_UPDATED','MESSAGE_RECEIVED','MESSAGE_EDITED','MESSAGE_SWIPED','CHAT_CHANGED'].map(x => [x, x]));
     const ctx = { chatId: 'fixture', chat: [], characterId: 0, characters: [{ avatar: 'fixture.png', data: { name: 'Fixture' } }],
         eventSource, eventTypes, getRequestHeaders: () => ({}), setExtensionPrompt() {} };
-    initSettings(() => ctx, {});
+    const extensionSettings = {};
+    initSettings(() => ctx, extensionSettings);
     Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'https://fixture.invalid', auxModel: 'fixture', autoGen: 0 });
     const { loadPrompts, getPrompt } = await import('../prompts/loader.js');
     await loadPrompts(new URL('../prompts/', import.meta.url).href);
@@ -161,6 +162,7 @@ export async function runBrowserFixture() {
         await wait(() => !!root.querySelector('.sl_img_btn') && !scanner.scanCoordinator.running);
         checks.push({ name: 'webview-cancelled-analysis-explicit-resume', ok: calls === oldCalls + 3 });
         const panel = await import('../modules/ui/panel.js'), tabs = await import('../modules/ui/tabs.js');
+        panel.buildUI();
         panel.showPanel();
         const manualForm = document.querySelector('#sl_panel #sl_manual_queue');
         const manualField = manualForm.querySelector('input');
@@ -175,6 +177,37 @@ export async function runBrowserFixture() {
                 !document.querySelector('#sl_compact form') });
         compact.setPluginEnabled(false);
         tabs.renderSettingsPage();
+        const switchStyle = input => {
+            const track = input.nextElementSibling;
+            return { color: getComputedStyle(track).backgroundColor, thumb: getComputedStyle(track, '::after').transform };
+        };
+        for (const [id, key] of [['sl_plugin_on', 'pluginOn'], ['sl_show_prompt', 'showGenPrompt']]) {
+            const input = document.getElementById(id);
+            const initial = input.checked, before = switchStyle(input);
+            input.closest('label').click();
+            const toggled = input.checked;
+            await wait(() => {
+                const style = switchStyle(input);
+                return style.color !== before.color && style.thumb !== before.thumb;
+            });
+            const saved = extensionSettings.cat_image[key];
+            input.click();
+            await wait(() => {
+                const style = switchStyle(input);
+                return style.color === before.color && style.thumb === before.thumb;
+            });
+            checks.push({ name: 'webview-switch-updates-in-place-' + id,
+                ok: toggled === !initial && saved === toggled && input.checked === initial &&
+                    extensionSettings.cat_image[key] === initial && document.getElementById(id) === input });
+        }
+        compact.setPluginEnabled(false);
+        const bridgeInput = () => document.getElementById('sl_fe_bridge');
+        const bridgeInitial = bridgeInput().checked;
+        bridgeInput().click();
+        const bridgeToggled = bridgeInput().checked === !bridgeInitial && extensionSettings.cat_image.feBridge === !bridgeInitial;
+        bridgeInput().click();
+        checks.push({ name: 'webview-frontend-bridge-switch-keeps-working',
+            ok: bridgeToggled && bridgeInput().checked === bridgeInitial && extensionSettings.cat_image.feBridge === bridgeInitial });
         jQuery('#sl_model_type').val('minimax_h3_image').trigger('change');
         checks.push({ name: 'webview-h3-model-selection-and-guidance-card', ok: settings.modelType === 'minimax_h3_image' &&
             !!document.querySelector('#sl_model_type option[value="minimax_h3_image"]') && document.querySelector('#sl_minimax_h3_card').style.display !== 'none' &&

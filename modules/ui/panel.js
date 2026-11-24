@@ -140,6 +140,13 @@ export function buildUI(extSettings) {
     css.push('#sl_panel_body::-webkit-scrollbar{width:6px}');
     css.push('#sl_panel_body::-webkit-scrollbar-thumb{background:var(--sl-line);border-radius:8px}');
     css.push('#sl_panel input[type=checkbox]{accent-color:var(--sl-accent)}');
+    css.push('#sl_panel .sl_switch{position:relative;display:inline-block;width:42px;height:25px;flex-shrink:0}');
+    css.push('#sl_panel .sl_switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:inherit}');
+    css.push('#sl_panel .sl_switch_track{position:absolute;inset:0;border-radius:999px;background:var(--sl-line);pointer-events:none;transition:background-color .2s ease}');
+    css.push('#sl_panel .sl_switch_track::after{content:"";position:absolute;top:3px;left:3px;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.2);transition:transform .2s ease}');
+    css.push('#sl_panel .sl_switch input:checked + .sl_switch_track{background:var(--sl-accent)}');
+    css.push('#sl_panel .sl_switch input:checked + .sl_switch_track::after{transform:translateX(16px)}');
+    css.push('#sl_panel .sl_switch input:focus-visible + .sl_switch_track{outline:2px solid var(--sl-accent);outline-offset:3px}');
     css.push('.sl-mask-in{animation:slFadeUp .2s ease both}');
     css.push('.sl-drawer-in{animation:slSlideIn .3s cubic-bezier(.32,.72,.28,1) both}');
     css.push('@keyframes slSlideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}');

@@ -429,16 +429,18 @@ test('chat filenames switch without normalization and roster copies can be edite
     } finally { ctx.openCharacterChat = oldOpen; }
 });
 
-test('the archive page opens the exact current and historical sessions', async () => {
+test('the archive pins the current session and sorts historical titles descending before and after loading the host list', async () => {
     const { createExpandedPanel } = await import('../modules/ui/panel.js');
     const { renderArchivePage } = await import('../modules/ui/tabs.js');
     const saved = { fetch, frame: globalThis.requestAnimationFrame };
+    const olderFile = 'Tester - 2026-11-12 @ T10:00:00';
     const historyFile = 'Tester - 2026-11-16 @ T08:00:00';
     const historyKey = keyFor(historyFile);
     const emptyFile = 'Tester - 2026-11-20 @ T14:00:00';
     let returnChatList;
     try {
         sessionData(keyFor('test'), true).roster.Alice = { key: 'Alice', name: 'Alice', anchor: 'eyes:green', portraitViews: { front: '/existing.png' } };
+        sessionData(keyFor(olderFile), true);
         sessionData(historyKey, true).roster.Robin = { key: 'Robin', name: 'Robin', anchor: 'eyes:blue' };
         sessionData(sessionKey('other.png', 'test'), true).roster.Hidden = { key: 'Hidden', name: 'Hidden' };
         const before = JSON.stringify(archive.sessions);
@@ -451,10 +453,13 @@ test('the archive page opens the exact current and historical sessions', async (
         createExpandedPanel();
         renderArchivePage();
         const page = document.querySelector('.sl_page_body');
+        assert.equal(page.querySelector(':scope > details').dataset.chat, keyFor('test'));
         assert.equal(page.querySelector(':scope > details[open] .sl_pcard').dataset.char, 'Alice');
         const other = () => page.querySelector(':scope > details.sl_other_chats');
+        const historicalKeys = () => [...other().querySelectorAll(':scope > details[data-chat]')].map(node => node.dataset.chat);
         assert.equal(other().open, false);
         assert.equal(other().querySelector(':scope > summary').textContent, '其他');
+        assert.deepEqual(historicalKeys(), [historyKey, keyFor(olderFile)]);
         const history = () => [...other().querySelectorAll("details[data-chat]")].find(node => node.dataset.chat === historyKey);
         assert.equal(history().open, false);
         assert.ok(history().querySelector('summary').textContent.includes(historyFile));
@@ -462,6 +467,7 @@ test('the archive page opens the exact current and historical sessions', async (
         returnChatList();
         await waitUntil(() => other().textContent.includes(emptyFile));
         assert.equal(other().open, true);
+        assert.deepEqual(historicalKeys(), [keyFor(emptyFile), historyKey, keyFor(olderFile)]);
         assert.ok(history().querySelector('.sl_chat_switch'));
         history().querySelector('summary').click();
         history().querySelector('.sl_pcard').click();

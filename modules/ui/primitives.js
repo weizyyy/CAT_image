@@ -54,8 +54,12 @@ export function btnDanger(extra) {
 
 // 开关
 export function switchHTML(id, checked, label, hint) {
-  var h = '<label style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:4px 0;"><span style="position:relative;display:inline-block;width:42px;height:25px;flex-shrink:0;"><input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + ' style="opacity:0;width:0;height:0;position:absolute;"><span style="position:absolute;inset:0;border-radius:999px;background:' + (checked ? CAT.accent : CAT.line) + ';transition:all .2s ease;"></span><span style="position:absolute;top:3px;left:' + (checked ? '19px' : '3px') + ';width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.2);transition:all .2s ease;"></span></span><span style="flex:1;"><span style="display:block;font-size:13px;font-weight:600;color:' + CAT.text + ';">' + esc(label) + '</span>';
-  if (hint) h += '<span style="display:block;font-size:10.5px;color:' + CAT.mute + ';margin-top:1px;">' + esc(hint) + '</span>';
+  var h = '<label style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:4px 0;">' +
+    '<span class="sl_switch"><input type="checkbox" role="switch" id="' + id + '" aria-labelledby="' + id + '_label"' +
+    (hint ? ' aria-describedby="' + id + '_hint"' : '') + (checked ? ' checked' : '') +
+    '><span class="sl_switch_track" aria-hidden="true"></span></span><span style="flex:1;">' +
+    '<span id="' + id + '_label" style="display:block;font-size:13px;font-weight:600;color:' + CAT.text + ';">' + esc(label) + '</span>';
+  if (hint) h += '<span id="' + id + '_hint" style="display:block;font-size:10.5px;color:' + CAT.mute + ';margin-top:1px;">' + esc(hint) + '</span>';
   return h + '</span></label>';
 }
 
