@@ -20,6 +20,7 @@ export async function runBrowserFixture() {
     await loadPrompts(new URL('../prompts/', import.meta.url).href);
     const scanner = await import('../modules/scanner.js');
     const bridge = await import('../modules/frontend-bridge.js');
+    const compact = await import('../modules/ui/compact-bar.js');
     const { setEnqueueGen, buildImgCard } = await import('../modules/render.js');
     const queue = await import('../modules/queue.js');
     setEnqueueGen(queue.enqueueGen); settings.autoGen = 1;
@@ -35,14 +36,21 @@ export async function runBrowserFixture() {
         calls++;
         lastAnalysis = JSON.parse(options.body);
         const user = JSON.parse(options.body).messages.at(-1).content;
-        const prompt = user.includes('H3-FIXTURE') ? 'A compact painted scene shows a sign reading "Fixture的茶铺". The woman supports a cup with her left palm while her right hand rests around the handle.'
+        const prompt = user.includes('MOSS-FIXTURE') ? JSON.stringify({
+            summary: { meta: ['anime illustration'], canvas: 'single', caption: 'A painted scene with cool light across the face and warm light on the cup.' },
+            items: [
+                { label: 'text', caption: 'A shop sign on the left', text: 'Fixture的茶铺\n"欢迎"', bbox: [-290, -790, -155, -370] },
+                { label: 'character', caption: 'The woman holds a cup in her left palm', tags: ['42 years old', 'blue cotton jacket'], bbox: [-410, -190, 432, 630] },
+            ],
+            bbox_coord_space: 'abs_centralized', bbox_format: 'yxyx',
+        })
             : user.includes('红衣') ? 'RED-FIXTURE-PROMPT' : user.includes('蓝衣') ? 'BLUE-FIXTURE-PROMPT' : 'OTHER-FIXTURE-PROMPT';
         return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content:
             '---PROFILE---\n{}\n---END---\n---IMAGES---\n' + prompt + '\n---END---' } }] }), { status: 200 });
     };
     window.fetch = mockFetch;
     const checks = [];
-    const wait = async fn => { for (let i = 0; i < 150; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 20)); } throw new Error('fixture timeout'); };
+    const wait = async (fn, attempts = 150) => { for (let i = 0; i < attempts; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 20)); } throw new Error('fixture timeout'); };
     const source = '前[img:同一场景|要点:红衣]中[img:同一场景|要点:蓝衣]后';
     document.body.innerHTML = '<div id="chat"><div class="mes" mesid="0"><div class="mes_text"></div></div></div>';
     const root = document.querySelector('.mes_text'); root.textContent = source;
@@ -130,7 +138,7 @@ export async function runBrowserFixture() {
         checks.push({ name: 'webview-frontend-identical-new-turn-rechecks', ok: calls === oldCalls + 2 });
         bridge.stopFrontendBridge(); settings.autoGen = 0;
         await wait(() => !queue.getQueueStatus().running);
-        const compact = await import('../modules/ui/compact-bar.js'); compact.createCompactBar();
+        compact.createCompactBar();
         const cancelRect = document.querySelector('#sl_comp_cancel').getBoundingClientRect(), barRect = document.querySelector('#sl_compact').getBoundingClientRect();
         checks.push({ name: 'webview-expanded-cancel-button-visible-and-in-bounds', ok: cancelRect.width > 0 && cancelRect.height > 0 &&
             cancelRect.left >= barRect.left && cancelRect.right <= barRect.right && cancelRect.bottom <= barRect.bottom });
@@ -175,32 +183,52 @@ export async function runBrowserFixture() {
             ok: calls === oldCalls + 3 && generations === beforeManual + 1 &&
                 manualRect.top >= document.querySelector('#sl_btn_gen_all').getBoundingClientRect().bottom &&
                 !document.querySelector('#sl_compact form') });
-        compact.setPluginEnabled(false);
-        tabs.renderSettingsPage();
         const switchStyle = input => {
             const track = input.nextElementSibling;
             return { color: getComputedStyle(track).backgroundColor, thumb: getComputedStyle(track, '::after').transform };
         };
-        for (const [id, key] of [['sl_plugin_on', 'pluginOn'], ['sl_show_prompt', 'showGenPrompt']]) {
-            const input = document.getElementById(id);
-            const initial = input.checked, before = switchStyle(input);
+        const toggleSwitch = async input => {
+            const before = switchStyle(input);
             input.closest('label').click();
-            const toggled = input.checked;
             await wait(() => {
                 const style = switchStyle(input);
                 return style.color !== before.color && style.thumb !== before.thumb;
             });
-            const saved = extensionSettings.cat_image[key];
-            input.click();
-            await wait(() => {
-                const style = switchStyle(input);
-                return style.color === before.color && style.thumb === before.thumb;
-            });
-            checks.push({ name: 'webview-switch-updates-in-place-' + id,
-                ok: toggled === !initial && saved === toggled && input.checked === initial &&
-                    extensionSettings.cat_image[key] === initial && document.getElementById(id) === input });
-        }
-        compact.setPluginEnabled(false);
+        };
+        const power = () => document.querySelector('#sl_home_hero #sl_plugin_on');
+        const originalPower = power();
+        await toggleSwitch(originalPower);
+        checks.push({ name: 'webview-home-power-switch-pauses-in-place',
+            ok: power() === originalPower && !power().checked && scanner.getScannerStatus() === 'off' &&
+                extensionSettings.cat_image.pluginOn === false &&
+                document.querySelector('#sl_home_status').textContent === '猫尾收起' });
+        panel.hidePanel();
+        const bar = document.querySelector('#sl_compact');
+        bar.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+        const shadow = () => getComputedStyle(bar).boxShadow;
+        const dot = () => getComputedStyle(document.querySelector('#sl_comp_status_dot')).backgroundColor;
+        const expandedShadow = shadow();
+        checks.push({ name: 'webview-paused-compact-bar-stays-visible-with-orange-status',
+            ok: bar.getClientRects().length > 0 && !bar.classList.contains('sl_compact_logo') &&
+                document.querySelector('#sl_comp_status').textContent === '猫尾收起' && dot() === 'rgb(255, 159, 10)' });
+        bar.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+        await wait(() => bar.classList.contains('sl_compact_logo'), 200);
+        checks.push({ name: 'webview-no-exterior-shadow-on-floating-bar-or-logo', ok: expandedShadow === 'none' && shadow() === 'none' });
+        bar.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+        document.querySelector('#sl_comp_panel_btn').click();
+        const reopened = power();
+        const stillOff = reopened && !reopened.checked && !bar.getClientRects().length && document.querySelector('#sl_head_status_txt').textContent === '猫尾收起';
+        await toggleSwitch(reopened);
+        checks.push({ name: 'webview-reopen-panel-and-enable-while-paused', ok: stillOff && reopened.checked &&
+            extensionSettings.cat_image.pluginOn === true && scanner.getScannerStatus() !== 'off' && dot() !== 'rgb(255, 159, 10)' });
+        tabs.renderSettingsPage();
+        const promptSwitch = document.querySelector('#sl_show_prompt');
+        await toggleSwitch(promptSwitch);
+        const promptOn = promptSwitch.checked && extensionSettings.cat_image.showGenPrompt === true;
+        await toggleSwitch(promptSwitch);
+        checks.push({ name: 'webview-settings-prompt-switch-updates-in-place',
+            ok: !document.querySelector('.sl_page_body #sl_plugin_on') && promptOn && !promptSwitch.checked &&
+                extensionSettings.cat_image.showGenPrompt === false && document.querySelector('#sl_show_prompt') === promptSwitch });
         const bridgeInput = () => document.getElementById('sl_fe_bridge');
         const bridgeInitial = bridgeInput().checked;
         bridgeInput().click();
@@ -208,12 +236,17 @@ export async function runBrowserFixture() {
         bridgeInput().click();
         checks.push({ name: 'webview-frontend-bridge-switch-keeps-working',
             ok: bridgeToggled && bridgeInput().checked === bridgeInitial && extensionSettings.cat_image.feBridge === bridgeInitial });
-        jQuery('#sl_model_type').val('minimax_h3_image').trigger('change');
-        checks.push({ name: 'webview-h3-model-selection-and-guidance-card', ok: settings.modelType === 'minimax_h3_image' &&
-            !!document.querySelector('#sl_model_type option[value="minimax_h3_image"]') && document.querySelector('#sl_minimax_h3_card').style.display !== 'none' &&
-            document.querySelector('#sl_krea2_style_card').style.display === 'none' });
+        jQuery('#sl_model_type').val('moss_image').trigger('change');
+        const mossWidth = document.querySelector('#sl_moss_width');
+        mossWidth.value = '1600';
+        mossWidth.dispatchEvent(new Event('change', { bubbles: true }));
+        mossWidth.value = '1601';
+        mossWidth.dispatchEvent(new Event('change', { bubbles: true }));
+        checks.push({ name: 'webview-moss-model-selection-and-canvas-settings', ok: settings.modelType === 'moss_image' &&
+            document.querySelector('#sl_moss_card').style.display !== 'none' && document.querySelector('#sl_krea2_style_card').style.display === 'none' &&
+            mossWidth.value === '1600' && extensionSettings.cat_image.mossWidth === 1600 && document.querySelector('#sl_moss_height').value === '864' });
         settings.autoGen = 1;
-        settings.cWf = '{"native":{"inputs":{"text":"%prompt%"}},"canvas":{"inputs":{"width":1152,"height":1280}}}';
+        settings.cWf = '{"native":{"inputs":{"text":"%prompt%"}},"canvas":{"inputs":{"width":1600,"height":864}}}';
         const { upsertPerson, setEnglishAnchor } = await import('../modules/roster.js');
         const { upsertEntry } = await import('../modules/wardrobe.js');
         const fixtureAnchor = 'race:FixtureOrigin | age:forty-two | nose:FixtureNose';
@@ -221,23 +254,24 @@ export async function runBrowserFixture() {
         upsertPerson('FixtureActor', '层次测试', '本轮档案原文', 'anchor');
         setEnglishAnchor('FixtureActor', '层次测试', fixtureAnchor);
         upsertEntry('服装', 'FixtureOutfit', fixtureOutfit, 'expanded');
-        ctx.chat[0].mes = '[img:H3-FIXTURE|人物:FixtureActor（层次测试）|造型:服装=FixtureOutfit|要点:招牌文字Fixture的茶铺，手托杯子]'; root.textContent = ctx.chat[0].mes;
+        ctx.chat[0].mes = '[img:MOSS-FIXTURE|人物:FixtureActor（层次测试）|造型:服装=FixtureOutfit|要点:招牌文字Fixture的茶铺，手托杯子]'; root.textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery(root));
         await wait(() => !!root.querySelector('.sl_img_block img') && !scanner.scanCoordinator.running);
-        const h3System = lastAnalysis.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-        checks.push({ name: 'webview-h3-overlay-reaches-analysis-and-keeps-quoted-lettering', ok: h3System.includes('【模式：MiniMax-H3-Image') &&
-            h3System.includes(getPrompt('pipeline/minimax-h3-image-overlay.txt').trim()) &&
-            !h3System.includes('【模式：Krea 2') && root.querySelector('.sl_img_btn').dataset.prompt.includes('"Fixture的茶铺"') });
-        checks.push({ name: 'webview-h3-plain-caption-to-comfy-with-unchanged-canvas', ok: lastWorkflow.native.inputs.text.includes('"Fixture的茶铺"') &&
-            lastWorkflow.canvas.inputs.width === 1152 && lastWorkflow.canvas.inputs.height === 1280 && !lastWorkflow.native.inputs.text.includes('expanded_caption') });
-        const h3Overlay = getPrompt('pipeline/minimax-h3-image-overlay.txt').trim();
+        const mossSystem = lastAnalysis.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+        const mossOverlay = getPrompt('pipeline/moss-image-overlay.txt').trim();
+        const mossPrompt = root.querySelector('.sl_img_btn').dataset.prompt;
+        checks.push({ name: 'webview-moss-overlay-reaches-analysis-and-keeps-quoted-lettering', ok: mossSystem.includes(mossOverlay) &&
+            !mossSystem.includes('【模式：Krea 2') && JSON.parse(mossPrompt).items[0].text === 'Fixture的茶铺\n"欢迎"' });
+        checks.push({ name: 'webview-moss-layout-reaches-comfy-with-unchanged-canvas', ok: lastWorkflow.native.inputs.text === mossPrompt &&
+            lastWorkflow.canvas.inputs.width === 1600 && lastWorkflow.canvas.inputs.height === 864 });
         const wardrobeRules = getPrompt('wardrobe-expand.txt').trim();
-        const h3User = lastAnalysis.messages.at(-1).content;
+        const mossUser = lastAnalysis.messages.at(-1).content;
         checks.push({ name: 'webview-shared-rules-overlay-and-records-stay-in-their-layers', ok:
-            lastAnalysis.messages.some(m => m.role === 'system' && m.content === h3Overlay) &&
-            h3System.indexOf('## 造型库具象化') < h3System.indexOf(wardrobeRules) && h3System.indexOf(wardrobeRules) < h3System.indexOf(h3Overlay) &&
-            !/【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/.test(h3Overlay) &&
-            h3User.includes(fixtureAnchor) && h3User.includes(fixtureOutfit) && !h3System.includes(fixtureAnchor) && !h3System.includes(fixtureOutfit) });
+            lastAnalysis.messages.some(m => m.role === 'system' && m.content === mossOverlay) &&
+            mossSystem.indexOf('## 造型库具象化') < mossSystem.indexOf(wardrobeRules) && mossSystem.indexOf(wardrobeRules) < mossSystem.indexOf(mossOverlay) &&
+            !/【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/.test(mossOverlay) &&
+            mossUser.includes('实际宽 1600 px，高 864 px') &&
+            mossUser.includes(fixtureAnchor) && mossUser.includes(fixtureOutfit) && !mossSystem.includes(fixtureAnchor) && !mossSystem.includes(fixtureOutfit) });
         return { ok: checks.every(c => c.ok), checks, mockedAnalysisRequests: calls, mockedImageRequests: generations, externalRequests: 0 };
-    } finally { scanner.stopPolling(); bridge.stopFrontendBridge(); }
+    } finally { compact.removeCompactBar(); scanner.stopPolling(); bridge.stopFrontendBridge(); }
 }

@@ -3,7 +3,7 @@ import { CAT, CAT_THEMES, TEXT_THEMES, applyTheme, getTextTheme, refreshTextThem
 import { card, groupTitle, cell, cardHead, lbl, chip, btnMain, btnGhost, btnSm, btnDanger, switchHTML, empty } from './primitives.js';
 import { catSVG, catStatusText } from './cat.js';
 import { toast, esc, escAttr, fi, chkProf } from './utils.js';
-import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge } from '../settings.js';
+import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge, MOSS_IMAGE_MODE, getMossCanvas, isMossDimension } from '../settings.js';
 import { KREA2_STYLES, krea2StyleById } from '../style-presets.js';
 import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
 import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, queueMessageFloors, scanAllMsgs } from '../scanner.js';
@@ -24,18 +24,27 @@ import { initFrontendBridge, stopFrontendBridge, getFeBridgeStatus, probeFronten
 import { getPrompt, isPromptsLoaded } from '../../prompts/loader.js';
 
 // ═══════════ 主视图（Feed） ═══════════
+function refreshHomeStatus(body) {
+  const status = getScannerStatus(), queued = getQueueLength(), ready = chkProf();
+  const off = status === 'off';
+  const face = off ? 'idle' : status === 'scanning' ? 'busy' : queued ? 'queuing' : ready ? 'healthy' : 'idle';
+  body.find('.sl-cat-hero').html(catSVG(face, 76));
+  body.find('#sl_home_status').text(off ? '猫尾收起' : catStatusText(face));
+  body.find('#sl_home_status_note').text(off ? '配图已暂停' :
+    status === 'scanning' ? '扫描角色档案中…' : queued ? '队列 ' + queued + ' 张待画' : ready ? '档案已就绪' : '档案还没备好');
+}
+
 export function renderHomeTab() {
   var body = jQuery('#sl_panel_body'); if (!body.length) return;
   body.find('.sl-page').remove();
-  var cn = getCharacterName() || '未选择角色', hp = chkProf(), ss = getScannerStatus(), ql = getQueueLength(),
-    ha = !!(settings.auxUrl && settings.auxModel), hc = !!settings.cUrl, hw = !!(settings.cWf && settings.cWf.length > 50),
-    allReady = ha && hc && hw, h = '';
+  var cn = getCharacterName() || '未选择角色', ql = getQueueLength(),
+    ha = !!(settings.auxUrl && settings.auxModel), hc = !!settings.cUrl, h = '';
   // 顶部：状态猫大卡
-  var catFaceState = ss === 'scanning' ? 'busy' : (ql > 0 ? 'queuing' : (hp ? 'healthy' : 'idle'));
-  h += '<div style="' + card() + ';padding:18px;display:flex;flex-direction:column;align-items:center;gap:2px;">';
-  h += '<span class="sl-cat-hero" style="color:' + CAT.accent + ';display:flex;">' + catSVG(catFaceState, 76) + '</span>';
-  h += '<div style="font-size:13px;font-weight:700;color:' + CAT.text + ';margin-top:6px;">' + catStatusText(catFaceState) + '</div>';
-  h += '<div style="font-size:11px;color:' + CAT.sub + ';">' + (ss === 'scanning' ? '扫描角色档案中…' : (ql > 0 ? '队列 ' + ql + ' 张待画' : (hp ? '档案已就绪' : '档案还没备好'))) + '</div>';
+  h += '<div id="sl_home_hero" style="' + card() + 'padding:18px;display:flex;flex-direction:column;align-items:center;gap:2px;">';
+  h += '<span class="sl-cat-hero" style="color:' + CAT.accent + ';display:flex;"></span>';
+  h += '<div id="sl_home_status" style="font-size:13px;font-weight:700;color:' + CAT.text + ';margin-top:6px;"></div>';
+  h += '<div id="sl_home_status_note" style="font-size:11px;color:' + CAT.sub + ';"></div>';
+  h += '<div class="sl_home_power">' + switchHTML('sl_plugin_on', settings.pluginOn !== false, '插件开启') + '</div>';
   h += '</div>';
   // 角色卡
   h += '<div class="sl-hover-card" style="' + card() + 'padding:16px;">';
@@ -78,7 +87,16 @@ export function renderHomeTab() {
   var _ver = (typeof window !== 'undefined' && window.SILLYLAB_VERSION) ? window.SILLYLAB_VERSION : '';
   h += '<div style="text-align:center;padding:14px 0 6px;color:' + CAT.mute + ';font-size:10px;letter-spacing:1px;">小猫的生图插件 ' + esc(_ver) + '</div>';
   body.html(h);
+  refreshHomeStatus(body);
   // 交互绑定
+  body.find('#sl_plugin_on').on('change', function () {
+    settings.pluginOn = this.checked;
+    saveSettings();
+    if (settings.pluginOn) startPolling();
+    else stopPolling();
+    refreshHomeStatus(body);
+    compact.refreshCompactBar();
+  });
   body.off('click', '#sl_btn_gen_all').on('click', '#sl_btn_gen_all', compact.triggerGenAll);
   body.find('#sl_manual_floors').on('keydown', event => event.stopPropagation());
   body.find('#sl_manual_queue').on('submit', function (event) {
@@ -141,7 +159,6 @@ function krea2StyleOptionsHTML(selected) {
 export function renderSettingsPage() {
   pushPage(function (body) {
     var f = fi(), h = '';
-    h += '<div style="' + card() + ';padding:14px 16px;">' + switchHTML('sl_plugin_on', settings.pluginOn !== false, '插件开启', '关掉就停止扫描与出图') + '</div>';
     h += '<div style="' + card() + '">' + cardHead('🖼️', '模型类型', '决定提示词语言') + '<select id="sl_model_type" style="' + f + '">' + modeOptionsHTML(settings.modelType, false) + '</select><div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.6;">Anima 系模型由 Danbooru 标签 + 自然语言 caption 混合训练：<b>纯标签丢氛围，纯描述丢结构</b> → 用混合模式效果最好。<br>Krea 2 吃<b>英文自然语言段落</b>（不吃标签链 / 权重语法）；它默认会探索风格，多张图靠同一套风格句保持一致。</div></div>';
     h += '<div style="' + card() + '">' + cardHead('🐟', '配图偏好', '这只猫什么时候画图') + '<select id="sl_image_mode" style="' + f + '"><option value="always"' + (settings.imageMode === 'always' ? ' selected' : '') + '>总是配图（每轮 ≥1 张）</option><option value="encourage"' + (settings.imageMode === 'encourage' ? ' selected' : '') + '>鼓励配图（该插就插）</option><option value="key"' + (settings.imageMode === 'key' ? ' selected' : '') + '>关键场景（宁缺毋滥）</option></select></div>';
     h += '<div style="' + card() + '">' + cardHead('🖼️', '图块尺寸', '图卡里图片的宽度（分辨率低建议调小）') + '<select id="sl_img_width" style="' + f + '"><option value="100%"' + ((settings.imgBlockWidth || '55%') === '100%' ? ' selected' : '') + '>大（100%）</option><option value="75%"' + ((settings.imgBlockWidth || '55%') === '75%' ? ' selected' : '') + '>中（75%）</option><option value="55%"' + ((settings.imgBlockWidth || '55%') === '55%' ? ' selected' : '') + '>小（55% · 默认）</option><option value="40%"' + ((settings.imgBlockWidth || '55%') === '40%' ? ' selected' : '') + '>迷你（40%）</option></select></div>';
@@ -158,7 +175,13 @@ export function renderSettingsPage() {
       '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:8px;line-height:1.6;">前端卡必须装「酒馆助手 / JS-Slash-Runner」才能跑；每条剧情都会多一次辅助 AI 调用（配图分析请求）。</div></div>';
     h += '<div style="' + card() + ';padding:14px 16px;">' + switchHTML('sl_show_prompt', settings.showGenPrompt === true, '图块显示完整提示词', '默认关闭：图块只显示短标题（详细字段只进生成链，用户看不到）；调试时打开可看到每张图的完整生成提示词') + '</div>';
     h += '<div id="sl_krea2_style_card" style="' + card() + ';' + (settings.modelType === 'krea2' ? '' : 'display:none;') + '">' + cardHead('🎨', 'Krea 2 风格', '锁定本场画风 · 插件统一前置，跨轮不漂') + '<select id="sl_krea2_style" style="' + f + '">' + krea2StyleOptionsHTML(settings.krea2Style) + '</select>' + '<div id="sl_krea2_style_note" style="font-size:10px;color:' + CAT.sub + ';margin-top:6px;line-height:1.7;">' + esc((krea2StyleById(settings.krea2Style) || {}).note || '') + '</div>' + '<div style="font-size:10px;color:' + CAT.mute + ';margin-top:6px;line-height:1.7;">官方没有固定的内置风格清单：Krea 2 的风格靠<b>提示词 / 风格参考图 / 情绪板 / LoRA</b> 四条路。这里是从官方示例归纳出的风格句 —— 选中后由插件加在每张提示词最前，辅助 AI 只写人物与场景，不再另写画风。<br>画风由插件统一拼接，不再自动注入质量前缀。</div></div>';
-    h += '<div id="sl_minimax_h3_card" style="' + card() + ';' + (settings.modelType === 'minimax_h3_image' ? '' : 'display:none;') + '">' + cardHead('🎬', 'MiniMax-H3-Image · Galgame CG', '纯二次元 · 横向事件 CG · 人物主导') + '<div style="font-size:10.5px;color:' + CAT.sub + ';line-height:1.7;">以二维线条、平整色面、赛璐璐阴影和局部渐变表现人物、衣物与背景，优先表情、动作和清楚的接触关系。<br>默认 16:9 横向构图。正构图、人物侧倾与镜头滚转按场景选择，不强制倾斜；滚转时背景与重力保持一致。<br>实际画布由工作流决定，请自行在 ComfyUI 设置横向画布后导入。插件不会改写宽高；原生模型不使用负面提示词。</div></div>';
+    const { width, height } = getMossCanvas();
+    h += '<div id="sl_moss_card" style="' + card() + (settings.modelType === MOSS_IMAGE_MODE ? '' : 'display:none;') + '">' +
+      cardHead('🎬', 'MOSS-Image · Galgame CG', '二维事件 CG · 人物标签与分区构图') +
+      '<div style="display:flex;gap:8px;">' +
+      '<label style="flex:1;min-width:0;"><span style="' + lbl() + '">画布宽度（px）</span><input id="sl_moss_width" type="number" min="16" step="16" value="' + width + '" style="' + f + '"></label>' +
+      '<label style="flex:1;min-width:0;"><span style="' + lbl() + '">画布高度（px）</span><input id="sl_moss_height" type="number" min="16" step="16" value="' + height + '" style="' + f + '"></label></div>' +
+      '<div style="font-size:10.5px;color:' + CAT.sub + ';margin-top:6px;line-height:1.7;">宽高应与工作流采样画布一致，均为 16 的倍数。将 %prompt% 放在正向文本输入，关闭工作流的提示词增强器。改尺寸后可用「重新解析」更新已有图卡的布局。</div></div>';
     h += '<div style="' + card() + '">' + cardHead('🎨', '艺术家风格', '英文模式可选') + '<input id="sl_anime_artist" type="text" value="' + escAttr(settings.animeArtist || '') + '" style="' + f + '" placeholder="留空则不添加"></div>';
     h += '<div style="text-align:center;font-size:10px;color:' + CAT.mute + ';padding:6px 0 2px;">所有改动即时保存 · 无需手动保存</div>';
     body.html(h);
@@ -166,8 +189,18 @@ export function renderSettingsPage() {
   }, '模型与偏好', { key: '模型与偏好' });
 }
 export function bindSettingsEvents(b) {
-  b.off('change', '#sl_plugin_on').on('change', '#sl_plugin_on', function () { settings.pluginOn = jQuery(this).is(':checked'); saveSettings(); if (settings.pluginOn) { startPolling(); compact.setPluginEnabled(true); } else { stopPolling(); compact.setPluginEnabled(false); } });
-  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); jQuery('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); jQuery('#sl_minimax_h3_card').toggle(settings.modelType === 'minimax_h3_image'); saveSettings(); refreshCoopCards(); checkLastMessage(); });
+  b.off('change', '#sl_model_type').on('change', '#sl_model_type', function () { settings.modelType = jQuery(this).val(); b.find('#sl_krea2_style_card').toggle(settings.modelType === 'krea2'); b.find('#sl_moss_card').toggle(settings.modelType === MOSS_IMAGE_MODE); saveSettings(); refreshCoopCards(); checkLastMessage(); });
+  b.off('change', '#sl_moss_width, #sl_moss_height').on('change', '#sl_moss_width, #sl_moss_height', function () {
+    const isWidth = this.id === 'sl_moss_width';
+    if (!isMossDimension(this.valueAsNumber)) {
+      const canvas = getMossCanvas();
+      this.value = isWidth ? canvas.width : canvas.height;
+      toast('warning', '画布宽高必须是 16 的正整数倍');
+      return;
+    }
+    settings[isWidth ? 'mossWidth' : 'mossHeight'] = this.valueAsNumber;
+    saveSettings();
+  });
   b.off('change', '#sl_image_mode').on('change', '#sl_image_mode', function () { settings.imageMode = jQuery(this).val(); saveSettings(); });
   b.off('change', '#sl_img_width').on('change', '#sl_img_width', function () { settings.imgBlockWidth = jQuery(this).val(); saveSettings(); });
   b.off('click', '#sl_copy_instr').on('click', '#sl_copy_instr', function () { var t = isPromptsLoaded() ? (getPrompt('main-llm-instruction.txt') || '') : ''; if (!t) t = '[img:画面描述] 指令未加载，请刷新重试'; if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(function () { toast('success', '指令已复制，贴到角色卡/预设/世界书'); }, function () { toast('error', '复制失败'); }); } else { toast('error', '浏览器不支持剪贴板'); } });

@@ -1,5 +1,19 @@
 // ── SillyImage Lab 设置中心 ──
 export var settings = {};
+export const MOSS_IMAGE_MODE = 'moss_image';
+const defaultMossCanvas = { width: 1536, height: 864 };
+
+export function isMossDimension(value) {
+    return Number.isSafeInteger(value) && value > 0 && value % 16 === 0;
+}
+
+export function getMossCanvas() {
+    const { mossWidth, mossHeight } = settings;
+    return {
+        width: isMossDimension(mossWidth) ? mossWidth : defaultMossCanvas.width,
+        height: isMossDimension(mossHeight) ? mossHeight : defaultMossCanvas.height,
+    };
+}
 
 export function getDefaults() {
     return {
@@ -17,6 +31,8 @@ export function getDefaults() {
         nsfwEnhance: false,
         modelType: 'zit',
         krea2Style: '',
+        mossWidth: defaultMossCanvas.width,
+        mossHeight: defaultMossCanvas.height,
         uiTheme: '雪白猫',
         debugMode: false,
         historyRounds: 5,
@@ -83,6 +99,7 @@ function preferences(source) {
 
 export function loadPreferences() {
     Object.assign(settings, preferences(_extensionSettings?.cat_image || {}));
+    if (settings.modelType === 'minimax_h3_image') settings.modelType = MOSS_IMAGE_MODE;
 }
 
 export function saveSettings() {
@@ -101,7 +118,7 @@ export var MODES = [
     { id: 'anime',     label: 'Anime（纯英文描述）',                                        short: 'Anime（纯英文描述）',          badge: '🎬 Anime' },
     { id: 'anime_tag', label: 'Anime Tag（纯英文标签）',                                    short: 'Anime Tag（纯英文标签）',      badge: '🎬 Tag' },
     { id: 'krea2',     label: '🎬 Krea 2（英文自然语言段落）★ Krea 2 / 通用基座模型推荐',      short: 'Krea 2（英文自然语言段落）',   badge: '🎬 Krea2' },
-    { id: 'minimax_h3_image', label: '🎬 MiniMax-H3-Image（纯二次元 · Galgame CG）', short: 'MiniMax-H3-Image（Galgame CG）', badge: '🎬 H3 CG' },
+    { id: MOSS_IMAGE_MODE, label: '🎬 MOSS-Image（Layout JSON · Galgame CG）', short: 'MOSS-Image（Galgame CG）', badge: '🎬 MOSS CG' },
 ];
 
 export function modeLabel(id) {
@@ -114,14 +131,9 @@ export function modeBadge(id) {
     return '🖼️ ZIT';
 }
 
-// ── 是否「英文提示词」模式（含 Krea 2 / MiniMax-H3-Image）──
+// 英文模式共用同一套人物锚点。
 // 统一入口：以后新增英文模式只改这里，不用再去各处撒 if
 export function isEnglishMode(mode) {
     var m = mode || getActiveMode();
-    return m === 'anime' || m === 'anime_tag' || m === 'anima' || m === 'krea2' || m === 'minimax_h3_image';
-}
-
-// English prose modes share the EN-PROMPT profile field, rather than EN-TAGS.
-export function isEnglishProseMode(mode = getActiveMode()) {
-    return mode === 'anime' || mode === 'krea2' || mode === 'minimax_h3_image';
+    return m === 'anime' || m === 'anime_tag' || m === 'anima' || m === 'krea2' || m === MOSS_IMAGE_MODE;
 }

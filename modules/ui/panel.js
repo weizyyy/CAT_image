@@ -21,6 +21,7 @@ export function showPanel() {
   if (_maskEl) _maskEl.show().addClass('sl-mask-in');
   var _ce2 = compact.getCompactEl(); if (_ce2) _ce2.hide();
   tabs.renderHomeTab();
+  compact.refreshCompactBar();
 }
 export function hidePanel() {
   _expandedVisible = false;
@@ -147,6 +148,11 @@ export function buildUI(extSettings) {
     css.push('#sl_panel .sl_switch input:checked + .sl_switch_track{background:var(--sl-accent)}');
     css.push('#sl_panel .sl_switch input:checked + .sl_switch_track::after{transform:translateX(16px)}');
     css.push('#sl_panel .sl_switch input:focus-visible + .sl_switch_track{outline:2px solid var(--sl-accent);outline-offset:3px}');
+    css.push('#sl_panel .sl_home_power{margin-top:10px;padding:0 11px;border:1px solid var(--sl-line);border-radius:999px;background:var(--sl-bg)}');
+    css.push('#sl_panel .sl_home_power #sl_plugin_on_label{font-size:11px!important;color:var(--sl-sub)!important}');
+    css.push('#sl_panel .sl_home_power .sl_switch{width:34px;height:20px}');
+    css.push('#sl_panel .sl_home_power .sl_switch_track::after{width:14px;height:14px}');
+    css.push('#sl_panel .sl_home_power input:checked + .sl_switch_track::after{transform:translateX(14px)}');
     css.push('.sl-mask-in{animation:slFadeUp .2s ease both}');
     css.push('.sl-drawer-in{animation:slSlideIn .3s cubic-bezier(.32,.72,.28,1) both}');
     css.push('@keyframes slSlideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}');

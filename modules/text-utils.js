@@ -1,4 +1,5 @@
 import { tokenizePlaceholders } from './placeholders.js';
+import { MOSS_IMAGE_MODE } from './settings.js';
 // ── SillyImage Lab 文本处理工具 ──
 
 // 清洗 AI 模型输出的 XML/思考标签
@@ -52,20 +53,9 @@ export function cleanAnimePrompt(prompt) {
     return t;
 }
 
-// H3 can render literal non-English lettering inside an English caption.
-// Keep quoted text exact through language cleanup and character-name filtering.
-export function preserveQuotedText(prompt, transform) {
-    const text = String(prompt || ''), quotes = [];
-    let prefix = '⟦SLQ_';
-    while (text.includes(prefix)) prefix += '_';
-    const protectedText = text.replace(/"(?:\\.|[^"\\])*"|“[^”]*”/g, quote => {
-        quotes.push(quote); return prefix + (quotes.length - 1) + '⟧';
-    });
-    return transform(protectedText).replace(new RegExp(prefix + '(\\d+)⟧', 'g'), (_match, i) => quotes[Number(i)]);
-}
-
 export function cleanPromptForMode(prompt, mode) {
-    return mode === 'minimax_h3_image' ? preserveQuotedText(prompt, cleanAnimePrompt) : cleanAnimePrompt(prompt);
+    // Layout JSON contains literal text fields, while standalone portraits use plain prompts.
+    return mode === MOSS_IMAGE_MODE && String(prompt || '').trimStart().startsWith('{') ? prompt : cleanAnimePrompt(prompt);
 }
 
 // ══════════════════════════════

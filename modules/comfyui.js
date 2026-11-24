@@ -1,12 +1,12 @@
 import { workflowRequest } from './workflow-template.js';
 // ── SillyImage Lab 🎨 ComfyUI连接 通信 ──
 import { slLog } from './log.js';
-import { settings, getSTHeaders, saveSettings, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
+import { settings, getSTHeaders, saveSettings, escapeHtml, getActiveMode, isEnglishMode, MOSS_IMAGE_MODE } from './settings.js';
 import { uploadImageToST } from './cache.js';
 import { getCharacterName } from './archive.js';
 import { rosterEntries } from './roster.js';
 import { krea2StylePrompt } from './style-presets.js';
-import { preserveQuotedText } from './text-utils.js';
+import { parseMossLayout } from './moss-layout.js';
 
 // [Fix] 提示词角色名过滤（最后防线）：LLM 偶发违规把角色名写进提示词，或 FACE 占位符残留。
 // 角色名是生图模型无法理解的概念噪音，且会把名字当成画面元素画出来。
@@ -120,13 +120,20 @@ export async function deleteWorkflow(name) {
 // 目的：面板里"复制提示词"必须等于**实际发给 ComfyUI 的那一条**（走一遍真实管线，而不是只给裸提示词）
 // 仅保留模型输出、画风和艺术家风格，不注入通用前缀或负面词。
 export function composeFinalPrompt(prompt, curMode = getActiveMode()) {
+    if (curMode === MOSS_IMAGE_MODE && String(prompt).trimStart().startsWith('{')) {
+        const layout = parseMossLayout(prompt);
+        if (!layout) throw new Error('MOSS-Image 布局格式不正确，请重新解析图卡');
+        if (!settings.animeArtist?.trim()) return prompt.trim();
+        layout.summary.caption += ', ' + settings.animeArtist.trim();
+        return JSON.stringify(layout);
+    }
     prompt = String(prompt || '')
         .replace(/\[image:[^\]]*\]/g, '')
         .replace(/【提示词[】:：]*/g, '').replace(/【\/提示词】/g, '')
         .replace(/【\s*💬[^\n]*/g, '')
         .replace(/\n\s*【[^】]*】/g, '\n')
         .trim();
-    prompt = curMode === 'minimax_h3_image' ? preserveQuotedText(prompt, stripCharacterNames) : stripCharacterNames(prompt);
+    prompt = stripCharacterNames(prompt);
     var domVal = (jQuery('#sl_style_preset').length ? jQuery('#sl_style_preset').val() : '') || '';
     var stylePrefix = domVal || settings.stylePreset || '';
     if (stylePrefix && !STYLE_PRESETS[stylePrefix]) {

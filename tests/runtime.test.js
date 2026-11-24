@@ -598,7 +598,7 @@ test('the reading theme recolors complete cards and newly generated cards use ma
 });
 
 test('the compact panel and icon dock to the dragged edge across collapse and viewport changes', async t => {
-    const { createCompactBar, setPluginEnabled } = await import('../modules/ui/compact-bar.js');
+    const { createCompactBar, removeCompactBar } = await import('../modules/ui/compact-bar.js');
     const width = window.innerWidth, height = window.innerHeight;
     const oldPosition = localStorage.getItem('sl_compact_pos');
     t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -651,7 +651,7 @@ test('the compact panel and icon dock to the dragged edge across collapse and vi
         assert.equal(bar.style.top, '45px');
         assert.equal(localStorage.getItem('sl_compact_pos'), docked);
     } finally {
-        setPluginEnabled(false);
+        removeCompactBar();
         resize(width, height);
         if (oldPosition === null) localStorage.removeItem('sl_compact_pos');
         else localStorage.setItem('sl_compact_pos', oldPosition);
@@ -807,69 +807,95 @@ test('cancel image queue aborts active request, drops waiting/portrait tasks and
     clearQueue(); release(); await new Promise(r => setTimeout(r, 0)); settings.autoGen = 0;
 });
 
-test('H3 uses its own English overlay, preserves quoted lettering end to end, and keeps workflow geometry exact', async () => {
-    const { MODES, isEnglishMode, isEnglishProseMode } = await import('../modules/settings.js');
-    const { cleanPromptForMode } = await import('../modules/text-utils.js');
-    const { extractImgBlocksFromEnhanced } = await import('../modules/render.js');
-    const { generateImage, composeFinalPrompt } = await import('../modules/comfyui.js');
-    const savedMode = settings.modelType; settings.modelType = 'minimax_h3_image';
+const mossLayout = (caption, text) => ({
+    summary: { meta: ['visual novel event CG'], canvas: 'single', caption },
+    items: [
+        { label: 'character', tags: ['black hair', 'olive coat'], caption: 'A courier holds a parcel', bbox: [-410, -100, 432, 620] },
+        ...(text ? [{ label: 'text', caption: 'Small painted sign', text, bbox: [-300, -760, -220, -320] }] : []),
+    ],
+    bbox_coord_space: 'abs_centralized',
+    bbox_format: 'yxyx',
+});
+
+test('MOSS layout passes from its own overlay through the real image button and opaque workflow without altering lettering', async () => {
+    const { MODES, isEnglishMode } = await import('../modules/settings.js');
+    const { setEnqueueGen, extractImgBlocksFromEnhanced } = await import('../modules/render.js');
+    const { enqueueGen, getQueueStatus } = await import('../modules/queue.js');
+    const saved = { modelType: settings.modelType, animeArtist: settings.animeArtist, cWf: settings.cWf, mossWidth: settings.mossWidth };
+    Object.assign(settings, { modelType: 'moss_image', animeArtist: 'ink and restrained cel shading', mossWidth: 1600 });
     try {
         assert.equal(MODES.filter(m => m.id === settings.modelType).length, 1);
-        assert.equal(isEnglishMode(), true); assert.equal(isEnglishProseMode(), true);
-        const caption = 'A painted sign reads "Tester的茶铺" above the door. Her left hand supports the parcel while her right hand rests on its side.';
+        assert.equal(isEnglishMode(), true);
+        const caption = 'A courier supports a parcel with both hands in a rainlit station.';
+        const text = 'Tester的茶铺\n"欢迎" <茶> [image:牌] 【/提示词】 ---END---';
+        const layout = mossLayout(caption, text);
         let request;
-        fetch = async (_url, options) => { request = JSON.parse(options.body); return response(caption); };
-        const result = await runRosterPipeline('[img:茶铺|要点:手托包裹，招牌文字Tester的茶铺]', 'h3');
+        fetch = async (_url, options) => { request = JSON.parse(options.body); return response(JSON.stringify(layout, null, 2)); };
+        const result = await runRosterPipeline('[img:茶铺|要点:手托包裹，招牌文字Tester的茶铺]', 'moss');
+        assert.equal(result.ok, true);
         const system = request.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-        assert.ok(system.includes('【模式：MiniMax-H3-Image'));
         const { getPrompt } = await import('../prompts/loader.js');
-        assert.ok(system.includes(getPrompt('pipeline/minimax-h3-image-overlay.txt').trim()));
+        assert.ok(system.includes(getPrompt('pipeline/moss-image-overlay.txt').trim()));
         assert.equal(system.includes('【模式：Krea 2'), false);
-        assert.ok(system.includes('a widescreen 16:9 composition'));
-        assert.equal(system.includes('slightly taller-than-wide'), false);
-        assert.equal(request.messages.at(-1).content.includes('a widescreen 16:9 composition'), false);
-        const block = extractImgBlocksFromEnhanced(result.enhanced, 'h3')[0];
-        assert.ok(block.prompt.includes('"Tester的茶铺"'));
-        const cleaned = cleanPromptForMode(block.prompt, settings.modelType);
-        assert.ok(composeFinalPrompt(cleaned).includes('"Tester的茶铺"'));
-        const workflow = '{"text":{"inputs":{"text":"%prompt%"}},"canvas":{"inputs":{"width":1152,"height":1280}},"untouched":"%negative_prompt%"}';
+        assert.match(request.messages.at(-1).content, /实际宽 1600 px，高 864 px/);
+        const blocks = extractImgBlocksFromEnhanced(result.enhanced, 'moss');
+        assert.equal(blocks.length, 1);
+        assert.deepEqual(JSON.parse(blocks[0].prompt), layout);
+        settings.cWf = '{"text":{"inputs":{"text":"%prompt%"}},"canvas":{"inputs":{"width":1600,"height":864}},"untouched":"%negative_prompt%"}';
         let sent;
         fetch = async (url, options) => {
             if (String(url).endsWith('/generate')) { sent = JSON.parse(JSON.parse(options.body).prompt); return { ok: true, json: async () => ({ data: 'AA==' }) }; }
-            return { ok: true, json: async () => ({ path: '/h3-fixture.png' }) };
+            return { ok: true, json: async () => ({ path: '/moss-fixture.png' }) };
         };
-        await generateImage(workflow, cleaned);
-        assert.ok(sent.prompt.text.inputs.text.includes('"Tester的茶铺"'));
-        assert.deepEqual(sent.prompt.canvas.inputs, { width: 1152, height: 1280 });
+        setEnqueueGen(enqueueGen);
+        document.querySelector('#chat').innerHTML = blocks[0].html;
+        document.querySelector('.sl_img_btn').click();
+        await waitUntil(() => document.querySelector('.sl_img_result') && !getQueueStatus().running);
+        layout.summary.caption += ', ' + settings.animeArtist;
+        assert.deepEqual(JSON.parse(sent.prompt.text.inputs.text), layout);
+        assert.deepEqual(sent.prompt.canvas.inputs, { width: 1600, height: 864 });
         assert.equal(sent.prompt.untouched, '%negative_prompt%');
-    } finally { settings.modelType = savedMode; }
+    } finally { Object.assign(settings, saved); }
 });
 
-test('H3 retries caption JSON wrappers instead of forwarding them as image prompts', async () => {
-    const savedMode = settings.modelType; settings.modelType = 'minimax_h3_image'; let calls = 0;
+test('MOSS retries bad coordinate layouts and leaves the marker intact if it still receives prose', async () => {
+    const savedMode = settings.modelType; settings.modelType = 'moss_image'; let calls = 0;
     try {
-        fetch = async () => response(++calls === 1 ? '{"expanded_caption":"A natural portrait.","aspect_ratio":"1:1"}' : 'A natural portrait in a compact frame.');
-        const result = await runRosterPipeline('[img:人像]', 'h3-json');
+        const layout = mossLayout('A painted courier scene.');
+        const bad = structuredClone(layout);
+        bad.items[0].bbox[2] = 500;
+        fetch = async (_url, options) => {
+            if (++calls === 1) return response(JSON.stringify(bad));
+            assert.match(JSON.parse(options.body).messages.at(-1).content, /原生 MOSS-Image Layout JSON/);
+            return response(JSON.stringify(layout));
+        };
+        const source = '[img:人像]';
+        const result = await runRosterPipeline(source, 'moss-json');
         assert.equal(result.ok, true); assert.equal(calls, 2);
-        assert.ok(result.enhanced.includes('A natural portrait in a compact frame.'));
-        assert.equal(result.enhanced.includes('aspect_ratio'), false);
+        assert.ok(result.enhanced.includes(JSON.stringify(layout)));
+        fetch = async () => { calls++; return response('A standalone paragraph instead of the required layout.'); };
+        const rejected = await runRosterPipeline(source, 'moss-prose');
+        assert.equal(rejected.ok, false);
+        assert.equal(rejected.enhanced, source);
+        assert.equal(calls, 4);
     } finally { settings.modelType = savedMode; }
 });
 
-test('H3 mode cannot reuse another model prompt; edits within H3 still reuse unchanged slots', async () => {
+test('MOSS mode cannot reuse another model prompt; edits within MOSS still reuse unchanged slots', async () => {
     const savedMode = settings.modelType; settings.modelType = 'zit';
     let calls = 0; fetch = async () => response('Independent image caption ' + ++calls);
     show('[img:甲][img:乙]'); scanner.startPolling();
     try {
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
         const oldId = document.querySelector('.sl_img_btn').dataset.slid;
-        settings.modelType = 'minimax_h3_image';
+        settings.modelType = 'moss_image';
+        fetch = async () => response(JSON.stringify(mossLayout('Independent layout ' + ++calls)));
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
-        const h3Id = document.querySelector('.sl_img_btn').dataset.slid;
-        assert.equal(calls, 4); assert.notEqual(h3Id, oldId);
+        const mossId = document.querySelector('.sl_img_btn').dataset.slid;
+        assert.equal(calls, 4); assert.notEqual(mossId, oldId);
         ctx.chat[0].mes = '[img:甲][img:丙]'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
-        assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, h3Id);
+        assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, mossId);
         settings.modelType = 'zit'; ctx.chat[0].mes = '[img:甲][img:乙]'; document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery('.mes_text')); await waitUntil(() => !scanner.scanCoordinator.running);
         assert.equal(calls, 5); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
@@ -886,12 +912,14 @@ test('a historical image from another mode restores from cache and can be reanal
         ctx.chat.push({ mes: '新的回复，无图', is_user: false, swipe_id: 0 });
         document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">新的回复，无图</div></div>');
         document.querySelector('.mes_text').textContent = ctx.chat[0].mes;
-        settings.modelType = 'minimax_h3_image'; scanner.scanAllMsgs();
+        settings.modelType = 'moss_image'; scanner.scanAllMsgs();
         assert.equal(calls, 1); assert.equal(document.querySelector('.sl_img_btn').dataset.slid, oldId);
         assert.equal(document.querySelector('.sl_img_block img').getAttribute('src'), '/history.png');
+        const newLayout = mossLayout('Historical scene as a MOSS layout.');
+        fetch = async () => { calls++; return response(JSON.stringify(newLayout)); };
         document.querySelector('.sl_img_reanalyze').click();
-        await waitUntil(() => document.querySelector('.sl_img_btn').dataset.prompt === 'Historical image caption 2');
-        assert.equal(document.querySelector('.sl_img_btn').dataset.slMode, 'minimax_h3_image');
+        await waitUntil(() => document.querySelector('.sl_img_btn').dataset.prompt === JSON.stringify(newLayout));
+        assert.equal(document.querySelector('.sl_img_btn').dataset.slMode, 'moss_image');
         assert.equal(calls, 2);
         assert.notEqual(document.querySelector('.sl_img_btn').dataset.slid, oldId);
     } finally { scanner.stopPolling(); settings.modelType = savedMode; }
@@ -903,17 +931,21 @@ test('assembled requests keep shared policies, model overlays and per-call recor
     const { upsertPerson, setEnglishAnchor } = await import('../modules/roster.js');
     const { upsertEntry } = await import('../modules/wardrobe.js');
     const saved = { mode: settings.modelType, layered: settings.slPurgeLayered };
-    const overlayPaths = { zit: 'zit', anima: 'anima', anime: 'anime', anime_tag: 'anime-tag', krea2: 'krea2', minimax_h3_image: 'minimax-h3-image' };
+    const overlayPaths = { zit: 'zit', anima: 'anima', anime: 'anime', anime_tag: 'anime-tag', krea2: 'krea2', moss_image: 'moss-image' };
     const anchor = 'race:LayerTestOrigin | age:forty-two | nose:LayerTestNose | skin_tone:LayerTestTone';
     const detail = 'LayerTestBlue cotton jacket, LayerTestRound collar';
     const source = '[img:递出包裹|人物:LayerActor（层次测试）|造型:服装=LayerOutfit|要点:腰部以上，左手托住包裹]';
     let request;
     try {
-        settings.modelType = 'minimax_h3_image';
+        settings.modelType = 'moss_image';
         upsertPerson('LayerActor', '层次测试', '本轮档案原文', 'anchor');
         setEnglishAnchor('LayerActor', '层次测试', anchor);
         upsertEntry('服装', 'LayerOutfit', detail, 'expanded');
-        fetch = async (_url, options) => { request = JSON.parse(options.body); return response('A waist-up view shows an adult supporting a parcel with the left hand.'); };
+        fetch = async (_url, options) => {
+            request = JSON.parse(options.body);
+            const caption = 'A waist-up view shows a courier supporting a parcel with the left hand.';
+            return response(settings.modelType === 'moss_image' ? JSON.stringify(mossLayout(caption)) : caption);
+        };
         for (const mode of MODES) for (const layered of [true, false]) {
             settings.modelType = mode.id; settings.slPurgeLayered = layered;
             const result = await runRosterPipeline(source, 'layer-audit');
@@ -931,9 +963,10 @@ test('assembled requests keep shared policies, model overlays and per-call recor
             assert.ok(user.includes('【造型库】') && user.includes(detail));
             assert.equal(system.includes(anchor) || system.includes(detail), false, 'records belong to the user payload');
             assert.equal(user.includes('只用光学与肤质词') || user.includes('重写四条 portrait'), false);
-            if (mode.id === 'minimax_h3_image') {
+            if (mode.id === 'moss_image') {
                 assert.doesNotMatch(overlay, /【人物档案】|【造型库】|\b(?:anchor|aura|portrait)\b|---(?:PROFILE|WARDROBE)---/);
-                assert.equal(user.includes('【MiniMax-H3-Image】') || user.includes('标签区'), false);
+                assert.match(user, /MOSS-Image Layout JSON/);
+                assert.doesNotMatch(user, /第1条纯文本提示词/);
             }
         }
     } finally {

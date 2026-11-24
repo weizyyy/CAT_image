@@ -34,9 +34,9 @@
 | 模式 | detail 语言 | 风格 |
 |---|---|---|
 | `zit` | 中文 | 自然短语，逗号分隔 |
-| `anima` | 英文 | Danbooru 标签链 + 少量自然短语 |
+| `anima` / `moss_image` | 英文 | Danbooru 标签链 + 少量自然短语；MOSS-Image 保留可见项，放进对应人物的 tags |
 | `anime` | 英文 | 自然语言短语 |
-| `krea2` / `minimax_h3_image` | 英文 | 固定特征短语；写入图像提示词时逐项融入连贯句子 |
+| `krea2` | 英文 | 固定特征短语；写入图像提示词时逐项融入连贯句子 |
 | `anime_tag` | 英文 | 纯 Danbooru 标签 |
 
 **不要输出中文到英文模式**（会被 cleanAnimePrompt 删空）。

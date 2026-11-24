@@ -6,6 +6,12 @@
 
 流式回复结束后，插件分析各个占位符。手动模式用「生成图片」出图。自动模式排入最新 AI 楼层尚未生成的图位。只改一处占位符时，该处重新分析，其他图卡继续显示。点「重新解析」可以重写单个图位的提示词。完整悬浮窗的「取消全部」中止待分析和待生成任务。
 
+### MOSS-Image 布局配图
+
+选择「MOSS-Image（Layout JSON · Galgame CG）」。横图默认 1536×864，在 ComfyUI 和插件的「模型与偏好」中使用同一宽高。布局框按采样画布的像素计算；调整尺寸后，可对旧图卡点「重新解析」更新坐标。
+
+在 MOSS-Image API 工作流中，把 `%prompt%` 放在直接送给正向编码的完整文本输入。关闭 `enable_prompt_enhancer`，并绕过会再次打包边界框的节点。插件会把画师给出的 `summary` 与 `items` 一起传入。参见 [OpenMOSS 用户指南](https://github.com/OpenMOSS/MOSS-Image/blob/main/USERGUIDE.md#layout-prompts-experimental) 和 [ComfyUI 布局模板说明](https://github.com/Comfy-Org/docs/blob/main/tutorials/image/moss-image/moss-image.mdx)。
+
 ## 角色档案与图库
 
 人物根据占位符建档。展开其他聊天组可查看或复制其中的人物，已有的同键人物会沿用。点人物进入详情，可以编辑英文锚点、生成立绘或删除该人物。

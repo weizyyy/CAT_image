@@ -2,7 +2,7 @@ import { tokenizePlaceholders } from './placeholders.js';
 import { mountSlots, updateSlots } from './dom-placeholders.js';
 // ── SillyImage Lab 渲染 ──
 import { slErr } from './log.js';
-import { settings, escapeHtml, getActiveMode, isEnglishMode } from './settings.js';
+import { settings, escapeHtml, getActiveMode, isEnglishMode, MOSS_IMAGE_MODE } from './settings.js';
 import { applyTextTheme } from './ui/theme.js';
 
 import { imgCacheGetById } from './cache.js';
@@ -76,7 +76,7 @@ export function bindImageButtonsIn(doc) {
         }
     });
     jQuery(doc).on('click', '.sl_img_btn', async function() {
-        var btn = jQuery(this), prompt = btn.data('prompt');
+        var btn = jQuery(this), prompt = this.dataset.prompt;
         if (btn.text() === '排队中…') return;
         enqueueGen(btn, prompt);
     });
@@ -96,13 +96,16 @@ function enqueueGen(btn, prompt, options) { if (_enqueueGen) _enqueueGen(btn, pr
 export function extractImgBlocksFromEnhanced(enhancedText, blockKey, startIndex = 0, blockIds, mode = getActiveMode()) {
     var blocks = [];
     if (!enhancedText) return blocks;
-    var re = /\[image:\s*([\s\S]*?)\]/g;
+    // Consume the entire JSON field, including any bracketed lettering in its strings.
+    var re = mode === MOSS_IMAGE_MODE
+        ? /\[image:\s*([^\]]*)\]\r?\n【提示词】(\{[^\r\n]*\})【\/提示词】/g
+        : /\[image:\s*([\s\S]*?)\]/g;
     var m;
     var blockIdx = startIndex;
     while ((m = re.exec(enhancedText)) !== null) {
         var scene = (m[1] || '').trim();
         // [Fix] 用正则匹配位置定位提示词（同场景多图不共用第一块，B4）
-        var promptContent = extractImagePrompt(enhancedText, m[0], m.index) || '';
+        var promptContent = m[2] ?? extractImagePrompt(enhancedText, m[0], m.index);
         // [Fix] 提示词只用【提示词】块内容（无则回退场景）：占位符配图场景是主 LLM 写的长叙事
         // （人物动作/表情/衣着），拼进提示词会把剧情文字+角色名喂给生图模型
         var fullPrompt = promptContent || scene;
@@ -129,7 +132,7 @@ export function renderEnhancedLite(element, enhancedText, blockKey, sourceText,
         for (const slot of slots) {
             const btn = slot.querySelector('.sl_img_btn');
             if (!btn) continue;
-            if (btn.textContent.includes('生成图片') && !btn.closest('.sl_img_block')?.querySelector('img')) enqueueGen(jQuery(btn), jQuery(btn).data('prompt'), { automatic: true });
+            if (btn.textContent.includes('生成图片') && !btn.closest('.sl_img_block')?.querySelector('img')) enqueueGen(jQuery(btn), btn.dataset.prompt, { automatic: true });
         }
     }
     return slots.length > 0;

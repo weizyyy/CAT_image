@@ -4,7 +4,8 @@ import { tokenizePlaceholders, replaceTokens } from '../placeholders.js';
 // 起为唯一管线（旧画师管线 runAuxPipeline 已移除）
 
 import { slLog, slErr } from '../log.js';
-import { settings, getActiveMode, isEnglishMode } from '../settings.js';
+import { settings, getActiveMode, isEnglishMode, MOSS_IMAGE_MODE, getMossCanvas } from '../settings.js';
+import { parseMossLayout } from '../moss-layout.js';
 import { auxApiCallRaw } from './api.js';
 import { isPromptsLoaded, getPrompt } from '../../prompts/loader.js';
 import { findImagePlaceholders, buildImageBlock, extractDynamicBits, findLostNumbers, wrapFactSpan, parseCheckSection } from '../text-utils.js';
@@ -19,7 +20,7 @@ import { krea2StyleById } from '../style-presets.js';
 //   不重试 → 剩下 2 条直接走中文场景兜底（就是用户看到的"没重试就用了主模型的词"）。
 var REFUSAL_RE = /(抱歉|对不起|我无法|我不能|我无法协助|无法协助|不便协助|恕难|无法生成|不能生成|违反.{0,6}政策|不当内容|敏感内容|不符合.{0,6}(准则|规范)|作为.{0,4}(AI|人工智能|语言模型)|I can't|I cannot|I'm sorry|I am unable|As an AI|cannot assist|cannot help)/i;
 
-export function classifyPipelineFailure(out, expectCount, meta) {
+export function classifyPipelineFailure(out, expectCount, meta, mode = getActiveMode(), canvas = getMossCanvas()) {
     // 截断**先判**。
     // 旧实现没有 truncated 这一类，截断被压缩成 empty（正文空）或 short（条数不足）：
     //   empty → 「不带上次输出整轮重发」→ 思考白烧一遍，还要再烧一遍；
@@ -37,7 +38,7 @@ export function classifyPipelineFailure(out, expectCount, meta) {
     // 结构标记在 → 再看 IMAGES 段实际回了几条
     if (expectCount && expectCount > 0) {
         var lines = [];
-        try { lines = parseRosterImages(t, expectCount) || []; } catch (ePL) { lines = []; }
+        try { lines = parseRosterImages(t, expectCount, mode) || []; } catch (ePL) { lines = []; }
         if (!lines.length) return REFUSAL_RE.test(t) ? 'refusal' : 'noimage';
         if (lines.length < expectCount) {
             // 条数不足时把"标记计数"打出来 —— 不猜，让失败可见。
@@ -51,9 +52,7 @@ export function classifyPipelineFailure(out, expectCount, meta) {
         }
         for (var i = 0; i < lines.length; i++) {
             if (lines[i] && lines[i].length < 120 && REFUSAL_RE.test(lines[i])) return 'refusal';
-            if (getActiveMode() === 'minimax_h3_image' && /^[\[{]/.test(lines[i]?.trim() || '')) {
-                try { if (typeof JSON.parse(lines[i]) === 'object') return 'captionformat'; } catch { /* Ordinary prose is allowed. */ }
-            }
+            if (mode === MOSS_IMAGE_MODE && !parseMossLayout(lines[i], canvas)) return 'layoutformat';
         }
     }
     return '';
@@ -68,7 +67,7 @@ function _missingHint(expectCount, gotCount) {
 
 // ── 数字保真：逐条对比"主模型给的数字"与"输出提示词里剩下的数字" ──
 // 返回 [{ i: 0, items: ['14岁'] }]（i = 占位符下标，0-based）
-export function findLostNumbersInPrompts(placeholders, prompts) {
+export function findLostNumbersInPrompts(placeholders, prompts, mode = getActiveMode()) {
     var misses = [];
     if (!placeholders || !prompts) return misses;
     var n = Math.min(placeholders.length, prompts.length);
@@ -77,7 +76,12 @@ export function findLostNumbersInPrompts(placeholders, prompts) {
         var segs = ph.personSegments || [];
         var src = [ph.scene || '', ph.topic || ''];
         for (var j = 0; j < segs.length; j++) src.push(segs[j].appearance || '');
-        var lost = findLostNumbers(src.join(' '), prompts[i] || '');
+        let text = prompts[i] || '';
+        if (mode === MOSS_IMAGE_MODE) {
+            const layout = parseMossLayout(text);
+            text = layout ? [layout.summary.caption, ...layout.items.flatMap(item => [item.caption, ...(item.tags || [])])].join(' ') : '';
+        }
+        var lost = findLostNumbers(src.join(' '), text);
         if (lost.length) misses.push({ i: i, items: lost });
     }
     return misses;
@@ -150,10 +154,10 @@ var MODE_OVERLAY = {
     anime:     'pipeline/anime-overlay.txt',
     anime_tag: 'pipeline/anime-tag-overlay.txt',
     krea2:     'pipeline/krea2-overlay.txt',
-    minimax_h3_image: 'pipeline/minimax-h3-image-overlay.txt',
+    [MOSS_IMAGE_MODE]: 'pipeline/moss-image-overlay.txt',
 };
 
-function buildPurgeMessages() {
+function buildPurgeMessages(pipeMode) {
     var msgs = [];
     function push(text) {
         var t = String(text || '').trim();
@@ -183,7 +187,6 @@ function buildPurgeMessages() {
     push(['atomic-vocab.txt', 'wardrobe-vocab.txt', 'wardrobe-expand.txt']
         .map(_p).filter(Boolean).join('\n\n'));
     // ⑥ 模式 overlay
-    var pipeMode = getActiveMode();
     push(_p(MODE_OVERLAY[pipeMode] || MODE_OVERLAY.zit));
     if (settings.nsfwEnhance) push(_p('pipeline/nsfw-overlay.txt'));
 
@@ -199,11 +202,14 @@ function buildPurgeMessages() {
 // 与"整轮重发"的区别：重发要再烧一次完整预算（含思考），而思考在第一轮已经做完了。
 // 续写一律**关思考** —— 规划已完成，续写阶段的 reasoning 是纯浪费，还会再挤占一次预算。
 // ── 用户消息：人物表 + 占位符（不发送正文——占位符配图插件AI 只做"档案+酒馆AI要点 → 提示词"的编辑） ──
-function buildRosterUserContent(placeholders, wardrobeInfo) {
+function buildRosterUserContent(placeholders, wardrobeInfo, mode, canvas) {
     var lines = [];
+    const moss = mode === MOSS_IMAGE_MODE;
     lines.push('【任务】为每个 [img:] 占位符输出 1 条提示词，按【占位符】编号一一对应。人物外貌必须引用【人物档案】，禁止用名字代替外貌。禁止偷懒：每一幅图都要写完整详情（人物当前状态+衣着发型+表情+动作+场景+光影），不允许省略/概括/一句话带过。');
+    if (moss) lines.push('【布局画布】实际宽 ' + canvas.width + ' px，高 ' + canvas.height + ' px。以画布中心为原点，x 范围 ±' +
+        canvas.width / 2 + '、y 范围 ±' + canvas.height / 2 + '；bbox 顺序 [y_min,x_min,y_max,x_max]。');
     // Krea 2 风格锁定 —— 风格句由插件统一前置（跨轮稳定），这里告诉模型"别再自己写媒介"
-    if (getActiveMode() === 'krea2') {
+    if (mode === 'krea2') {
         var _kstyle = krea2StyleById(settings.krea2Style);
         if (_kstyle && _kstyle.prompt) {
             lines.push('【风格·已由插件锁定】' + _kstyle.prompt);
@@ -219,11 +225,15 @@ function buildRosterUserContent(placeholders, wardrobeInfo) {
     // 于是 3 个占位符 → 3 个 PROFILE/IMAGES/END（实测 14707 字被误判 short）。
     // 解析器已经能合并多段；这里再把源头堵上，省掉重复输出的 token。
     lines.push('⚠️ **整轮只输出一次三段**：占位符有 N 个，就在**同一个** `---IMAGES---` 段里写 N 行。禁止"每个占位符各写一份 PROFILE/IMAGES/END"。');
-    lines.push('---PROFILE---\n{人物建档 JSON，无更新写{}}---END---\n\n[---WARDROBE---\n{造型具象化 JSON}---END---  ← **仅当【造型库】有「待具象化」条目时才输出这一段；没有就整段省略**]\n\n---IMAGES---\n第1条纯文本提示词（禁止 [image:]、禁止【提示词】包裹、禁止解释性文字）\n第2条……\n（条数=占位符数；零图写：（无））\n---END---');
+    const imageLine = moss ? '每条占位符输出一个紧凑的 MOSS-Image Layout JSON 对象，使用该模式规定的字段和坐标。'
+        : '第1条纯文本提示词（禁止 [image:]、禁止【提示词】包裹、禁止解释性文字）\n第2条……';
+    lines.push('---PROFILE---\n{人物建档 JSON，无更新写{}}---END---\n\n[---WARDROBE---\n{造型具象化 JSON}---END---  ← **仅当【造型库】有「待具象化」条目时才输出这一段；没有就整段省略**]\n\n---IMAGES---\n' + imageLine +
+        '\n（条数=占位符数；零图写：（无））\n---END---');
     lines.push('只输出以上段落，禁止任何其他内容：禁止图块、禁止复述正文/占位符原文、禁止聊天口吻、禁止 Markdown 代码块。');
     lines.push('');
     lines.push('【事实段·必须由你写进提示词】`事实:` 段里的每一条，都是**前提**不是描写，插件**不会**替你补写。');
-    lines.push('  · ✅ 你要做的：把它**原词**写进提示词的**主体句（②）**，前 1/3 内、不晚于第三句（例：`她，怀孕16周的孕妇，白衬衫被胸口与隆起的小腹撑起`）；');
+    lines.push(moss ? '  · 将原词与可见后果写进相关人物或物件的 caption。'
+        : '  · ✅ 你要做的：把它**原词**写进提示词的**主体句（②）**，前 1/3 内、不晚于第三句（例：`她，怀孕16周的孕妇，白衬衫被胸口与隆起的小腹撑起`）；');
     lines.push('  · ✅ 允许同义同指（`怀孕16周` ≈ `身孕四个月`），但**所指不能变**；');
     lines.push('  · ⛔ 不许换成体征或模糊词（「怀孕16周」→「小腹微隆」、「截肢」→「手臂有伤」、「化疗」→「气色不好」）；⛔ 不许省略、不许否认；');
     lines.push('  · ✅ 同时写它的**可见后果**：孕肚的弧度与位置、空袖管怎么别进腰带、头巾的包法、义眼的反光 —— 二者不冲突；');
@@ -456,7 +466,13 @@ function _parseImageLines(text) {
     return out;
 }
 
-export function parseRosterImages(output, expectedCount) {
+export function parseRosterImages(output, expectedCount, mode = getActiveMode()) {
+    if (mode === MOSS_IMAGE_MODE) {
+        // Match section markers on their own lines so literal lettering inside JSON is preserved.
+        const section = /(?:^|\n)[ \t]*---IMAGES---[ \t]*\r?\n([\s\S]*?)(?=\n[ \t]*---(?:END|PROFILE|IMAGES|CHECK|WARDROBE)---[ \t]*(?:\r?\n|$)|$)/.exec(output);
+        const part = section?.[1].trim().replace(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i, '$1');
+        return part && !/^(?:（无）|\(无\))$/.test(part) ? [part] : [];
+    }
     var sections = _allSections(output, 'IMAGES');
     if (!sections.length) return [];
     if (expectedCount === 1) {
@@ -479,7 +495,7 @@ export function parseRosterImages(output, expectedCount) {
 }
 
 // ── 占位符替换：原文 [img:…] → [image:场景]【提示词】…【/提示词】 ──
-export function fillPlaceholders(bodyText, placeholders, prompts) {
+export function fillPlaceholders(bodyText, placeholders, prompts, mode = getActiveMode()) {
     var phIdx = 0, pIdx = 0, missing = 0;
     var values = placeholders.map(function(ph) {
         var m = ph.text;
@@ -498,7 +514,7 @@ export function fillPlaceholders(bodyText, placeholders, prompts) {
         try { _auditFacts(ph, prompt, phIdx); } catch (eAudit) {}
         // 英文模式：字面出现的事实原样保护，避免被中文清洗吃掉（机械替换，不做语义判断）
         try {
-            if (isEnglishMode()) {
+            if (isEnglishMode(mode) && mode !== MOSS_IMAGE_MODE) {
                 var _fs2 = ph.facts || [];
                 for (var _fi = 0; _fi < _fs2.length; _fi++) {
                     var _f = String(_fs2[_fi] || '');
@@ -532,6 +548,7 @@ function _auditFacts(ph, prompt, idx) {
 
 // ── 入口 ──
 async function runSinglePipeline(bodyText, mesId, options) {
+    const mode = getActiveMode(), canvas = getMossCanvas();
     const callApi = async (...args) => {
         if (!options.isCurrent()) throw new Error('回复版本已变更');
         args[6] = options.signal;
@@ -587,8 +604,8 @@ async function runSinglePipeline(bodyText, mesId, options) {
         }
 
         // 2. 调用插件AI
-        var sysMsgs = buildPurgeMessages();
-        var userContent = buildRosterUserContent(placeholders, wardrobeInfo);
+        var sysMsgs = buildPurgeMessages(mode);
+        var userContent = buildRosterUserContent(placeholders, wardrobeInfo, mode, canvas);
         var expectN = placeholders.length;
         var baseMsgs = sysMsgs.concat([{ role: 'user', content: userContent }]);
 
@@ -601,11 +618,11 @@ async function runSinglePipeline(bodyText, mesId, options) {
         // 失败重试（兜底指令只在重试时下发 —— system prompt 里不留任何"可以省略/可以软化"的退路）
         //   拒绝/空回/格式崩 → **不带上次输出**重发（带着拒绝语重试会让它锚定在"我刚拒绝了"上）
         //   条数不足       → **带上上次输出** + 点名缺第几条（让它接着补，而不是整轮重写又漏）
-        var _fail = classifyPipelineFailure(output, expectN, _meta);
+        var _fail = classifyPipelineFailure(output, expectN, _meta, mode, canvas);
         // 数字保真闸门：条数对了，但主模型给的数字在提示词里蒸发了 → 同样算不合格
         var _lostNum = [];
         if (!_fail) {
-            try { _lostNum = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1)); } catch (eLN) { _lostNum = []; }
+            try { _lostNum = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1, mode), mode); } catch (eLN) { _lostNum = []; }
             if (_lostNum.length) {
                 _fail = 'lostnum';
                 slErr('⚠️ 数字保真：主模型给的数字在提示词里丢了 → 重试 · ' + _lostNum.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / '));
@@ -615,7 +632,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
         if (_fail) {
             slErr('⚠️ 管线输出不合格(' + _fail + ', ' + (output ? output.length : 0) + ' 字, 需要 ' + expectN + ' 条) → 重试');
             var _gotN = 0;
-            try { _gotN = (_fail === 'short' || _fail === 'truncated') ? (parseRosterImages(output, 1) || []).length : 0; } catch (eG) { _gotN = 0; }
+            try { _gotN = (_fail === 'short' || _fail === 'truncated') ? (parseRosterImages(output, 1, mode) || []).length : 0; } catch (eG) { _gotN = 0; }
             var _need = _missingHint(expectN, _gotN);
             // **除了 refusal，其余一律带上上次输出**。
             // 理由：模型每次调用都是无状态的，任务素材（档案/种子/占位符）全在 userContent 里，
@@ -638,8 +655,8 @@ async function runSinglePipeline(bodyText, mesId, options) {
                         + '然后重新完整输出 ---PROFILE--- 与 ---IMAGES--- 两段。';
                 } else if (_fail === 'truncated') {
                     _retryNote = '【系统重试】上一条回复被长度限制截断。请重新完整输出本张图的 ---PROFILE--- 和 ---IMAGES---，只写本张图的一条完整提示词，不要接着写第2条。';
-                } else if (_fail === 'captionformat') {
-                    _retryNote = '【系统重试】MiniMax-H3-Image 的 IMAGES 段只接受一段英文画面纯文本。去掉 JSON 对象/数组、expanded_caption / aspect_ratio 字段及比例或尺寸建议，保留画面内容；PROFILE 仍沿用插件档案协议。重新完整输出 PROFILE 与 IMAGES 两段。';
+                } else if (_fail === 'layoutformat') {
+                    _retryNote = '【系统重试】重新输出 PROFILE 和 IMAGES。IMAGES 须是一个原生 MOSS-Image Layout JSON 对象，含 summary、items、bbox_coord_space: "abs_centralized"、bbox_format: "yxyx"。每个元素需要 caption 及范围内的四个整数坐标；text 元素还须有原样文字。请按前面的实际画布上下限检查所有框，去掉额外属性及 JSON 外的文字。';
                 } else {   // format
                     _retryNote = '【系统重试】你上一轮的内容方向是对的，但**没有按格式输出**（缺少 ---PROFILE--- / ---IMAGES--- 的分段标记）。\n'
                         + '请保留你上一轮的画面内容，**改成规定的两段式格式重新输出**：---PROFILE--- 段 + ---IMAGES--- 段'
@@ -669,7 +686,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
                 output = _r3.content;
                 _meta = { finish: _r3.finish, truncated: _r3.truncated, reasoningLen: _r3.reasoningLen };
             }
-            var _fail2 = classifyPipelineFailure(output, expectN, _meta);
+            var _fail2 = classifyPipelineFailure(output, expectN, _meta, mode, canvas);
             // 重试后**必须复检数字**。
             // 旧实现重试后只判 classifyPipelineFailure —— 于是 lostnum 触发重试后，
             // 重试结果里数字仍然丢失也会被当成"重试成功"放行（实测：mock 两次输出都不带 24岁，第二次直接放行）。
@@ -678,7 +695,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
             // 拿它去回退到上一次输出会更差。让人看图确认才是正确处置。
             if (!_fail2) {
                 try {
-                    var _lostNum2 = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1));
+                    var _lostNum2 = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1, mode), mode);
                     if (_lostNum2.length) {
                         slErr('⚠️ 重试后数字仍未字面出现（可能合法同义改写）: '
                             + _lostNum2.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / ')
@@ -689,7 +706,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
             if (_fail2) {
                 throw new Error('本图提示词仍不合格: ' + _fail2);
             } else {
-                slLog('重试成功: ' + output.length + ' 字, ' + (parseRosterImages(output, 1) || []).length + ' 条');
+                slLog('重试成功: ' + output.length + ' 字, ' + (parseRosterImages(output, 1, mode) || []).length + ' 条');
             }
         }
         if (!output || !output.trim()) throw new Error('插件AI返回空');
@@ -799,7 +816,8 @@ async function runSinglePipeline(bodyText, mesId, options) {
         void saveArchive();
 
         // 4. 解析提示词并填充
-        var prompts = parseRosterImages(output, 1);
+        var prompts = parseRosterImages(output, 1, mode);
+        if (mode === MOSS_IMAGE_MODE) prompts = prompts.map(prompt => JSON.stringify(JSON.parse(prompt)));
         // 地点保真：不阻断、不重试，只点名（场景对不上就是这里漏的）
         try {
             var _lostPlace = findLostPlaces(placeholders, prompts);
@@ -807,7 +825,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
                 slErr('⚠️ 地点丢失：第' + (_lostPlace[_lp].i + 1) + '条提示词里找不到「' + _lostPlace[_lp].place + '」的痕迹（场景/背景可能被写成通用室内）');
             }
         } catch (eLP) { slLog('地点体检跳过: ' + eLP.message); }
-        var enhanced = fillPlaceholders(bodyText, placeholders, prompts);
+        var enhanced = fillPlaceholders(bodyText, placeholders, prompts, mode);
         return { ok: true, enhanced: enhanced };
     } catch (e) {
         slErr('协作管线失败: ' + e.message);

@@ -1,11 +1,11 @@
 import { clampPosition } from './viewport.js';
 // ── SillyImage Lab 紧凑状态条（胶囊猫条） ──
-import { CAT, getCatStatusFace } from './theme.js';
+import { CAT } from './theme.js';
 import { rosterEntries } from '../roster.js';
-import { catSVG, catStatusText } from './cat.js';
+import { catSVG } from './cat.js';
 import { setHeadStatus } from './panel.js';
 import { toast, chkProf } from './utils.js';
-import { settings, saveSettings, getActiveMode, modeBadge } from '../settings.js';
+import { settings, saveSettings, getActiveMode, modeBadge, COLORS } from '../settings.js';
 import { getCharacterName } from '../archive.js';
 import { getScannerStatus, cancelPendingScans, resetAutomaticBacklog } from '../scanner.js';
 import { resetFrontendAutomaticBacklog } from '../frontend-bridge.js';
@@ -19,25 +19,23 @@ const snapDistance = 24;
 
 export function getCompactEl() { return _compactEl; }
 
-export function setPluginEnabled(enabled) {
-    if (enabled) {
-        if (_compactEl) _compactEl.show();
-        if (!_compactTimer) { _compactTimer = setInterval(refreshCompactBar, 3000); }
-    } else {
-        if (_compactEl) _compactEl.hide();
-        if (_compactTimer) { clearInterval(_compactTimer); _compactTimer = null; }
-    }
+export function removeCompactBar() {
+    _compactCleanup?.();
+    _compactCleanup = null;
+    clearInterval(_compactTimer);
+    _compactTimer = null;
+    _compactEl?.remove();
+    _compactEl = null;
 }
 
 export function rebuildCompactBar() {
-    if (_compactCleanup) { _compactCleanup(); _compactCleanup = null; }
-    if (_compactEl) { clearInterval(_compactTimer); _compactEl.remove(); _compactEl = null; _compactTimer = null; }
+    removeCompactBar();
     createCompactBar();
 }
 export function createCompactBar() {
   if (_compactEl && _compactEl.parent().length) return;
   var bar = '';
-  bar += '<div id="sl_compact" style="position:fixed;z-index:30000;background:' + CAT.card + ';border-radius:' + CAT.radius + ';box-shadow:0 14px 44px rgba(150,100,60,0.22);border:' + CAT.borderStyle + ' ' + CAT.line + ';font-family:' + CAT.font + ';font-size:12px;color:' + CAT.text + ';user-select:none;overflow:hidden;display:flex;flex-direction:column;">';
+  bar += '<div id="sl_compact" style="position:fixed;z-index:30000;background:' + CAT.card + ';border-radius:' + CAT.radius + ';border:' + CAT.borderStyle + ' ' + CAT.line + ';font-family:' + CAT.font + ';font-size:12px;color:' + CAT.text + ';user-select:none;overflow:hidden;display:flex;flex-direction:column;">';
   // 头部：猫脸泡泡 + 文案 + 日志爪印
   bar += '<div id="sl_comp_header" style="display:flex;align-items:center;gap:9px;padding:10px 12px 8px;cursor:move;touch-action:none;border-bottom:1px solid ' + CAT.line + ';flex-shrink:0;height:26%;background:linear-gradient(135deg,' + CAT.accent + '14,transparent);">';
   bar += '<span id="sl_cat_icon" style="width:34px;height:34px;border-radius:12px;background:' + CAT.bg + ';display:flex;align-items:center;justify-content:center;pointer-events:none;color:' + CAT.accent + ';"></span>';
@@ -51,7 +49,7 @@ export function createCompactBar() {
   bar += '</div>';
   // 状态行：状态点+状态+队列+模式
   bar += '<div style="padding:4px 12px;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;height:26%;">';
-  bar += '<div style="display:flex;align-items:center;gap:7px;font-size:11.5px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + CAT.green + ';box-shadow:0 0 0 3px ' + CAT.green + '22;"></span><span id="sl_comp_status" style="font-weight:700;color:' + CAT.text + ';">打盹中 zZ</span><span style="color:' + CAT.mute + ';">·</span><span id="sl_comp_queue_txt" style="color:' + CAT.sub + ';">🐟 排队 0</span><span style="color:' + CAT.mute + ';">·</span><span id="sl_comp_mode" style="color:' + CAT.sub + ';">⚡ 自动</span></div>';
+  bar += '<div style="display:flex;align-items:center;gap:7px;font-size:11.5px;"><span id="sl_comp_status_dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;" aria-hidden="true"></span><span id="sl_comp_status" style="font-weight:700;color:' + CAT.text + ';">打盹中 zZ</span><span style="color:' + CAT.mute + ';">·</span><span id="sl_comp_queue_txt" style="color:' + CAT.sub + ';">🐟 排队 0</span><span style="color:' + CAT.mute + ';">·</span><span id="sl_comp_mode" style="color:' + CAT.sub + ';">⚡ 自动</span></div>';
   bar += '<div id="sl_comp_event" style="font-size:10px;color:' + CAT.mute + ';margin-top:3px;">🐾 小猫候命中…</div></div>';
   // 按钮区
   bar += '<div style="display:flex;align-items:center;gap:6px;padding:8px 12px 12px;flex-shrink:0;height:26%;"><button id="sl_comp_gen" style="flex:1;font-size:12px;padding:0;height:36px;border:none;border-radius:13px;background:linear-gradient(135deg,' + CAT.accent + ',' + (CAT.accentHover || CAT.accent) + ');color:#fff;cursor:pointer;font-weight:800;box-shadow:' + CAT.btnShadow + ';">🐟 排图</button><button id="sl_comp_cancel" title="取消所有排图和分析；已交给 ComfyUI 的计算可能继续" aria-label="取消所有排图" style="flex:1.45;font-size:11px;padding:0;height:36px;border:1px solid ' + CAT.line + ';border-radius:13px;background:' + CAT.card + ';color:' + CAT.text + ';cursor:pointer;font-weight:700;">⏹ 取消全部</button><button id="sl_comp_auto" style="flex:1;font-size:12px;padding:0;height:36px;border:1px solid ' + CAT.line + ';border-radius:13px;background:' + CAT.card + ';color:' + CAT.text + ';cursor:pointer;font-weight:700;">⚡ 自动</button></div></div>';
@@ -68,7 +66,14 @@ export function createCompactBar() {
   _compactTimer = setInterval(refreshCompactBar, 3000); refreshCompactBar();
 }
 export function refreshCompactBar() {
-  if (!_compactEl || !_compactEl.is(':visible')) return;
+  if (!_compactEl) return;
+  const ss = getScannerStatus(), ql = getQueueLength();
+  const statusText = { off: '猫尾收起', idle: '打盹中 zZ', waiting_body: '等故事来…', waiting_end: '猫爪码字中…', scanning: '思考小鱼干中…' }[ss] || ss;
+  const dotColor = ss === 'off' ? COLORS.orange : ss === 'scanning' ? CAT.yellow : ql > 0 ? CAT.accent : CAT.green;
+  _compactEl.find('#sl_comp_status').text(statusText);
+  _compactEl.find('#sl_comp_status_dot').css({ backgroundColor: dotColor, boxShadow: '0 0 0 3px ' + dotColor + '22' });
+  setHeadStatus(statusText, dotColor);
+  if (!_compactEl.is(':visible')) return;
   var cn = getCharacterName() || '', hasChat = !!cn;
   jQuery('#sl_comp_char').text(hasChat ? cn : '还没有选角色喵~');
   jQuery('#sl_comp_model').text(hasChat ? String(modeBadge(getActiveMode())).toUpperCase() : '');
@@ -79,17 +84,11 @@ export function refreshCompactBar() {
     if (_pn2) jQuery('#sl_comp_profile').text('🐾 已建档 ' + _pn2 + ' 人').css({ background: CAT.green + '1F', color: CAT.green }).show();
     else jQuery('#sl_comp_profile').text('🐾 暂无档案').css({ background: CAT.bg, color: CAT.sub }).show();
   }
-  var ss = getScannerStatus(), sm = { off: '猫尾收起', idle: '打盹中 zZ', waiting_body: '等故事来…', waiting_end: '猫爪码字中…', scanning: '思考小鱼干中…' };
-  jQuery('#sl_comp_status').text(sm[ss] || ss);
-  var dotColor = ss === 'scanning' ? CAT.yellow : (getQueueLength() > 0 ? CAT.accent : CAT.green);
-  jQuery('#sl_comp_status').prev().css('background', dotColor).css('box-shadow', '0 0 0 3px ' + dotColor + '22');
-  var ql = getQueueLength();
   jQuery('#sl_comp_queue_txt').text('🐟 排队 ' + ql);
   jQuery('#sl_comp_mode').text(settings.autoGen === 1 ? '⚡ 自动' : '🖐 手动');
   jQuery('#sl_comp_auto').text(settings.autoGen === 1 ? '⚡ 自动' : '🖐 手动');
   var cs = 'idle'; if (ss === 'scanning') cs = 'busy'; else if (ql > 0) cs = ql > 5 ? 'busy' : 'queuing';
   jQuery('#sl_cat_icon').html(catSVG(cs, 26));
-  try { setHeadStatus(sm[ss] || ss, dotColor); } catch (e) {}
   var evText = '🐾 小猫候命中…';
   if (ss === 'scanning') evText = '🧠 脑内小剧场启动…';
   else if (ql > 0) evText = '🐟 小鱼干排队 ' + ql + ' 张';

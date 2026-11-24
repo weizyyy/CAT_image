@@ -1,0 +1,21 @@
+【模式：MOSS-Image · 二维 Galgame 事件 CG · Layout JSON】
+
+描绘同一幕里的一个瞬间。采用横向视觉小说事件 CG 的二维插画语言：轮廓清楚、线条有轻重，皮肤用干净的色面与少量柔和过渡，衣料用成组明暗和随动作变化的褶线。优先眼神、表情、动作和光线。画面是单幅插画，不加分镜、字幕、对话框、边框或水印。
+
+## 三层分工
+1. summary.caption 用简练的英文画面说明交代媒介、景别、视点、主体重心、人物的相对位置、前后遮挡、场所、主光方向和情绪。动作涉及人与人或人与物时，用完整句写清谁看向谁、谁用哪只手接触哪一处，以及承重或接触点。可用 summary.meta 标记 "anime illustration"、"visual novel event CG" 等画面类别。summary.canvas 写 "single"。
+2. items 中每个实际入镜的人各占一个 character。把识别这个人所需的可见外貌、年龄、发型、衣着及姿势写成简短英文标签，逐项放进该人的 tags 数组，不用权重语法。每项只表达一个具体特征。该人的 caption 写表情、视线、动作或朝向，并补足局部光影。身份和穿戴特征应随同一个人物框走，跨图用词一致。保持明确给出的年龄和可见外貌；肤色、脸型和瞳色保留辨识度，肤质由细腻色面和柔和层次表现。按景别选择细节，衣服遮住或裁出画外的部分留在画外。
+3. 只给位置影响叙事的物件、建筑形体或可见背景标志建立 object 项。普通环境、光斑和气氛留在 summary.caption。多个框可以合理相交，例如手叠到包裹上、背后窗框被人物遮住。跨框关系在全局句里写清，局部用词与该关系一致。文字确实入镜且有指定原文时，用独立 text 项写排版和承载表面的 caption，把原文（语言、引号、换行和标点）放进 text。
+
+## 横幅构图与框选
+- 先按占位符选景别。对话或情绪镜头让脸和手势成为首要阅读区，主角给足画幅，地点只留一两处可辨的线索。需要交代完整动作或场所时再用中全景或全景。不要为塞入更多服饰细节缩小主体。
+- 正构图、轻微侧身、明显侧倾、前景透视或镜头滚转都按场景选。要用侧倾填进横幅时，在 caption 写清头与躯干的实际方向和视点，让脸、肩、手势沿有用的方向舒展；角度由叙事决定，不固定方向，也不强制沿对角线。人物框仍是轴对齐矩形，只圈住该人物在画面里可见的整体。镜头滚转时，同一画面内的地平线、建筑线和重力方向使用一致的视点。
+- 为主要表情和动作留出轮廓分离及边缘余量，允许有意裁切的部分碰边。画外视点人物不另画身体。接触手、肘和物件的空间关系写入 caption，别拆成额外的手、眼、发梢或衣物框。由背景和次要元素到前景主体排列 items，保持图中有意义的层次。
+
+## IMAGES 输出
+每个占位符对应一个原生 Layout JSON 对象，在 IMAGES 段单独占一行；对象之外不加说明、围栏、标签链或编号。其他回传段沿用原协议。
+- 顶层只用 summary、items、bbox_coord_space、bbox_format。items 是非空的平铺数组。每项至少有 label、caption、bbox，label 只能是 character、object、text；tags 为英文短语数组。text 项另有原样 text 字段。
+- bbox_coord_space 固定为 "abs_centralized"，bbox_format 固定为 "yxyx"。使用本轮【布局画布】给的实际像素，原点在画布中心；x 向右、y 向下。bbox 为 [上,左,下,右] 四个整数；上 < 下、左 < 右，全框位于画布内。无需在 JSON 中写宽高或比例。
+- 示例仅展示格式与一种中景安排（1536×864）；人物、角度、位置和坐标依本画面重算。
+
+{"summary":{"meta":["anime illustration","visual novel event CG"],"canvas":"single","caption":"In an eye-level waist-up shot, a courier on the right offers a parcel into the lower center. Their gaze follows the recipient just outside the frame. The station window on the left casts a cool rim over the hair, while reflected lamplight softens the face."},"items":[{"label":"object","caption":"Tall rain-streaked station window in the background.","bbox":[-390,-690,240,-280]},{"label":"object","caption":"A paper parcel resting on the courier's left palm in the foreground.","bbox":[95,-155,280,178]},{"label":"character","caption":"The courier inclines toward the recipient, left palm under the parcel and right hand lightly steadying the side.","tags":["28 years old","short black hair","hazel eyes","round glasses","olive canvas coat","waist-up"],"bbox":[-390,-115,432,640]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
