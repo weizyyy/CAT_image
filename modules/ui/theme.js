@@ -22,7 +22,7 @@ export var CAT_THEMES = {
   '云朵棉花猫': { // 淡蓝紫+白+薰衣草 · 轻盈
     bg: '#eef1fd', card: 'rgba(255,255,255,0.86)', accent: '#7c8cf8', accentHover: '#96a3fb', text: '#33395c', sub: '#7f86ab', mute: '#b0b6d5', line: 'rgba(255,255,255,0.95)', green: '#57b58c', red: '#ea7373', yellow: '#f0ae54',
     radius: '20px', borderRadiusBtn: '14px', borderRadiusInput: '12px', btnPadding: '9px 18px', inputPadding: '9px 12px',
-    shadow: '0 12px 36px rgba(100,110,200,0.13)', btnShadow: '0 6px 18px rgba(124,140,248,0.35)', borderStyle: '1px solid', font: 'PingFang SC, Noto Sans SC, Microsoft YaHei, sans-serif', backdropFilter: 'blur(14px)'
+    shadow: '0 12px 36px rgba(100,110,200,0.13)', btnShadow: 'none', borderStyle: '1px solid', font: 'PingFang SC, Noto Sans SC, Microsoft YaHei, sans-serif', backdropFilter: 'blur(14px)'
   },
   '抹茶拿铁猫': { // 抹茶绿+奶油 · 清新
     bg: '#f0f5e7', card: '#ffffff', accent: '#7fb069', accentHover: '#6da25a', text: '#33452c', sub: '#8a9b7e', mute: '#bfcbb4', line: '#e4edda', green: '#58a97c', red: '#e5777b', yellow: '#e8bc55',
@@ -32,7 +32,7 @@ export var CAT_THEMES = {
   '星空夜猫': { // 深空蓝紫+星光 · 暗色
     bg: '#1e2230', card: 'rgba(40,46,66,0.92)', accent: '#8fa7ff', accentHover: '#a9bbff', text: '#e8ecff', sub: '#9aa4c8', mute: '#66708f', line: 'rgba(143,167,255,0.25)', green: '#6fd3a2', red: '#f08a8a', yellow: '#f2cf6b',
     radius: '20px', borderRadiusBtn: '14px', borderRadiusInput: '12px', btnPadding: '9px 18px', inputPadding: '9px 12px',
-    shadow: '0 12px 36px rgba(0,0,0,0.4)', btnShadow: '0 6px 18px rgba(143,167,255,0.35)', borderStyle: '1px solid', font: 'PingFang SC, Noto Sans SC, Microsoft YaHei, sans-serif', backdropFilter: 'none'
+    shadow: '0 12px 36px rgba(0,0,0,0.4)', btnShadow: 'none', borderStyle: '1px solid', font: 'PingFang SC, Noto Sans SC, Microsoft YaHei, sans-serif', backdropFilter: 'none'
   }
 };
 

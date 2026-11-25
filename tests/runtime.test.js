@@ -1117,9 +1117,11 @@ test('portrait editor persists the exact ComfyUI prompt and regenerates four vie
             el('.sl_prompt_btn').click();
         };
         openPerson('Alice');
-        const buttons = () => ['.sl_copy_btn', '.sl_prompt_edit', '.sl_prompt_regenerate'].map(selector => el(selector).textContent);
         const input = () => el('.sl_prompt_ta');
-        assert.deepEqual(buttons(), ['复制提示词', '修改提示词', '重新生成']);
+        assert.equal(el('.sl_person_delete').nextElementSibling, el('.sl_prompt_btn'));
+        assert.equal(el('.sl_prompt_btn').getAttribute('aria-expanded'), 'true');
+        assert.deepEqual([...el('.sl_prompt_box').querySelectorAll('button')].filter(button => button.style.display !== 'none')
+            .map(button => button.textContent), ['修改提示词', '重新生成']);
         const initial = input().value;
         assert.match(initial, /fixture artist$/);
         el('.sl_port_btn[data-view="front"]').click();

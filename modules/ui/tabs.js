@@ -515,7 +515,6 @@ const portraitRequests = new WeakSet();
 function bindPortraitPromptEditor(body, ent, chatId, key, mode) {
   const box = body.find('.sl_prompt_box');
   const input = box.find('.sl_prompt_ta');
-  const copy = box.find('.sl_copy_btn');
   const edit = box.find('.sl_prompt_edit');
   const regenerate = box.find('.sl_prompt_regenerate');
   const cancel = box.find('.sl_prompt_cancel');
@@ -523,32 +522,21 @@ function bindPortraitPromptEditor(body, ent, chatId, key, mode) {
   const refresh = () => {
     const prompt = buildPortraitPrompt(ent, 'front', mode);
     input.val(prompt).prop('readOnly', true);
-    copy.prop('disabled', !prompt);
     edit.prop('disabled', !prompt || restricted).text('修改提示词');
     regenerate.prop('disabled', restricted || !getEnglishAnchor(ent));
     cancel.hide();
   };
   const isCurrent = () => getChatId() === chatId && getActiveMode() === mode && rosterForChat(chatId)?.[key] === ent;
-  body.find('.sl_prompt_btn').on('click', () => {
+  body.find('.sl_prompt_btn').on('click', function () {
     if (box[0].hidden && input.prop('readOnly')) refresh();
     box[0].hidden = !box[0].hidden;
-  });
-  copy.on('click', () => {
-    const fallback = () => { input[0].select(); if (!document.execCommand('copy')) throw new Error('copy'); };
-    void (async () => {
-      try {
-        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(input.val()).catch(fallback);
-        else fallback();
-        toast('success', '提示词已复制');
-      } catch { toast('error', '复制失败，请手动选中'); }
-    })();
+    this.setAttribute('aria-expanded', String(!box[0].hidden));
   });
   edit.on('click', async () => {
     if (!isCurrent() || restricted || portraitRequests.has(ent)) return;
     if (input.prop('readOnly')) {
       input.prop('readOnly', false).trigger('focus');
       edit.text('保存提示词');
-      copy.prop('disabled', true);
       regenerate.prop('disabled', true);
       cancel.show();
       return;
@@ -626,9 +614,9 @@ function renderPersonDetail(body, key, chatId = getChatId()) {
   h += '<details style="margin-top:11px;"><summary style="cursor:pointer;font-size:11px;line-height:1.45;">编辑英文锚点</summary>';
   h += '<textarea class="sl_anchor_input" style="width:100%;min-height:105px;' + fi() + '">' + esc(getEnglishAnchor(ppl.ent)) + '</textarea>';
   h += '<button type="button" class="sl_anchor_save" style="' + btnSm() + '">保存英文锚点</button></details>';
-  h += '<button type="button" class="sl_person_delete" style="' + btnDanger() + ';margin-top:8px;">删除人物</button>';
-  h += '<div style="display:flex;gap:6px;margin-top:11px;flex-wrap:wrap;">';
-  if (chatId === getChatId()) h += '<button class="sl_prompt_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnGhost() + 'font-size:10.5px;padding:6px 13px;">提示词</button>';
+  h += '<div style="display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;margin-top:8px;max-width:100%;">';
+  h += '<button type="button" class="sl_person_delete" style="' + btnDanger() + '">删除人物</button>';
+  if (chatId === getChatId()) h += '<button type="button" class="sl_prompt_btn" aria-expanded="false" style="' + btnSm() + '">提示词</button>';
   h += '</div>';
   h += '<div class="sl_prompt_box" hidden style="margin-top:10px;">';
   h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-bottom:4px;">实际发给 ComfyUI 的正面立绘提示词，含画风预设和艺术家标签。</div>';
@@ -636,7 +624,7 @@ function renderPersonDetail(body, key, chatId = getChatId()) {
   const promptButton = (className, label, extra = '') =>
     '<button type="button" class="' + className + '" style="' + btnSm() + 'font-size:10px;' + extra + '">' + label + '</button>';
   h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
-    promptButton('sl_copy_btn', '复制提示词') + promptButton('sl_prompt_edit', '修改提示词') +
+    promptButton('sl_prompt_edit', '修改提示词') +
     promptButton('sl_prompt_regenerate', '重新生成') + promptButton('sl_prompt_cancel', '取消', 'display:none;') + '</div>';
   const promptNote = isUnderageEntry(ppl.ent) ? '此人物的全覆盖立绘从档案锚点生成。' : '重新生成会按已保存的英文锚点重写四个视角的提示词，并替换当前模式手改的正面提示词。';
   h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-top:4px;">' + promptNote + '</div></div>';

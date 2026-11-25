@@ -337,6 +337,38 @@ export async function runBrowserFixture() {
         const galleryGroup = document.querySelector('.sl-page .sl_other_chats');
         galleryGroup.open = true;
         checks.push({ name: 'webview-archive-chat-spacing-matches-gallery', ok: redDelete && rosterDensity === density(galleryGroup.querySelector('details')) });
+
+        const { applyTheme } = await import('../modules/ui/theme.js');
+        const { openSubPanel } = await import('../modules/ui/sub-panels.js');
+        for (const theme of ['云朵棉花猫', '星空夜猫']) {
+            settings.uiTheme = theme;
+            applyTheme(theme);
+            compact.rebuildCompactBar();
+            panel.showPanel();
+            const homeAction = document.querySelector('#sl_btn_gen_all');
+            const background = getComputedStyle(homeAction).backgroundColor;
+            const compactAction = document.querySelector('#sl_comp_gen');
+            openSubPanel('aux');
+            const testAction = document.querySelector('#sl_test_aux');
+            const panelButtonsFlat = [homeAction, testAction, compactAction]
+                .every(button => getComputedStyle(button).boxShadow === 'none');
+            panel.popPage();
+            tabs.renderArchivePage();
+            document.querySelector('[data-roster-context] > details .sl_pcard').click();
+            const remove = document.querySelector('.sl_person_delete');
+            const prompt = document.querySelector('.sl_prompt_btn');
+            const removalRect = remove.getBoundingClientRect(), promptRect = prompt.getBoundingClientRect();
+            prompt.click();
+            const promptBox = document.querySelector('.sl_prompt_box');
+            const buttons = [...promptBox.querySelectorAll('button')].filter(button => button.getClientRects().length);
+            const promptActionsFlat = [prompt, ...buttons].every(button => getComputedStyle(button).boxShadow === 'none');
+            checks.push({ name: 'webview-flat-blue-buttons-and-aligned-portrait-actions-' + theme,
+                ok: panelButtonsFlat && promptActionsFlat && getComputedStyle(prompt).backgroundColor === background &&
+                    remove.nextElementSibling === prompt && promptRect.left > removalRect.right && removalRect.width > 0 &&
+                    Math.abs(removalRect.width - promptRect.width) < 1 && Math.abs(removalRect.height - promptRect.height) < 1 &&
+                    Math.abs(removalRect.top - promptRect.top) < 1 && prompt.getAttribute('aria-expanded') === 'true' &&
+                    buttons.map(button => button.textContent).join('|') === '修改提示词|重新生成' });
+        }
         return { ok: checks.every(c => c.ok), checks, mockedAnalysisRequests: calls, mockedImageRequests: generations, externalRequests: 0 };
     } finally { compact.removeCompactBar(); scanner.stopPolling(); bridge.stopFrontendBridge(); }
 }
