@@ -795,16 +795,32 @@ test('editing one marker retains other prompts, images and IDs after scanner res
     } finally { scanner.stopPolling(); }
 });
 
-test('cancel image queue aborts active request, drops waiting/portrait tasks and requires explicit resume', async () => {
+test('cancel image queue sends native cancellation for the submitted job and drops local waiting tasks', async () => {
     const { enqueueGen, enqueueTask, clearQueue, getQueueStatus } = await import('../modules/queue.js');
     const { renderEnhancedLite, setEnqueueGen } = await import('../modules/render.js');
     const { imgCacheGetById } = await import('../modules/cache.js');
     show('[img:甲][img:乙]'); settings.autoGen = 1; setEnqueueGen(enqueueGen);
-    let requests = 0, release, abortSignal, portraitError;
+    const savedUrl = settings.cUrl;
+    const localUrl = 'http://127.0.0.1:8188/comfy/';
+    const remoteUrl = 'https://comfy.example.test/relay/api/';
+    settings.cUrl = localUrl;
+    let release, abortSignal, portraitError;
+    const jobs = [], cancellations = [];
     fetch = async (url, options) => {
         if (String(url).endsWith('/generate')) {
-            requests++; abortSignal = options.signal;
+            const request = JSON.parse(options.body);
+            jobs.push({ url: request.url, id: JSON.parse(request.prompt).prompt_id });
+            abortSignal = options.signal;
             return new Promise(resolve => release = () => resolve({ ok: true, json: async () => ({ data: 'AA==' }) }));
+        }
+        if (String(url).endsWith('/cancel')) {
+            assert.equal(options.method, 'POST');
+            assert.equal(options.signal.aborted, false);
+            assert.notEqual(options.signal, abortSignal);
+            cancellations.push(url);
+            return cancellations.length < 3
+                ? { ok: true, json: async () => ({ cancelled: cancellations.length === 2 }) }
+                : { ok: false, status: 404 };
         }
         assert.fail('a cancelled result must not be uploaded');
     };
@@ -812,15 +828,26 @@ test('cancel image queue aborts active request, drops waiting/portrait tasks and
     renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, { autoGenerate: true });
     enqueueTask('portrait-cancel', '立绘', () => assert.fail('cancelled portrait succeeded'), error => portraitError = error);
     assert.deepEqual(getQueueStatus(), { queued: 2, running: true });
+    settings.cUrl = remoteUrl;
     assert.equal(clearQueue(), 3); assert.equal(abortSignal.aborted, true); assert.equal(portraitError.name, 'AbortError');
     // Simulate a server ignoring the disconnect and returning late.
-    release(); await waitUntil(() => !getQueueStatus().running);
+    release(); await waitUntil(() => cancellations.length === 2);
     await new Promise(r => setTimeout(r, 0));
+    const localCancelUrl = localUrl + 'api/jobs/' + jobs[0].id + '/cancel';
+    assert.match(jobs[0].id, /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/);
+    assert.equal(jobs[0].url, localUrl);
+    assert.deepEqual(cancellations, [localCancelUrl, localCancelUrl]);
     renderEnhancedLite(jQuery('.mes_text'), blocks, 'cancel-image-test', ctx.chat[0].mes, { autoGenerate: true });
-    assert.equal(requests, 1); assert.equal(imgCacheGetById('cancel-image-test#0'), undefined);
+    assert.equal(jobs.length, 1); assert.equal(imgCacheGetById('cancel-image-test#0'), undefined);
     assert.equal(document.querySelectorAll('.sl_img_block img').length, 0);
-    enqueueGen(jQuery('.sl_img_btn').first(), '手动继续'); assert.equal(requests, 2);
-    clearQueue(); release(); await new Promise(r => setTimeout(r, 0)); settings.autoGen = 0;
+    enqueueGen(jQuery('.sl_img_btn').first(), '手动继续'); assert.equal(jobs.length, 2);
+    assert.equal(jobs[1].url, remoteUrl);
+    assert.notEqual(jobs[1].id, jobs[0].id);
+    clearQueue(); release(); await new Promise(r => setTimeout(r, 0));
+    assert.equal(abortSignal.aborted, true);
+    assert.deepEqual(cancellations, [localCancelUrl, localCancelUrl, remoteUrl + 'jobs/' + jobs[1].id + '/cancel']);
+    settings.autoGen = 0;
+    settings.cUrl = savedUrl;
 });
 
 const mossLayout = (caption, text) => ({

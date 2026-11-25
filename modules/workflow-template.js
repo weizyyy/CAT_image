@@ -4,8 +4,9 @@ export function substituteWorkflow(template, prompt) {
     return String(template || '').split('%prompt%').join(JSON.stringify(String(prompt || '')).slice(1, -1));
 }
 
-export function workflowRequest(template, prompt, clientId) {
-    return '{"prompt":' + substituteWorkflow(randomizeZeroSeeds(template), prompt) + ',"client_id":' + JSON.stringify(clientId) + '}';
+export function workflowRequest(template, prompt, clientId, promptId) {
+    const envelope = JSON.stringify({ client_id: clientId, prompt_id: promptId });
+    return '{"prompt":' + substituteWorkflow(randomizeZeroSeeds(template), prompt) + ',' + envelope.slice(1);
 }
 
 function randomSeed() {

@@ -156,6 +156,39 @@ export function composeFinalPrompt(prompt, curMode = getActiveMode()) {
     return prompt;
 }
 
+function createPromptId() {
+    if (globalThis.crypto.randomUUID) return globalThis.crypto.randomUUID();
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
+}
+
+async function cancelComfyJob(comfyUrl, promptId) {
+    try {
+        const endpoint = new URL(comfyUrl);
+        const base = endpoint.pathname.replace(/\/+$/, '');
+        endpoint.pathname = base + (base.endsWith('/api') ? '' : '/api') + '/jobs/' + promptId + '/cancel';
+        endpoint.hash = '';
+        const signal = AbortSignal.timeout(4000);
+        const cancel = async () => {
+            const response = await fetch(endpoint.href, { method: 'POST', credentials: 'omit', redirect: 'error', signal });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            return (await response.json()).cancelled === true;
+        };
+        let cancelled = await cancel();
+        if (!cancelled) {
+            // A click during submission can reach the server before the job does.
+            await new Promise(resolve => setTimeout(resolve, 500));
+            cancelled = await cancel();
+        }
+        slLog(cancelled ? 'ComfyUI 已接收任务取消' : 'ComfyUI 未报告任务已取消', promptId);
+    } catch (error) {
+        slLog('ComfyUI 定向取消未获确认，已通过酒馆中止生成请求:', error.message);
+    }
+}
+
 export async function generateImage(workflow, prompt, { signal, mode = getActiveMode() } = {}) {
     signal?.throwIfAborted();
     // 最终组装（模型输出 / 画风预设 / 艺术家风格）——
@@ -163,10 +196,15 @@ export async function generateImage(workflow, prompt, { signal, mode = getActive
     prompt = composeFinalPrompt(prompt, mode);
     slLog('🎨ComfyUI-prompt(' + prompt.length + '字):', prompt);
 
-    var clientId = 'sl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-    var raw = workflowRequest(workflow, prompt, clientId);
+    const comfyUrl = settings.cUrl;
+    const promptId = createPromptId();
+    var raw = workflowRequest(workflow, prompt, 'sl_' + promptId, promptId);
     var ctrl2 = new AbortController();
-    const cancel = () => ctrl2.abort();
+    let nativeCancellation;
+    const cancel = () => {
+        ctrl2.abort();
+        nativeCancellation = cancelComfyJob(comfyUrl, promptId);
+    };
     signal?.addEventListener('abort', cancel, { once: true });
     var timer2 = setTimeout(function() { ctrl2.abort(); }, (settings.cTimeout || 180) * 1000);
     var response, data;
@@ -174,7 +212,7 @@ export async function generateImage(workflow, prompt, { signal, mode = getActive
         response = await fetch('/api/sd/comfy/generate', {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, getSTHeaders()),
-            body: JSON.stringify({ url: settings.cUrl, prompt: raw }),
+            body: JSON.stringify({ url: comfyUrl, prompt: raw }),
             signal: ctrl2.signal
         });
         if (!response.ok) { var errorText = await response.text(); throw new Error(errorText.slice(0, 800)); }
@@ -183,7 +221,9 @@ export async function generateImage(workflow, prompt, { signal, mode = getActive
         signal?.throwIfAborted();
         throw new Error(e && e.name === 'AbortError' ? 'ComfyUI生成超时(' + ((settings.cTimeout || 180)) + 's)' : (e ? e.message : 'fetch失败'));
     } finally {
-        clearTimeout(timer2); signal?.removeEventListener('abort', cancel);
+        clearTimeout(timer2);
+        signal?.removeEventListener('abort', cancel);
+        if (nativeCancellation) await nativeCancellation;
     }
     signal?.throwIfAborted();
     if (!data.data) throw new Error('无输出');

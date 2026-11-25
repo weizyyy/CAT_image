@@ -142,12 +142,22 @@ export async function runBrowserFixture() {
         const cancelRect = document.querySelector('#sl_comp_cancel').getBoundingClientRect(), barRect = document.querySelector('#sl_compact').getBoundingClientRect();
         checks.push({ name: 'webview-expanded-cancel-button-visible-and-in-bounds', ok: cancelRect.width > 0 && cancelRect.height > 0 &&
             cancelRect.left >= barRect.left && cancelRect.right <= barRect.right && cancelRect.bottom <= barRect.bottom });
-        let analysisSignal, imageSignal, cancelledAnalysisCalls = 0, cancelledImageCalls = 0;
-        window.fetch = (url, options) => new Promise((_resolve, reject) => {
-            if (String(url).endsWith('/generate')) { cancelledImageCalls++; imageSignal = options.signal; }
-            else { cancelledAnalysisCalls++; analysisSignal = options.signal; }
-            options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled fixture', 'AbortError')), { once: true });
-        });
+        let analysisSignal, imageSignal, activeImageId, nativeCancel;
+        let cancelledAnalysisCalls = 0, cancelledImageCalls = 0;
+        window.fetch = async (url, options) => {
+            if (String(url).endsWith('/cancel')) {
+                nativeCancel = { url, method: options.method, aborted: options.signal.aborted };
+                return Response.json({ cancelled: true });
+            }
+            if (String(url).endsWith('/generate')) {
+                cancelledImageCalls++;
+                activeImageId = JSON.parse(JSON.parse(options.body).prompt).prompt_id;
+                imageSignal = options.signal;
+            } else { cancelledAnalysisCalls++; analysisSignal = options.signal; }
+            return new Promise((_resolve, reject) => {
+                options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled fixture', 'AbortError')), { once: true });
+            });
+        };
         ctx.chat[0].mes = '[img:取消分析]'; root.textContent = ctx.chat[0].mes;
         await scanner.runAuxImageScan(jQuery(root)); await wait(() => analysisSignal);
         const cards = document.createElement('div');
@@ -159,7 +169,8 @@ export async function runBrowserFixture() {
         await wait(() => !scanner.scanCoordinator.running && !queue.getQueueStatus().running);
         checks.push({ name: 'webview-cancel-button-aborts-analysis-and-image-and-clears-two-waiting',
             ok: queued === 2 && analysisSignal.aborted && imageSignal.aborted && queue.getQueueStatus().queued === 0 &&
-                cancelledAnalysisCalls === 1 && cancelledImageCalls === 1 });
+                cancelledAnalysisCalls === 1 && cancelledImageCalls === 1 && nativeCancel?.method === 'POST' && !nativeCancel.aborted &&
+                nativeCancel.url === settings.cUrl + '/api/jobs/' + activeImageId + '/cancel' });
         scanner.checkLastMessage();
         for (const btn of cards.querySelectorAll('.sl_img_btn')) queue.enqueueGen(jQuery(btn), '取消测试', { automatic: true });
         await new Promise(r => setTimeout(r, 1700));
