@@ -52,9 +52,13 @@ export class ScanCoordinator {
             if (['done', 'stale', 'failed'].includes(job.state)) this.jobs.delete(key);
         }
     }
-    clear() {
-        for (const job of this.jobs.values()) { job.cancelled = true; job.controller?.abort(); }
-        this.jobs.clear();
+    clear(matches = () => true) {
+        for (const [key, job] of this.jobs) {
+            if (!matches(job.snapshot)) continue;
+            job.cancelled = true;
+            job.controller?.abort();
+            this.jobs.delete(key);
+        }
     }
     cancelPending(snapshots = []) {
         for (const snapshot of snapshots) if (!this.jobs.has(snapshot.key))

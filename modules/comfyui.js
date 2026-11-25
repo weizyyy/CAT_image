@@ -189,11 +189,11 @@ async function cancelComfyJob(comfyUrl, promptId) {
     }
 }
 
-export async function generateImage(workflow, prompt, { signal, mode = getActiveMode() } = {}) {
+export async function generateImage(workflow, prompt, { signal, mode = getActiveMode(), promptIsFinal = false } = {}) {
     signal?.throwIfAborted();
     // 最终组装（模型输出 / 画风预设 / 艺术家风格）——
     // 与面板"提示词"里显示的完全同源
-    prompt = composeFinalPrompt(prompt, mode);
+    if (!promptIsFinal) prompt = composeFinalPrompt(prompt, mode);
     slLog('🎨ComfyUI-prompt(' + prompt.length + '字):', prompt);
 
     const comfyUrl = settings.cUrl;

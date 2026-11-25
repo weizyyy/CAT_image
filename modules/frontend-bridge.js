@@ -92,7 +92,7 @@ function renderRecord(record) {
     const blocks = record.slots.map((slot, index) => slot.enhanced && extractImgBlocksFromEnhanced(
         slot.enhanced, record.key, index, ids, record.mode)[0]);
     return renderEnhancedLite(jQuery(record.root), blocks, record.key, record.text, {
-        autoGenerate: record === newestRecord && record.callId > autoAfterCall && record.autoEligible,
+        autoGenerate: !generationBusy() && record === newestRecord && record.callId > autoAfterCall && record.autoEligible,
         onReanalyze: (index, button) => retryFrontendSlot(record, index, button),
     });
 }
@@ -100,13 +100,13 @@ function renderRecord(record) {
 function retryFrontendSlot(record, index, button) {
     const token = tokenizePlaceholders(record.text)[index];
     const block = record.slots[index];
-    if (!token || !block?.enhanced || !record.enhanced || !settings.auxUrl || !settings.auxModel || generationBusy()) return;
+    if (!token || !block?.enhanced || !record.enhanced || !settings.auxUrl || !settings.auxModel) return;
     const restore = label => { button.disabled = false; button.textContent = label; };
     button.disabled = true; button.textContent = '重新解析中…';
     const job = reanalyzeSlot({
         id: block.id, source: token.text, origin: record.key,
         isCurrent: () => running && settings.feBridge !== false && settings.pluginOn !== false &&
-            getChatId() === record.chatId && getActiveMode() === record.mode && !generationBusy() &&
+            getChatId() === record.chatId && getActiveMode() === record.mode &&
             rootOwners.get(record.root) === record.key && !inflight.get(record.win) && visibleRecord(record) &&
             record.slots[index] === block,
         onSuccess(enhanced) {

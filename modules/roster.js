@@ -580,18 +580,17 @@ export function setPortraitPrompts(name, identity, obj) {
 export function getPortraitPrompt(entry, view) {
     try {
         var pp = entry && entry.portraitPrompts;
+        // Apply the full-coverage reference even when edited anchors have
+        // invalidated the old generated prompts.
+        if (isUnderageEntry(entry) && (pp?.[view || 'front'] || entry.anchor || entry.anchorZh)) {
+            return _safeMinorPortrait(entry, view || 'front');
+        }
         if (!pp) return '';
         // 非正面视角**不回退到正面** —— 旧写法 pp[view] || pp.front，某个视角没写就用正面那条，
         // 结果四个视角共用一条提示词（实测左右两张几乎一样）。缺就是缺，让上层去补方向/重写。
         var raw;
         if (view && view !== 'front') raw = String(pp[view] || '').trim();
         else raw = String(pp.front || '').trim();
-        if (!raw) return '';
-        // 年龄闸门**接通**。
-        // 卡点是：立绘清单（system.txt）要求逐人落地「胸的大小/胸型/乳晕/乳头/体毛/阴毛/阴部」，
-        // 没有年龄门槛 —— 成年角色那是体型参考，未成年角色就不该有。
-        // 在**出口**硬拦（不依赖模型自觉）：未成年角色的立绘不用模型写的那四条，改用中性维度重建。
-        if (isUnderageEntry(entry)) return _safeMinorPortrait(entry, view || 'front');
         return raw;
     } catch (e) { return ''; }
 }
@@ -638,6 +637,7 @@ var _AGE_CN_RE = /(?<![一二三四五六七八九十])(十[一二三四五六�
 var _AGE_CN_VAL = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
 var _AGE_DIM_RE = /(?:^|\|)\s*(?:age|年龄)\s*[:：]\s*([^|]*)/gi;
 var _AGE_TIER_RE = /(teenage|young girl|child|loli|elementary|underage|少女|萝莉|幼女|幼童|儿童|女童)/i;
+var _AGE_EN_MINOR_RE = /(?<![a-z\d-])(?:[1-9]|1[0-7]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)(?![a-z\d]|[- ]hundred)/i;
 
 // 明确数字年龄 < 18？（14岁 / 十四岁 / 17周岁）
 function _ageNumUnder18(t) {
@@ -676,7 +676,7 @@ export function isUnderageEntry(entry) {
                 var val = String(m[1] || '').trim();
                 const numeric = val.match(/^(\d{1,2})(?:\D|$)/);
                 if (numeric) return Number(numeric[1]) > 0 && Number(numeric[1]) < 18;
-                if (_AGE_TIER_RE.test(val)) return true;
+                if (_AGE_TIER_RE.test(val) || _AGE_EN_MINOR_RE.test(val)) return true;
             }
         }
         return false;

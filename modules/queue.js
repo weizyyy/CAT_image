@@ -49,8 +49,8 @@ async function processImageQueue() {
         var workflow = task.workflow;
         var prompt = task.prompt;
         // Anime 模式强制清理中文（删空则保留原文，防空提示词）
-        if (isEnglishMode(task.mode)) { var _clean = cleanPromptForMode(prompt, task.mode); if (_clean) prompt = _clean; }
-        var result = await generateImage(workflow, prompt, { signal: task.controller.signal, mode: task.mode });
+        if (!task.promptIsFinal && isEnglishMode(task.mode)) { var _clean = cleanPromptForMode(prompt, task.mode); if (_clean) prompt = _clean; }
+        var result = await generateImage(workflow, prompt, { signal: task.controller.signal, mode: task.mode, promptIsFinal: task.promptIsFinal });
         if (task.cancelled) return;
         galleryAdd(result.url, {
             kind: task.custom ? 'portrait' : 'chat',
@@ -111,8 +111,8 @@ export function enqueueGen(btn, prompt, { automatic = false } = {}) {
 }
 
 // [Fix] 通用排队任务（立绘等非聊天图按钮的生成）：与聊天图共用同一队列，串行打 ComfyUI
-export function enqueueTask(id, prompt, onSuccess, onFail) {
-    imageQueue.push({ id: id, prompt: prompt, mode: getActiveMode(), workflow: settings.cWf, custom: { onSuccess: onSuccess, onFail: onFail }, chatKey: getChatId() });
+export function enqueueTask(id, prompt, onSuccess, onFail, { promptIsFinal = false } = {}) {
+    imageQueue.push({ id, prompt, mode: getActiveMode(), workflow: settings.cWf, custom: { onSuccess, onFail }, chatKey: getChatId(), promptIsFinal });
     slLog('入队(任务):', id, '队列长度:', imageQueue.length);
     processImageQueue();
 }

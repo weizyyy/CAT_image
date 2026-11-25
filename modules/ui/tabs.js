@@ -13,6 +13,7 @@ import { rosterEntries, rosterForChat, atomValues, atomCount, getAtomAnchor, get
 import { describeCharacterChats, listCharacterChats, openCharacterSession } from '../chat-sessions.js';
 import { archiveSaveError, currentCard, flushArchive, getCharacterName, getChatId, saveArchive } from '../archive.js';
 import { composeFinalPrompt } from '../comfyui.js';
+import { requestPortraitPrompts } from '../pipeline/portrait.js';
 import { galleryList, galleryCount, galleryRemove, galleryClearChat, galleryPrune, galleryCacheSource, setGalleryCacheSource } from '../gallery.js';
 import { openSubPanel } from './sub-panels.js';
 import * as panel from './panel.js';
@@ -477,12 +478,14 @@ function buildPortraitPrompt(ent, view, bm) {
   var v = PORTRAIT_VIEW_CN[view] ? view : 'front';
   var underage = false;
   try { underage = isUnderageEntry(ent); } catch (e0) {}
+  const override = ent.portraitPromptOverrides?.[bm];
+  if (!underage && v === 'front' && override) return override;
   var body = '';
   try {
     var pp = getPortraitPrompt(ent, v);
     var pm = portraitPromptsMode(ent);
     // 语言桶必须对得上（中文提示词喂英文模型 = 会被清洗逻辑整段删空）
-    if (pp && (!pm || !bm || isEnglishMode(pm) === isEnglishMode(bm))) body = pp;
+    if (pp && (underage || !pm || !bm || isEnglishMode(pm) === isEnglishMode(bm))) body = pp;
   } catch (e1) {}
   if (body) {
     // 视角/全身/遮挡由代码兜住 —— AI 那一条可能只写了外貌
@@ -504,7 +507,82 @@ function buildPortraitPrompt(ent, view, bm) {
   }
   if (isEnglishMode(bm)) body = cleanPromptForMode(body, bm);
   // 走与 generateImage 完全同源的组装（画风预设 / 艺术家标签）
-  return composeFinalPrompt(body);
+  return composeFinalPrompt(body, bm).replace(/\r\n?/g, '\n');
+}
+
+const portraitRequests = new WeakSet();
+
+function bindPortraitPromptEditor(body, ent, chatId, key, mode) {
+  const box = body.find('.sl_prompt_box');
+  const input = box.find('.sl_prompt_ta');
+  const copy = box.find('.sl_copy_btn');
+  const edit = box.find('.sl_prompt_edit');
+  const regenerate = box.find('.sl_prompt_regenerate');
+  const cancel = box.find('.sl_prompt_cancel');
+  const restricted = isUnderageEntry(ent);
+  const refresh = () => {
+    const prompt = buildPortraitPrompt(ent, 'front', mode);
+    input.val(prompt).prop('readOnly', true);
+    copy.prop('disabled', !prompt);
+    edit.prop('disabled', !prompt || restricted).text('修改提示词');
+    regenerate.prop('disabled', restricted || !getEnglishAnchor(ent));
+    cancel.hide();
+  };
+  const isCurrent = () => getChatId() === chatId && getActiveMode() === mode && rosterForChat(chatId)?.[key] === ent;
+  body.find('.sl_prompt_btn').on('click', () => {
+    if (box[0].hidden && input.prop('readOnly')) refresh();
+    box[0].hidden = !box[0].hidden;
+  });
+  copy.on('click', () => {
+    const fallback = () => { input[0].select(); if (!document.execCommand('copy')) throw new Error('copy'); };
+    void (async () => {
+      try {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(input.val()).catch(fallback);
+        else fallback();
+        toast('success', '提示词已复制');
+      } catch { toast('error', '复制失败，请手动选中'); }
+    })();
+  });
+  edit.on('click', async () => {
+    if (!isCurrent() || restricted || portraitRequests.has(ent)) return;
+    if (input.prop('readOnly')) {
+      input.prop('readOnly', false).trigger('focus');
+      edit.text('保存提示词');
+      copy.prop('disabled', true);
+      regenerate.prop('disabled', true);
+      cancel.show();
+      return;
+    }
+    const value = input.val();
+    if (!value.trim()) { toast('warning', '请输入立绘提示词'); return; }
+    ent.portraitPromptOverrides ??= {};
+    ent.portraitPromptOverrides[mode] = value;
+    refresh();
+    if (await saveArchive()) toast('success', '正面立绘提示词已保存');
+  });
+  cancel.on('click', refresh);
+  regenerate.on('click', async () => {
+    if (!isCurrent() || restricted || portraitRequests.has(ent)) return;
+    const anchor = getEnglishAnchor(ent);
+    if (!anchor) { toast('warning', '请先保存英文锚点'); return; }
+    if (!settings.auxUrl || !settings.auxModel) { toast('warning', '请先配置 AI 助理'); return; }
+    portraitRequests.add(ent);
+    regenerate.prop('disabled', true).text('生成中…');
+    edit.prop('disabled', true);
+    try {
+      const prompts = await requestPortraitPrompts(anchor, mode);
+      if (!isCurrent() || getEnglishAnchor(ent) !== anchor) return;
+      ent.portraitPrompts = prompts;
+      if (ent.portraitPromptOverrides) delete ent.portraitPromptOverrides[mode];
+      if (await saveArchive()) toast('success', '四视角立绘提示词已更新');
+    } catch (error) {
+      if (isCurrent()) toast('error', '立绘提示词生成失败 · ' + esc(error.message));
+    } finally {
+      portraitRequests.delete(ent);
+      regenerate.text('重新生成');
+      if (box[0].isConnected) refresh();
+    }
+  });
 }
 
 // ── 人物详情页（第3层）：完整档案（锚点）+ 提示词 ──
@@ -552,20 +630,32 @@ function renderPersonDetail(body, key, chatId = getChatId()) {
   h += '<div style="display:flex;gap:6px;margin-top:11px;flex-wrap:wrap;">';
   if (chatId === getChatId()) h += '<button class="sl_prompt_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnGhost() + 'font-size:10.5px;padding:6px 13px;">提示词</button>';
   h += '</div>';
-  h += '<div class="sl_prompt_box" data-char="' + escAttr(ppl.key) + '" style="display:none;margin-top:10px;">';
-  h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-bottom:4px;">下方就是**实际发给 ComfyUI 的那一条**（含画风预设 / 艺术家标签）</div>';
-  h += '<textarea class="sl_prompt_ta" data-char="' + escAttr(ppl.key) + '" readonly style="width:100%;min-height:110px;' + fi() + 'font-size:10.5px;resize:vertical;">' + esc(buildPortraitPrompt(ppl.ent, 'front', bm)) + '</textarea>';
-  h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><button class="sl_copy_btn" data-char="' + escAttr(ppl.key) + '" style="' + btnSm() + 'font-size:10px;">复制提示词</button></div></div>';
+  h += '<div class="sl_prompt_box" hidden style="margin-top:10px;">';
+  h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-bottom:4px;">实际发给 ComfyUI 的正面立绘提示词，含画风预设和艺术家标签。</div>';
+  h += '<textarea class="sl_prompt_ta" aria-label="正面立绘提示词" readonly style="width:100%;min-height:110px;' + fi() + 'font-size:10.5px;resize:vertical;"></textarea>';
+  const promptButton = (className, label, extra = '') =>
+    '<button type="button" class="' + className + '" style="' + btnSm() + 'font-size:10px;' + extra + '">' + label + '</button>';
+  h += '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+    promptButton('sl_copy_btn', '复制提示词') + promptButton('sl_prompt_edit', '修改提示词') +
+    promptButton('sl_prompt_regenerate', '重新生成') + promptButton('sl_prompt_cancel', '取消', 'display:none;') + '</div>';
+  const promptNote = isUnderageEntry(ppl.ent) ? '此人物的全覆盖立绘从档案锚点生成。' : '重新生成会按已保存的英文锚点重写四个视角的提示词，并替换当前模式手改的正面提示词。';
+  h += '<div style="font-size:9.5px;color:' + CAT.mute + ';margin-top:4px;">' + promptNote + '</div></div>';
   h += '</div></div></div>';
   body.html(archiveSaveNotice() + h); bindArchiveEvents(body);
   bindArchiveSave(body, () => renderPersonDetail(body, key, chatId));
+  if (chatId === getChatId()) bindPortraitPromptEditor(body, ppl.ent, chatId, key, bm);
   const character = currentCard().id;
   body.find('.sl_anchor_save').on('click', async () => {
     if (character !== currentCard().id || !editRosterAnchor(chatId, key, body.find('.sl_anchor_input').val())) {
       toast('warning', '请输入有效的英文锚点'); return;
     }
+    const promptWasOpen = !body.find('.sl_prompt_box')[0].hidden;
+    const anchorInput = body.find('.sl_anchor_input')[0];
     if (await flushArchive()) toast('success', '英文锚点已保存');
-    if (character === currentCard().id) renderPersonDetail(body, key, chatId);
+    if (character === currentCard().id && anchorInput.isConnected) {
+      renderPersonDetail(body, key, chatId);
+      if (promptWasOpen) body.find('.sl_prompt_btn').trigger('click');
+    }
   });
   body.find('.sl_person_delete').on('click', async () => {
     if (character !== currentCard().id || !confirm('删除此聊天中的人物档案「' + ppl.name + '」？')) return;
@@ -579,30 +669,6 @@ export function bindArchiveEvents(b) {
   // 卡片 → 详情页；返回
   b.off('click', '.sl_pcard').on('click', '.sl_pcard', function () { renderPersonDetail(b, this.dataset.char, this.closest('details[data-chat]')?.dataset.chat); });
   b.off('click', '.sl_pback').on('click', '.sl_pback', function () { renderArchiveInto(b); });
-  // 提示词：打开时按最新锚点重新生成
-  b.off('click', '.sl_prompt_btn').on('click', '.sl_prompt_btn', function () {
-    var cn2 = jQuery(this).data('char');
-    var box = b.find('.sl_prompt_box[data-char="' + cn2 + '"]');
-    if (box.is(':visible')) { box.hide(); return; }
-    var people2 = collectArchivePeople(), p2 = null;
-    for (var i2 = 0; i2 < people2.length; i2++) { if (people2[i2].key === cn2) { p2 = people2[i2]; break; } }
-    var bm3 = getActiveMode() || 'zit';
-    var atom2 = p2 ? getAtomAnchor(p2.ent, bm3) : '';
-    box.find('.sl_prompt_ta').val(buildPortraitPrompt(p2 && p2.ent, 'front', bm3));
-    box.show();
-  });
-  b.off('click', '.sl_copy_btn').on('click', '.sl_copy_btn', function () {
-    var cn3 = jQuery(this).data('char');
-    var ta = b.find('.sl_prompt_ta[data-char="' + cn3 + '"]');
-    var txt = ta.val() || '';
-    if (!txt) { toast('warning', '还没有提示词（先聊一轮建档）'); return; }
-    var done = function () { toast('success', '提示词已复制'); };
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(txt).then(done, function () { try { ta[0].select(); document.execCommand('copy'); done(); } catch (e) { toast('error', '复制失败，请手动选中'); } });
-      } else { ta[0].select(); document.execCommand('copy'); done(); }
-    } catch (e9) { toast('error', '复制失败，请手动选中'); }
-  });
   // ── 立绘：四个视角（正面/左/右/背）──
   // 提示词由辅助 AI 建档时写好（每视角一条）；老档案没有才退回锚点拼装。
   // 按钮挂在列表卡片（第2层）与详情页（第3层）→ 必须阻止冒泡，否则会顺带触发"进详情页"
@@ -615,20 +681,14 @@ export function bindArchiveEvents(b) {
     try { var re2 = rosterEntries(); for (var i2 = 0; i2 < re2.length; i2++) { if (re2[i2] && re2[i2].key === cn) { ent = re2[i2]; break; } } } catch (e9) {}
     if (!ent) { toast('error', '找不到该人物档案'); return; }
     var bm = getActiveMode() || 'zit';
-    var aiP = '', aiM = '';
-    try { aiP = getPortraitPrompt(ent, view); aiM = portraitPromptsMode(ent); } catch (e8) {}
-    var aiOk = !!(aiP && (!aiM || isEnglishMode(aiM) === isEnglishMode(bm)));
-    // 英文模式读【英文权威锚点】，zit 读中文呈现缓存；base 永不进立绘
-    var anchor = getAtomAnchor(ent, bm);
-    if (!anchor && !aiOk) {
+    var prompt = buildPortraitPrompt(ent, view, bm);
+    if (!prompt) {
       toast('warning', bm === 'zit'
         ? '还没有锚点 —— 先正常聊一轮（出一次图）让插件按 38 维建档，之后立绘才是干净的对照图'
         : '还没有【英文锚点】—— ' + bm + ' 模式只读英文锚点（中文会被清洗逻辑删空、画出路人）。先正常聊一轮出一次图');
       return;
     }
     if (!settings.cWf) { toast('error', '工作流未配置'); return; }
-    var prompt = buildPortraitPrompt(ent, view, bm);
-    if (!prompt) { toast('warning', '这条立绘还没有提示词'); return; }
     var oldTxt = btn.text();
     btn.prop('disabled', true).text('排队中…');
     enqueueTask('portrait_' + view + '_' + Date.now() + '_' + cn, prompt, function (result) {
@@ -642,7 +702,7 @@ export function bindArchiveEvents(b) {
         toast('success', cn + ' · ' + (PORTRAIT_VIEW_CN[view] || view) + ' 立绘生成完毕');
       }
       btn.prop('disabled', false).text(oldTxt || '生成立绘');
-    }, function (error) { if (error?.name !== 'AbortError') toast('error', '立绘生成失败'); btn.prop('disabled', false).text(oldTxt || '生成立绘'); });
+    }, function (error) { if (error?.name !== 'AbortError') toast('error', '立绘生成失败'); btn.prop('disabled', false).text(oldTxt || '生成立绘'); }, { promptIsFinal: true });
   });
   // id 前缀改成 [id^=sl_port] —— 旧写法 [id^=sl_port_] 匹配不到四视角缩略位（sl_portv_…），点不开放大
   b.off('click', '[id^=sl_port]').on('click', '[id^=sl_port]', function (e) { if (e && e.stopPropagation) e.stopPropagation(); var bg = jQuery(this).css('background-image'); if (!bg || bg === 'none') return; var url = bg.slice(bg.indexOf('(')+1,bg.lastIndexOf(')')).replace(/["']/g,'');

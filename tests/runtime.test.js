@@ -176,13 +176,15 @@ test('TavernHelper visible streaming sibling restores finished slots and reanaly
     } finally { scanner.stopPolling(); }
 });
 
-test('a historical card reanalyzes immediately after another reply finishes, before the next redraw', async () => {
+test('historical card reanalysis works during a new reply without analyzing the active floor', async () => {
     const source = '开头[img:旧提示]中间[img:保留提示]结尾';
     show(source);
     const oldReply = document.querySelector('.mes_text');
     const requests = [];
+    let finishReanalysis;
     fetch = async (_url, options) => {
         requests.push(JSON.parse(options.body).messages.at(-1).content);
+        if (requests.length === 3) await new Promise(resolve => { finishReanalysis = resolve; });
         return response('Scene number ' + requests.length + '.');
     };
     scanner.startPolling();
@@ -192,14 +194,29 @@ test('a historical card reanalyzes immediately after another reply finishes, bef
         const untouched = oldReply.querySelectorAll('.sl_img_btn')[1].dataset.slid;
         galleryAdd('/untouched.png', { blockId: untouched });
         scanner.scanAllMsgs();
-        const retry = oldReply.querySelector('.sl_img_reanalyze');
-        eventSource.emit(types.GENERATION_STARTED, 'normal', {}, false);
-        ctx.chat.push({ mes: '新的回复，无图', is_user: false, swipe_id: 0 });
-        document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">新的回复，无图</div></div>');
+        const retry = () => oldReply.querySelector('.sl_img_reanalyze');
+        eventSource.emit(types.GENERATION_STARTED, 'continue', {}, false);
+        retry().click();
+        assert.equal(retry().disabled, false);
+        assert.equal(requests.length, 2);
         eventSource.emit(types.GENERATION_ENDED);
-        retry.click();
-        assert.equal(retry.disabled, true);
+
+        eventSource.emit(types.GENERATION_STARTED, 'normal', {}, false);
+        retry().click();
+        assert.equal(retry().disabled, true);
+        ctx.chat.push({ mes: '[img:尚未结束]', is_user: false, swipe_id: 0 });
+        document.querySelector('#chat').insertAdjacentHTML('beforeend', '<div class="mes" mesid="1"><div class="mes_text">[img:尚未结束]</div></div>');
+        ctx.streamingProcessor = { messageId: 1, isFinished: false, isStopped: false };
+        // Nested host generation starts must preserve in-flight retries on other floors.
+        eventSource.emit(types.GENERATION_STARTED, 'continue', {}, false);
+        await scanner.runAuxImageScan(jQuery('.mes[mesid="1"] .mes_text'));
+        await waitUntil(() => !!finishReanalysis);
+        finishReanalysis();
         await waitUntil(() => oldReply.querySelector('.sl_img_btn').dataset.prompt === 'Scene number 3.' && !scanner.scanCoordinator.running);
+        assert.equal(scanner.generationBusy(), true);
+        assert.equal(document.querySelector('.mes[mesid="1"] [data-sl-slot]'), null);
+        ctx.streamingProcessor = null;
+        eventSource.emit(types.GENERATION_ENDED);
 
         oldReply.textContent = source;
         scanner.scanAllMsgs();
@@ -211,6 +228,8 @@ test('a historical card reanalyzes immediately after another reply finishes, bef
         assert.ok(requests[2].includes('旧提示'));
         assert.ok(!requests[2].includes('保留提示'));
     } finally {
+        finishReanalysis?.();
+        ctx.streamingProcessor = null;
         scanner.stopPolling();
     }
 });
@@ -1046,5 +1065,112 @@ test('assembled requests keep shared policies, model overlays and per-call recor
         }
     } finally {
         settings.modelType = saved.mode; settings.slPurgeLayered = saved.layered;
+    }
+});
+
+test('portrait editor persists the exact ComfyUI prompt and regenerates four views from the saved anchor', async () => {
+    const { createExpandedPanel, popPage } = await import('../modules/ui/panel.js');
+    const { renderArchivePage } = await import('../modules/ui/tabs.js');
+    const { loadArchive, flushArchive } = await import('../modules/archive.js');
+    const { getQueueStatus } = await import('../modules/queue.js');
+    const savedSettings = { ...settings }, savedFetch = fetch;
+    const files = new Map(), sent = [], requests = [];
+    const views = {
+        front: 'Standing, full body including feet, front view with blue eyes.',
+        left: 'Standing, full body including feet, camera on her left side.',
+        right: 'Standing, full body including feet, camera on her right side.',
+        back: 'Standing, full body including feet, back view.',
+    };
+    let answer = { front: views.front };
+    globalThis.fetch = async (url, options) => {
+        if (String(url).startsWith('/user/files/')) {
+            const data = files.get(url.split('/').at(-1));
+            return data ? new Response(data) : new Response(null, { status: 404 });
+        }
+        if (url === '/api/files/upload') {
+            const { name, data } = JSON.parse(options.body);
+            files.set(name, Buffer.from(data, 'base64'));
+            return new Response(null, { status: 200 });
+        }
+        if (url === '/api/characters/chats') return Response.json([]);
+        if (url === '/api/images/upload') return Response.json({ path: '/portrait.png' });
+        if (url === '/api/sd/comfy/generate') {
+            sent.push(JSON.parse(JSON.parse(options.body).prompt).prompt.text);
+            return Response.json({ data: 'AA==', format: 'png' });
+        }
+        assert.equal(url, 'http://analysis.local/chat/completions');
+        requests.push(JSON.parse(options.body).messages.at(-1).content);
+        return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(answer) } }] });
+    };
+    try {
+        Object.assign(settings, { modelType: 'anima', animeArtist: 'fixture artist', cWf: '{"text":"%prompt%"}' });
+        await loadArchive();
+        const roster = sessionData(keyFor('test'), true).roster;
+        roster.Alice = { key: 'Alice', name: 'Alice', anchor: 'age:twenty-eight | eyes:green' };
+        roster.June = { key: 'June', name: 'June', anchor: 'age:about fourteen to fifteen years old | eyes:hazel' };
+        createExpandedPanel();
+        renderArchivePage();
+        const page = document.querySelector('.sl_page_body');
+        const el = selector => page.querySelector(selector);
+        const openPerson = name => {
+            el('.sl_pcard[data-char="' + name + '"]').click();
+            el('.sl_prompt_btn').click();
+        };
+        openPerson('Alice');
+        const buttons = () => ['.sl_copy_btn', '.sl_prompt_edit', '.sl_prompt_regenerate'].map(selector => el(selector).textContent);
+        const input = () => el('.sl_prompt_ta');
+        assert.deepEqual(buttons(), ['复制提示词', '修改提示词', '重新生成']);
+        const initial = input().value;
+        assert.match(initial, /fixture artist$/);
+        el('.sl_port_btn[data-view="front"]').click();
+        await waitUntil(() => sent.length === 1 && !getQueueStatus().running);
+        assert.equal(sent[0], initial);
+
+        el('.sl_prompt_edit').click();
+        const manual = ' Alice, 手改 "quoted" $&\nsecond line  ';
+        input().value = manual;
+        el('.sl_prompt_edit').click();
+        assert.equal(await flushArchive(), true);
+        const disk = await import('../modules/archive.js?portrait-reopened');
+        await disk.loadArchive();
+        assert.equal(disk.sessionData(keyFor('test')).roster.Alice.portraitPromptOverrides.anima, manual);
+        el('.sl_pback').click();
+        openPerson('Alice');
+        assert.equal(input().value, manual);
+        el('.sl_port_btn[data-view="front"]').click();
+        await waitUntil(() => sent.length === 2 && !getQueueStatus().running);
+        assert.equal(sent[1], manual);
+
+        const newAnchor = 'age:twenty-eight | eyes:blue';
+        el('.sl_anchor_input').value = newAnchor;
+        const previousInput = input();
+        el('.sl_anchor_save').click();
+        await waitUntil(() => input() !== previousInput && !el('.sl_prompt_box').hidden);
+        el('.sl_prompt_regenerate').click();
+        await waitUntil(() => !el('.sl_prompt_regenerate').disabled);
+        assert.equal(input().value, manual);
+        assert.equal(roster.Alice.portraitPrompts, undefined);
+        answer = views;
+        el('.sl_prompt_regenerate').click();
+        await waitUntil(() => !el('.sl_prompt_regenerate').disabled);
+        assert.deepEqual(requests, [newAnchor, newAnchor]);
+        assert.equal(sent.length, 2);
+        assert.deepEqual(roster.Alice.portraitPrompts, { ...views, mode: 'anima' });
+        assert.equal(Object.hasOwn(roster.Alice.portraitPromptOverrides, 'anima'), false);
+        assert.match(input().value, /blue eyes.*fixture artist$/);
+        el('.sl_port_btn[data-view="left"]').click();
+        await waitUntil(() => sent.length === 3 && !getQueueStatus().running);
+        assert.match(sent[2], /camera on her left side.*fixture artist$/);
+
+        el('.sl_pback').click();
+        openPerson('June');
+        assert.equal(el('.sl_prompt_edit').disabled, true);
+        assert.equal(el('.sl_prompt_regenerate').disabled, true);
+        assert.match(input().value, /modest full coverage/);
+    } finally {
+        await flushArchive();
+        popPage();
+        Object.assign(settings, savedSettings);
+        globalThis.fetch = savedFetch;
     }
 });

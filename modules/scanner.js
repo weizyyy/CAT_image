@@ -14,7 +14,7 @@ import { ScanCoordinator } from './scan-coordinator.js';
 
 let observedLatest, automaticLatest;
 let galleryIndexMemo;
-let active = false, generating = false, epoch = 0, timer, checkAt = 0, fallback, observer;
+let active = false, generating = false, generationType, epoch = 0, timer, checkAt = 0, fallback, observer;
 const handlers = [], observations = new Map(), revisions = new Map();
 
 export function generationBusy() {
@@ -25,7 +25,7 @@ export function generationBusy() {
 }
 
 // ST's message data is authoritative; DOM text contains generated cards/buttons.
-export function readSnapshot(messageId) {
+export function readSnapshot(messageId, { reanalysis = false } = {}) {
     if (messageId == null || messageId === '') return null;
     const message = getSTContext()?.chat?.[Number(messageId)];
     if (!message || message.is_user || message.is_system || typeof message.mes !== 'string') return null;
@@ -40,8 +40,18 @@ export function readSnapshot(messageId) {
         source, swipe, mode, key, isSameReply, results: new Map(),
         isCurrent() {
             return active && settings.pluginOn !== false && epoch === version &&
-                !generationBusy() && isSameReply() && getActiveMode() === mode;
+                isSameReply() && getActiveMode() === mode &&
+                (!generationBusy() || (reanalysis && isHistoricalReply(Number(messageId))));
         } };
+}
+function isHistoricalReply(id) {
+    const { chat, streamingProcessor: stream } = getSTContext();
+    if (stream && !stream.isFinished && !stream.isStopped && Number.isInteger(stream.messageId) && stream.messageId >= 0) {
+        return id !== stream.messageId;
+    }
+    // Before streaming claims a floor, a normal reply appends. Swipe,
+    // continue and regenerate can still reuse the last floor.
+    return generationType === 'normal' || id < chat.length - 1;
 }
 function latestAssistantId() {
     const chat = getSTContext()?.chat || [];
@@ -129,7 +139,7 @@ export function reanalyzeSlot({ id, source, origin, isCurrent, onSuccess, onErro
     if (existing && ['running', 'queued'].includes(existing.state)) return;
     scanCoordinator.jobs.delete(key);
     return scanCoordinator.submit({
-        owner: key, key, isCurrent,
+        owner: key, key, isCurrent, reanalysis: true,
         run: (current, signal) => runRosterPipeline(source, origin, { isCurrent: current, signal }),
         commit: result => onSuccess(result.enhanced),
         onError, onCancel, onSettled,
@@ -140,7 +150,7 @@ function retryMessageSlot(snapshot, index, button) {
     if (!settings.auxUrl || !settings.auxModel) return;
     // A later reply can finish before the existing cards are rebound. Validate
     // the displayed reply against the current chat and start from a fresh snapshot.
-    const current = readSnapshot(snapshot.messageId);
+    const current = readSnapshot(snapshot.messageId, { reanalysis: true });
     if (!current?.isCurrent() || current.chatId !== snapshot.chatId ||
         current.source !== snapshot.source || current.swipe !== snapshot.swipe) return;
     const revision = prepareRevision(current);
@@ -163,7 +173,7 @@ function retryMessageSlot(snapshot, index, button) {
             revision.slots[index] = updated;
             revision.results.set(index, { ok: true, enhanced });
             saveImageRevision(revision);
-            const isLatest = Number(revision.messageId) === latestAssistantId();
+            const isLatest = !generationBusy() && Number(revision.messageId) === latestAssistantId();
             renderSnapshot(revision, { autoGenerate: isLatest, resolvedOnly: !isLatest });
         },
         onError: () => restore('重新解析失败 · 重试'),
@@ -516,16 +526,18 @@ export function startPolling() {
         if (!types?.[name] || !source?.on) return;
         source.on(types[name], fn); handlers.push(() => (source.off || source.removeListener)?.call(source, types[name], fn));
     };
-    on('GENERATION_STARTED', (_type, _options, dryRun) => {
+    on('GENERATION_STARTED', (type, _options, dryRun) => {
         if (dryRun) return;
-        generating = true; epoch++; scanCoordinator.clear(); clearTimeout(timer); timer = undefined;
+        generating = true; generationType = type;
+        scanCoordinator.clear(snapshot => !snapshot.reanalysis);
+        clearTimeout(timer); timer = undefined;
     });
-    for (const name of ['GENERATION_ENDED', 'GENERATION_STOPPED']) on(name, () => { generating = false; requestCheck(300); });
+    for (const name of ['GENERATION_ENDED', 'GENERATION_STOPPED']) on(name, () => { generating = false; generationType = undefined; requestCheck(300); });
     for (const name of ['MESSAGE_RECEIVED', 'MESSAGE_UPDATED', 'CHARACTER_MESSAGE_RENDERED', 'MESSAGE_DELETED']) on(name, () => requestCheck());
     for (const name of ['MESSAGE_EDITED', 'MESSAGE_SWIPED']) on(name, id => {
         requestCheck(); setTimeout(() => { if (active) scheduleMessage(id); }, 850);
     });
-    on('CHAT_CHANGED', () => { epoch++; generating = false; observations.clear(); revisions.clear(); scanCoordinator.clear(); resetAutomaticBacklog(); refreshCoopCards(); requestCheck(500); });
+    on('CHAT_CHANGED', () => { epoch++; generating = false; generationType = undefined; observations.clear(); revisions.clear(); scanCoordinator.clear(); resetAutomaticBacklog(); refreshCoopCards(); requestCheck(500); });
     observer = new MutationObserver(mutations => {
         if (mutations.every(m => {
             const element = m.target.nodeType === 1 ? m.target : m.target.parentElement;
@@ -546,7 +558,7 @@ export function startPolling() {
 }
 function onFrameLoad() { requestCheck(200); }
 export function stopPolling() {
-    active = false; epoch++; generating = false; clearTimeout(timer); clearInterval(fallback); observer?.disconnect();
+    active = false; epoch++; generating = false; generationType = undefined; clearTimeout(timer); clearInterval(fallback); observer?.disconnect();
     timer = undefined;
     document.querySelector('#chat')?.removeEventListener('load', onFrameLoad, true);
     for (const node of document.querySelectorAll('#chat [' + ACTIVE_STREAM + ']')) node.removeAttribute(ACTIVE_STREAM);
