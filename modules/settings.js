@@ -2,6 +2,7 @@
 export var settings = {};
 export const MOSS_IMAGE_CG_MODE = 'moss_image';
 export const MOSS_IMAGE_FREE_MODE = 'moss_image_free';
+export const GEMINI_AUX_URL = 'https://aiplatform.googleapis.com';
 const defaultMossCanvas = { width: 1536, height: 864 };
 
 export function isMossImageMode(mode) {
@@ -28,9 +29,12 @@ export function getDefaults() {
         cTimeout: 180,
         cWf: '',
         cWfName: '',
+        auxFormat: 'openai',
         auxUrl: '',
         auxKey: '',
         auxModel: '',
+        auxOpenAI: {},
+        auxGemini: {},
         stylePreset: '',
         enhancedTheme: '默认',
         nsfwEnhance: false,
@@ -52,6 +56,21 @@ export function getDefaults() {
         feBridgeMode: 'auto',
         slPurgeLayered: true,
     };
+}
+
+export function getAuxiliaryConfig() {
+    if (settings.auxFormat === 'gemini') {
+        const gemini = settings.auxGemini || {};
+        return { ...gemini, format: 'gemini', url: gemini.url?.trim() || GEMINI_AUX_URL,
+            model: gemini.model?.trim() || '', key: gemini.key?.trim() || '', projectId: gemini.projectId?.trim() || '' };
+    }
+    return { ...settings.auxOpenAI, format: 'openai', url: settings.auxUrl?.trim() || '',
+        model: settings.auxModel?.trim() || '', key: settings.auxKey?.trim() || '' };
+}
+
+export function isAuxConfigured() {
+    const { format, url, model, projectId } = getAuxiliaryConfig();
+    return !!(url && model && (format !== 'gemini' || projectId));
 }
 
 export var COLORS = {

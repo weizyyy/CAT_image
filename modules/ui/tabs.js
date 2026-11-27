@@ -3,7 +3,7 @@ import { CAT, CAT_THEMES, TEXT_THEMES, applyTheme, getTextTheme, refreshTextThem
 import { card, groupTitle, cell, cardHead, lbl, chip, btnMain, btnGhost, btnSm, btnDanger, switchHTML, empty } from './primitives.js';
 import { catSVG, catStatusText } from './cat.js';
 import { toast, esc, escAttr, fi, chkProf } from './utils.js';
-import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge, isMossImageMode, getMossCanvas, isMossDimension } from '../settings.js';
+import { settings, saveSettings, getActiveMode, isEnglishMode, MODES, modeBadge, isMossImageMode, getMossCanvas, isMossDimension, isAuxConfigured } from '../settings.js';
 import { KREA2_STYLES, krea2StyleById } from '../style-presets.js';
 import { slLogDump, getLogCount, slClearLogs, slLog } from '../log.js';
 import { startPolling, stopPolling, getScannerStatus, checkLastMessage, generationBusy, queueMessageFloors, scanAllMsgs } from '../scanner.js';
@@ -38,7 +38,7 @@ function refreshHomeStatus(body) {
 export function renderHomeTab() {
   var body = jQuery('#sl_panel_home'); if (!body.length) return;
   var cn = getCharacterName() || '未选择角色', ql = getQueueLength(),
-    ha = !!(settings.auxUrl && settings.auxModel), hc = !!settings.cUrl, h = '';
+    ha = isAuxConfigured(), hc = !!settings.cUrl, h = '';
   // 顶部：状态猫大卡
   h += '<div id="sl_home_hero" style="' + card() + 'padding:18px;display:flex;flex-direction:column;align-items:center;gap:2px;">';
   h += '<span class="sl-cat-hero" style="color:' + CAT.accent + ';display:flex;"></span>';
@@ -553,7 +553,7 @@ function bindPortraitPromptEditor(body, ent, chatId, key, mode) {
     if (!isCurrent() || restricted || portraitRequests.has(ent)) return;
     const anchor = getEnglishAnchor(ent);
     if (!anchor) { toast('warning', '请先保存英文锚点'); return; }
-    if (!settings.auxUrl || !settings.auxModel) { toast('warning', '请先配置 AI 助理'); return; }
+    if (!isAuxConfigured()) { toast('warning', '请先配置 AI 助理'); return; }
     portraitRequests.add(ent);
     regenerate.prop('disabled', true).text('生成中…');
     edit.prop('disabled', true);

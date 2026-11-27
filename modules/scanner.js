@@ -1,5 +1,5 @@
 import { slLog, slErr } from './log.js';
-import { settings, getSTContext, getActiveMode } from './settings.js';
+import { settings, getSTContext, getActiveMode, isAuxConfigured } from './settings.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
 import { refreshCoopCards } from './sync-cards.js';
 import { getChatId, sessionData, saveArchive } from './archive.js';
@@ -147,7 +147,7 @@ export function reanalyzeSlot({ id, source, origin, isCurrent, onSuccess, onErro
 }
 
 function retryMessageSlot(snapshot, index, button) {
-    if (!settings.auxUrl || !settings.auxModel) return;
+    if (!isAuxConfigured()) return;
     // A later reply can finish before the existing cards are rebound. Validate
     // the displayed reply against the current chat and start from a fresh snapshot.
     const current = readSnapshot(snapshot.messageId, { reanalysis: true });
@@ -424,7 +424,7 @@ function scheduleMessage(id, immediate = false) {
     }
     const cache = findBestCachedEntry(snapshot.chatId, id, snapshot.source, snapshot.swipe);
     if (cache?.complete) { renderSnapshot(prepareRevision(snapshot)); return; }
-    if (!settings.cWf || !settings.auxUrl || !settings.auxModel) return;
+    if (!settings.cWf || !isAuxConfigured()) return;
     const observation = observations.get(snapshot.owner);
     if (!observation || observation.key !== snapshot.key) {
         observations.set(snapshot.owner, { key: snapshot.key, since: Date.now() });
@@ -470,7 +470,7 @@ export function queueMessageFloors(input) {
         }
         reuseGalleryImages(revision);
         const missing = revision.slots.some(slot => !slot.enhanced);
-        const pending = missing && !!(settings.auxUrl && settings.auxModel);
+        const pending = missing && isAuxConfigured();
         if (missing && !pending) result.needsArtist++;
         saveImageRevision(revision);
         result.queued += renderAndQueueFloor(revision, pending);

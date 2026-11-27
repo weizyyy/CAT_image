@@ -1,41 +1,119 @@
-// ── SillyImage Lab 辅助 API 调用 ──
+// 辅助 AI 传输层。调用方负责拼接消息和处理回包协议。
 import { slLog, slErr } from '../log.js';
-import { settings } from '../settings.js';
+import { getAuxiliaryConfig, settings } from '../settings.js';
 
-// ══════════════════════════════════════════════════════════════
-// ── 思考强度选项已删除：辅助 AI 一律「关闭思考」 ──
-//   实测（同一套破限 + 明确成人内容，每档 n=10）：
-//     off → 拒绝 0/10 ｜ low → 拒绝 4/10 ｜ high → 拒绝 9/10
-//   档位越高越容易被拒，画面质量却没有肉眼可见的提升 —— 性价比为负，直接砍掉选项。
-// ⚠️ 协议：DeepSeek 服务端默认 thinking=enabled + effort=high，
-//    所以「把 thinking 参数删掉」= 开到 high，**不是**关掉 —— 必须显式 disabled。
-// ══════════════════════════════════════════════════════════════
-var OUT_MAXTOKENS = 16384;
+const OUT_MAXTOKENS = 16384;
+const OPENAI_MANAGED_FIELDS = new Set(['model', 'messages', 'stream', 'temperature', 'top_p', 'top_k', 'thinking', 'reasoning_effort']);
 
-// ── 思考预算配对（恢复 的表，删档位时被一起删掉了）──
-// reasoning 与 content **共享** max_tokens：开着思考却用 16k，就是"提前截断"和"晚点截断"两种结局。
-// 这张表是开思考的硬前提；档位与预算必须同源，不能一处改一处不改。
-var THINKING_BUDGET = { off: 16384, low: 32768, high: 65536, max: 98304 };
-
-/**
- * 按思考档位设置 thinking / reasoning_effort，并把 max_tokens 抬到该档预算下限。
- * @param {object} body 请求体（原地改）
- * @param {string} level off | low | high | max（缺省 = off）
- */
-function applyThinking(body, level) {
-    var lv = String(level || 'off');
-    if (lv !== 'low' && lv !== 'high' && lv !== 'max') lv = 'off';
-    if (lv === 'off') {
-        body.thinking = { type: 'disabled' };
-        delete body.reasoning_effort;
-    } else {
-        body.thinking = { type: 'enabled' };
-        body.reasoning_effort = lv;
+export function parseAuxAdditionalParams(input) {
+    const text = String(input || '').trim();
+    if (!text) return {};
+    let value;
+    try {
+        value = JSON.parse(text.startsWith('"') ? '{' + text + '}' : text);
+    } catch {
+        throw new Error('附加参数必须是有效的 JSON 对象。布尔值使用 true 或 false。');
     }
-    var floor = THINKING_BUDGET[lv] || OUT_MAXTOKENS;
-    body.max_tokens = Math.max(Number(body.max_tokens) || 0, floor);
-    return body;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('附加参数必须是 JSON 对象。');
+    }
+    const reserved = Object.keys(value).find(key => OPENAI_MANAGED_FIELDS.has(key));
+    if (reserved) throw new Error('附加参数中的 ' + reserved + ' 由插件或上方设置管理。');
+    if (Object.hasOwn(value, 'max_tokens') && Object.hasOwn(value, 'max_completion_tokens')) {
+        throw new Error('max_tokens 和 max_completion_tokens 请选择其一。');
+    }
+    return value;
 }
+
+function auxiliaryEndpoint(config, model) {
+    if (!config.url || !model) throw new Error('请填写 AI 助理的 API 地址和模型。');
+    let endpoint;
+    try { endpoint = new URL(config.url, globalThis.window?.location?.href); }
+    catch { throw new Error('AI 助理的 API 地址格式不正确。'); }
+    if (!['https:', 'http:'].includes(endpoint.protocol)) throw new Error('API 地址须使用 HTTP 或 HTTPS。');
+    const path = endpoint.pathname.replace(/\/+$/, '');
+    if (config.format === 'gemini') {
+        if (!config.projectId) throw new Error('请填写 Gemini 的 Project ID。');
+        if (!/^[a-z0-9][a-z0-9-]*$/i.test(config.projectId)) throw new Error('Gemini 的 Project ID 格式不正确。');
+        // Accept a base URL, a versioned base URL, or the full resource URL.
+        const resource = path.match(/^(.*\/v1(?:beta1)?)\/projects\/[^/]+\/locations\/([^/]+)\/publishers\/google\/models\/[^/]+:generateContent$/);
+        if (!resource && (path.includes('/projects/') || path.endsWith(':generateContent'))) {
+            throw new Error('Gemini 的 API 地址须是基础地址或完整的 generateContent 地址。');
+        }
+        const base = resource?.[1] ?? (/\/v1(?:beta1)?$/.test(path) ? path : path + '/v1');
+        const location = resource?.[2] ?? 'global';
+        endpoint.pathname = base + '/projects/' + config.projectId + '/locations/' + location +
+            '/publishers/google/models/' + encodeURIComponent(model) + ':generateContent';
+    } else {
+        endpoint.pathname = path.endsWith('/chat/completions') ? path : path + '/chat/completions';
+    }
+    endpoint.hash = '';
+    return endpoint;
+}
+
+function samplingValue(config, name, fallback) {
+    if (config.omit?.includes(name)) return;
+    const raw = String(config[name] ?? '').trim();
+    if (!raw) return fallback;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || (name === 'topK' && !Number.isSafeInteger(parsed))) {
+        throw new Error(name + (name === 'topK' ? ' 须为整数。' : ' 须为数字。'));
+    }
+    return parsed;
+}
+
+function geminiBody(messages, config, sampling, maxTokens, level) {
+    const systemParts = [], contents = [];
+    for (const message of messages) {
+        const part = { text: message.content };
+        if (message.role === 'system') systemParts.push(part);
+        else contents.push({ role: message.role === 'assistant' ? 'model' : message.role, parts: [part] });
+    }
+    const generationConfig = { ...sampling, maxOutputTokens: maxTokens };
+    if (config.thinking === 'off') generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    if (config.thinking === 'on' && level) {
+        // Gemini 2.5 accepts a numeric budget; newer models use a thinking level.
+        if (/^-?\d+$/.test(level)) {
+            const budget = Number(level);
+            if (!Number.isSafeInteger(budget) || budget < -1) throw new Error('Gemini thinkingBudget 须为 -1 或非负整数。');
+            generationConfig.thinkingConfig = { thinkingBudget: budget };
+        } else {
+            generationConfig.thinkingConfig = { thinkingLevel: level.toUpperCase() };
+        }
+    }
+    return { ...(systemParts.length ? { systemInstruction: { parts: systemParts } } : {}), contents, generationConfig };
+}
+
+function openaiBody(endpoint, config, model, messages, { temperature, topP, topK }, maxTokens, level) {
+    const official = endpoint.hostname === 'api.openai.com';
+    const deepseek = endpoint.hostname === 'api.deepseek.com';
+    if (official && topK !== undefined) throw new Error('使用 OpenAI 官方接口时，请将 topK 留空或勾选「不发送」。');
+    const extras = parseAuxAdditionalParams(config.additional);
+    const tokenField = official || Object.hasOwn(extras, 'max_completion_tokens') ? 'max_completion_tokens' : 'max_tokens';
+    const body = { messages, model, stream: false, temperature, top_p: topP, top_k: topK, [tokenField]: maxTokens, ...extras };
+    if (Object.hasOwn(extras, 'max_tokens') && tokenField === 'max_completion_tokens') delete body.max_completion_tokens;
+    const legacyDefault = !official && !config.thinking;
+    if (legacyDefault || (deepseek && config.thinking === 'off')) body.thinking = { type: 'disabled' };
+    else if (config.thinking === 'off') body.reasoning_effort = 'none';
+    if (config.thinking === 'on') {
+        if (deepseek) body.thinking = { type: 'enabled' };
+        if (level) body.reasoning_effort = level;
+    }
+    return { body, legacyDefault };
+}
+
+function requestHeaders(config) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (!config.key) return headers;
+    const explicitKey = config.format === 'gemini' && config.key.match(/^x-goog-api-key:\s*(\S+)$/i);
+    if (explicitKey || (config.format === 'gemini' && config.key.startsWith('AIza'))) {
+        headers['x-goog-api-key'] = explicitKey?.[1] || config.key;
+    } else {
+        headers.Authorization = /^Bearer\s/i.test(config.key) ? config.key : 'Bearer ' + config.key;
+    }
+    return headers;
+}
+
 
 // ── CoT（思维链）剥离 ──
 // DeepSeek 把思考放在独立的 reasoning_content 字段（正常不会混进 content）；
@@ -73,107 +151,77 @@ async function _post(endpoint, headers, body, timeoutMs, signal) {
     try {
         const response = await fetch(endpoint, { method: 'POST', headers: headers, body: JSON.stringify(body), signal: ctrl.signal });
         const text = await response.text();
-        return { ok: response.ok, status: response.status, text: async () => text, json: async () => JSON.parse(text) };
+        return { ok: response.ok, status: response.status, text };
     } catch (e) {
         throw new Error(signal?.aborted ? '回复版本已变更，请求已取消' : e && e.name === 'AbortError' ? '辅助API请求超时(' + timeoutMs + 'ms)' : (e ? e.message : 'fetch失败'));
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 
-/**
- * 辅助 API 调用（原始版）：返回 { content, finish, reasoningLen, truncated }。
- * **finish_reason 必须回传**——旧实现只把它打进日志就 return content，
- * 导致下游无法区分「模型拒绝」和「被 max_tokens 截断」，截断只能被压缩成 empty/short，
- * 重试策略只能靠猜（截断被当成空回 → 整轮重发 → 思考白烧一遍）。
- *
- * @param {string|Array} systemPrompt 字符串（system 单条）或多条消息数组
- * @param {string|null} userMessage    systemPrompt 是数组时传 null
- * @param {number} maxTokens           与思考档位配对，见 THINKING_BUDGET
- * @param {number} temperature
- * @param {string} forceModel
- * @param {string} thinkingLevel       off | low | high | max（缺省 off）
- */
-export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel, thinkingLevel, signal) {
-    var model = forceModel || settings.auxModel;
-    if (!settings.auxUrl || !model) {
-        slLog('auxApiCall: auxUrl或model未配置');
-        throw new Error('辅助API未配置');
+function readAuxiliaryResponse(data, format) {
+    if (format === 'gemini') {
+        const candidate = data?.candidates?.[0];
+        const reason = candidate?.finishReason || data?.promptFeedback?.blockReason || '';
+        const finish = reason === 'MAX_TOKENS' ? 'length' : reason.toLowerCase();
+        const parts = candidate?.content?.parts || [];
+        const text = parts.filter(part => !part.thought).map(part => part.text || '').join('');
+        const reasoning = parts.filter(part => part.thought).map(part => part.text || '').join('');
+        return { text, finish, reasoningLen: reasoning.length };
     }
-    var endpoint = settings.auxUrl.replace(/\/+$/, '');
-    if (!/\/chat\/completions$/.test(endpoint)) endpoint += '/chat/completions';
-    slLog('auxApiCall →', endpoint, 'model:', model);
-
-    var headers = { 'Content-Type': 'application/json' };
-    if (settings.auxKey) headers['Authorization'] = 'Bearer ' + settings.auxKey;
-
-    var messages = Array.isArray(systemPrompt) ? systemPrompt : [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }];
-
-    var mt = Math.max(Number(maxTokens) || 0, OUT_MAXTOKENS);
-    var body = {
-        messages: messages,
-        max_tokens: mt,
-        temperature: temperature != null ? temperature : 0.3,
-        stream: false,
-        model: model
-    };
-    applyThinking(body, thinkingLevel);
-
-    var timeoutMs = (settings.cTimeout || 180) * 1000;
-    var response = await _post(endpoint, headers, body, timeoutMs, signal);
-    slLog('auxApiCall 响应状态:', response.status, '| max_tokens=' + mt + ' | thinking=' + (thinkingLevel || 'off'));
-
-    if (!response.ok) {
-        var errorText = await response.text().catch(function () { return ''; });
-        // 网关不认 thinking 字段时的兜底：去掉该字段重试一次。
-        // ⚠️ 只有「不接受 thinking 参数的网关」会走到这里；对 DeepSeek 官方来说去掉参数 = 开到 high，
-        //    所以日志里必须标出来，不能让这件事悄悄发生。
-        if (/thinking|reasoning|parameter|invalid|unknown/i.test(errorText)) {
-            slErr('辅助API拒绝参数, 去掉 thinking 字段重试（⚠️ 对端若按服务端默认，等于开到 high）:', errorText.slice(0, 200));
-            delete body.thinking;
-            delete body.reasoning_effort;
-            // 删掉 thinking 字段 = 对端按服务端默认（DeepSeek 官方是 enabled + high）
-            // → reasoning 会开始吃 token。这里必须同步把预算抬到 high 档，否则必然截断。
-            body.max_tokens = Math.max(Number(body.max_tokens) || 0, THINKING_BUDGET.high);
-            response = await _post(endpoint, headers, body, timeoutMs, signal);
-            slLog('auxApiCall 降级重试响应状态:', response.status, '| max_tokens 已按 high 档抬到 ' + body.max_tokens);
-            if (!response.ok) {
-                var errorText2 = await response.text().catch(function () { return ''; });
-                slErr('auxApiCall失败(降级后):', response.status, errorText2.slice(0, 500));
-                throw new Error('HTTP ' + response.status + ': ' + errorText2.slice(0, 300));
-            }
-        } else {
-            slErr('auxApiCall失败:', response.status, errorText.slice(0, 500));
-            throw new Error('HTTP ' + response.status + ': ' + errorText.slice(0, 300));
-        }
-    }
-
-    var data = await response.json();
-    var choice = data && data.choices && data.choices[0];
-    var msg = (choice && choice.message) || {};
-    var reasoning = (msg.reasoning_content || msg.reasoning || '');
-    var finish = (choice && choice.finish_reason) || '';
-    var content = stripCoT(msg.content || '');
-    slLog('auxApiCall 返回: finish=' + finish + ', content_len=' + content.length + ', reasoning_len=' + reasoning.length);
-
-    if (!content && finish === 'length') {
-        slErr('⚠️ 输出被max_tokens截断: content为空（reasoning 吃了 ' + reasoning.length + ' 字）');
-    }
-    if (!content && !reasoning && finish === 'stop') {
-        slErr('⚠️ 模型主动输出空内容 (finish=stop, 无reasoning), 响应前300字: ' + JSON.stringify(data).slice(0, 300));
-    }
-    return {
-        content: content,
-        finish: finish,
-        reasoningLen: reasoning.length,
-        // 截断的**权威判据**：finish_reason=length。下游靠它把「截断」和「拒绝/空回」分开。
-        truncated: finish === 'length',
-    };
+    const choice = data?.choices?.[0];
+    const message = choice?.message;
+    return { text: message?.content || '', finish: choice?.finish_reason || '',
+        reasoningLen: (message?.reasoning_content || message?.reasoning || '').length };
 }
 
-/**
- * 兼容包装：老签名、老返回值（string content）。
- * 返回文本。需要结束原因时使用 auxApiCallRaw。
- */
+async function sendAuxiliary(messages, { maxTokens, temperature = 0.3, forceModel, signal, config = getAuxiliaryConfig() }) {
+    const model = forceModel || config.model;
+    const endpoint = auxiliaryEndpoint(config, model);
+    const headers = requestHeaders(config);
+    const sampling = {
+        temperature: samplingValue(config, 'temperature', temperature),
+        topP: samplingValue(config, 'topP'),
+        topK: samplingValue(config, 'topK'),
+    };
+    const level = config.omit?.includes('thinkingLevel') ? '' : String(config.thinkingLevel ?? '').trim();
+    const request = config.format === 'gemini'
+        ? { body: geminiBody(messages, config, sampling, maxTokens, level) }
+        : openaiBody(endpoint, config, model, messages, sampling, maxTokens, level);
+    const timeoutMs = (settings.cTimeout || 180) * 1000;
+    slLog('auxApiCall →', endpoint.origin + endpoint.pathname, 'model:', model);
+    let response = await _post(endpoint.href, headers, request.body, timeoutMs, signal);
+    if (!response.ok && request.legacyDefault && [400, 422].includes(response.status) &&
+        /\bthinking\b/i.test(response.text) && /unknown|unsupported|unrecognized|not supported|not (?:permitted|allowed)|extra.forbidden|unexpected/i.test(response.text)) {
+        // Existing compatible endpoints may implement the legacy thinking flag.
+        slLog('辅助 API 不支持默认 thinking 字段，使用服务端默认设置重试');
+        delete request.body.thinking;
+        response = await _post(endpoint.href, headers, request.body, timeoutMs, signal);
+    }
+    if (!response.ok) {
+        slErr('auxApiCall 失败:', response.status, response.text.slice(0, 500));
+        throw new Error('HTTP ' + response.status + ': ' + response.text.slice(0, 300));
+    }
+    let data;
+    try { data = JSON.parse(response.text); }
+    catch { throw new Error('辅助 API 未返回 JSON。'); }
+    const { text, finish, reasoningLen } = readAuxiliaryResponse(data, config.format);
+    const content = stripCoT(text);
+    slLog('auxApiCall 返回: finish=' + finish + ', content_len=' + content.length + ', reasoning_len=' + reasoningLen);
+    return { content, finish, reasoningLen, truncated: finish === 'length' };
+}
+
+export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel, { signal, config } = {}) {
+    const messages = Array.isArray(systemPrompt) ? systemPrompt : [
+        { role: 'system', content: systemPrompt }, { role: 'user', content: userMessage },
+    ];
+    return sendAuxiliary(messages, { maxTokens: Math.max(Number(maxTokens) || 0, OUT_MAXTOKENS), temperature, forceModel, signal, config });
+}
+
 export async function auxApiCall(systemPrompt, userMessage, maxTokens, temperature, forceModel) {
-    var r = await auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel);
-    return r.content;
+    const result = await auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel);
+    return result.content;
+}
+
+export async function testAuxConnection() {
+    const result = await sendAuxiliary([{ role: 'user', content: 'Reply only with OK.' }], { maxTokens: 256 });
+    if (!result.content && !result.truncated) throw new Error('已连接，但模型未返回文本' + (result.finish ? '（' + result.finish + '）' : '') + '。');
 }

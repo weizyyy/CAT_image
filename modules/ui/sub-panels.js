@@ -1,27 +1,123 @@
 // ── SillyImage Lab 子面板（AI 助理 / ComfyUI / 高级选项） ──
 import { CAT } from './theme.js';
 import { toast, esc, escAttr, sbtn, fi } from './utils.js';
-import { settings, getDefaults, saveSettings, getSTHeaders } from '../settings.js';
+import { settings, getDefaults, saveSettings, getSTHeaders, getAuxiliaryConfig, GEMINI_AUX_URL } from '../settings.js';
 import { STYLE_PRESETS } from '../comfyui.js';
+import { parseAuxAdditionalParams, testAuxConnection } from '../pipeline/api.js';
 import { pushPage } from './panel.js';  // 分层导航（仅函数体内使用，运行时安全）
 var SUB_TITLES = { aux: 'AI 助理', comfy: 'ComfyUI 与工作流', advanced: '高级选项' };
 export function openSubPanel(type) {
   pushPage(function (body) { fillSubPanel(type, body); }, SUB_TITLES[type] || '设置');
 }
 export function closeSubPanel(sub) { if (sub && sub.length) sub.remove(); }
+function renderAuxPanel(body) {
+  const config = getAuxiliaryConfig(), gemini = config.format === 'gemini';
+  const profile = gemini ? 'auxGemini' : 'auxOpenAI';
+  const current = settings[profile] ||= {};
+  const inputStyle = fi();
+  const fieldLabel = 'display:block;font-size:11px;color:' + CAT.sub + ';margin-bottom:4px;';
+  const block = 'margin-bottom:10px;';
+  const hint = 'font-size:10.5px;color:' + CAT.mute + ';line-height:1.5;margin-top:4px;';
+  const option = (value, label, selected) => '<option value="' + value + '"' + (value === selected ? ' selected' : '') + '>' + label + '</option>';
+  const entry = (key, label, value, type = 'text', placeholder = '') => '<div style="' + block +
+    '"><label for="sl_aux_' + key + '" style="' + fieldLabel + '">' + label + '</label><input id="sl_aux_' + key +
+    '" data-aux-field="' + key + '" type="' + type + '" value="' + escAttr(value) +
+    '" placeholder="' + escAttr(placeholder) + '" style="' + inputStyle + '"></div>';
+  const optionalEntry = (key, label, type, placeholder, integer = false) => {
+    const omitted = current.omit?.includes(key);
+    return '<div style="' + block + '"><label for="sl_aux_' + key + '" style="' + fieldLabel + '">' + label +
+      '</label><div style="display:flex;align-items:center;gap:8px;"><input id="sl_aux_' + key + '" data-aux-field="' + key +
+      '" type="' + type + '"' + (type === 'number' ? ' step="' + (integer ? '1' : 'any') + '"' : '') +
+      ' value="' + escAttr(String(current[key] ?? '')) + '" placeholder="' + escAttr(placeholder) + '"' + (omitted ? ' disabled' : '') +
+      ' style="' + inputStyle + 'min-width:0;"><label style="white-space:nowrap;font-size:11px;color:' + CAT.sub +
+      ';"><input type="checkbox" data-aux-omit="' + key + '" aria-label="' + label + ' 不发送"' + (omitted ? ' checked' : '') + '> 不发送</label></div></div>';
+  };
+
+  let html = '<div style="' + block + '"><label for="sl_aux_format" style="' + fieldLabel + '">请求格式</label>' +
+    '<select id="sl_aux_format" style="' + inputStyle + '">' + option('openai', 'OpenAI Chat Completions', config.format) +
+    option('gemini', 'Gemini Enterprise Agent Platform', config.format) + '</select></div>';
+  html += entry('url', 'API 地址', gemini ? current.url : settings.auxUrl, 'text', gemini ? GEMINI_AUX_URL : 'https://api.openai.com/v1');
+  html += entry('key', gemini ? 'Google Cloud API Key / OAuth 访问令牌' : 'API Key', config.key, 'password');
+  html += entry('model', gemini ? 'Gemini 模型 ID' : '聊天分析模型', config.model);
+  if (gemini) {
+    html += entry('projectId', 'Project ID', config.projectId);
+    html += '<div style="' + hint + '">API 地址留空使用全局端点。也可填完整的 generateContent 地址。</div>';
+  }
+  html += '<div style="' + hint + 'margin-bottom:8px;">留空沿用默认值（配图 temperature 为 0.25）。勾选「不发送」可省略该字段。' +
+    (gemini ? '' : ' topK 由兼容网关提供。') + '</div>';
+  html += optionalEntry('temperature', 'temperature', 'number', '当前任务默认');
+  html += optionalEntry('topP', 'topP', 'number', '服务默认');
+  html += optionalEntry('topK', 'topK', 'number', '服务默认', true);
+  html += '<div style="' + block + '"><label for="sl_aux_thinking" style="' + fieldLabel + '">思考模式</label>' +
+    '<select id="sl_aux_thinking" data-aux-field="thinking" style="' + inputStyle + '">' +
+    option('', '使用默认值', current.thinking || '') + option('on', '开启', current.thinking) +
+    option('off', '关闭', current.thinking) + option('omit', '不发送', current.thinking) + '</select>' +
+    (gemini ? '<div style="' + hint + '">是否支持关闭由所选模型决定。</div>' : '') + '</div>';
+  html += '<div id="sl_aux_level_row"' + (current.thinking === 'on' ? '' : ' hidden') + '>' +
+    optionalEntry('thinkingLevel', gemini ? 'thinkingLevel' : 'ReasoningEffort', 'text', '留空由模型决定') +
+    (gemini ? '<div style="' + hint + 'margin:-6px 0 10px;">Gemini 2.5 可填整数作为 thinkingBudget。</div>' : '') + '</div>';
+  if (!gemini) {
+    html += '<div style="' + block + '"><label for="sl_aux_additional" style="' + fieldLabel + '">附加参数（JSON）</label>' +
+      '<textarea id="sl_aux_additional" data-aux-field="additional" rows="5" spellcheck="false" style="' + inputStyle +
+      'font-family:monospace;resize:vertical;" placeholder="' + escAttr('{"provider":{"only":["relace/fp4"],"allow_fallbacks":false}}') + '">' +
+      esc(current.additional || '') + '</textarea><div id="sl_aux_additional_error" role="status" style="' + hint + 'color:' + CAT.red + ';"></div></div>';
+  }
+  html += '<div style="display:flex;gap:8px;align-items:center;"><button type="button" id="sl_test_aux" style="' + sbtn(CAT.accent) +
+    '">测试连接</button><span id="sl_aux_status" role="status" style="font-size:11px;color:' + CAT.sub + ';"></span></div>';
+  body.html(html);
+
+  const validateAdditional = () => {
+    const input = body.find('#sl_aux_additional'), errorText = body.find('#sl_aux_additional_error');
+    if (!input.length) return;
+    let error = '';
+    try { parseAuxAdditionalParams(current.additional); } catch (e) { error = e.message; }
+    input.attr('aria-invalid', String(!!error));
+    errorText.text(error);
+  };
+  validateAdditional();
+  body.find('#sl_aux_format').on('change', function () {
+    settings.auxFormat = this.value;
+    saveSettings();
+    renderAuxPanel(body);
+  });
+  const openaiKeys = { url: 'auxUrl', key: 'auxKey', model: 'auxModel' };
+  body.find('[data-aux-field]').on('input change', function () {
+    const key = this.dataset.auxField;
+    if (!gemini && Object.hasOwn(openaiKeys, key)) settings[openaiKeys[key]] = this.value;
+    else current[key] = this.value;
+    if (key === 'thinking') body.find('#sl_aux_level_row').prop('hidden', this.value !== 'on');
+    if (key === 'additional') validateAdditional();
+    saveSettings();
+  });
+  body.find('[data-aux-omit]').on('change', function () {
+    const key = this.dataset.auxOmit;
+    const omitted = new Set(current.omit);
+    if (this.checked) omitted.add(key);
+    else omitted.delete(key);
+    current.omit = [...omitted];
+    body.find('#sl_aux_' + key).prop('disabled', this.checked);
+    saveSettings();
+  });
+  body.find('#sl_test_aux').on('click', async function () {
+    const button = jQuery(this), status = body.find('#sl_aux_status');
+    button.prop('disabled', true).text('测试中…');
+    status.text('');
+    try {
+      await testAuxConnection();
+      status.css('color', CAT.green).text('连接成功');
+    } catch (error) {
+      status.css('color', CAT.red).text(error.message);
+    } finally {
+      button.prop('disabled', false).text('测试连接');
+    }
+  });
+}
+
+
 export function fillSubPanel(type, body) {
   var f = fi();
   if (type === "aux") {
-    var h = '';
-    h += '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">📍 API 地址</div><input id="sl_aux_url" type="text" value="' + escAttr(settings.auxUrl || "") + '" style="' + f + '"></div>';
-    h += '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">🔑 API Key</div><input id="sl_aux_key" type="password" value="' + escAttr(settings.auxKey || "") + '" style="' + f + '"></div>';
-    h += '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">🧠 聊天分析模型</div><input id="sl_aux_model" type="text" value="' + escAttr(settings.auxModel || "") + '" style="' + f + '"></div>';
-    h += '<div style="display:flex;gap:8px;align-items:center;"><button id="sl_test_aux" style="' + sbtn(CAT.accent) + '">🐾 测试连接</button><span id="sl_aux_status" style="font-size:11px;color:' + CAT.sub + ';"></span></div>';
-    body.html(h);
-    jQuery("#sl_aux_url").on("change input", function () { settings.auxUrl = jQuery(this).val(); saveSettings(); });
-    jQuery("#sl_aux_key").on("change input", function () { settings.auxKey = jQuery(this).val(); saveSettings(); });
-    jQuery("#sl_aux_model").on("change input", function () { settings.auxModel = jQuery(this).val(); saveSettings(); });
-    jQuery("#sl_test_aux").on("click", async function () { var b = jQuery(this), s = jQuery("#sl_aux_status"); b.prop("disabled", true).text("测试中..."); try { var baseUrl = (jQuery("#sl_aux_url").val() || "").replace(/\/+$/, ""), url = /\/chat\/completions$/.test(baseUrl) ? baseUrl : baseUrl + "/chat/completions", key = jQuery("#sl_aux_key").val(), hd = { "Content-Type": "application/json" }; if (key) hd["Authorization"] = "Bearer " + key; var r = await fetch(url, { method: "POST", headers: hd, body: JSON.stringify({ model: jQuery("#sl_aux_model").val() || "default", messages: [{ role: "user", content: "hi" }], max_tokens: 3, stream: false }) }); if (r.ok) { s.css({ color: CAT.green }).text("连接成功喵~ ✨"); toast("success", "AI助理连接成功~"); } else { var t = await r.text().catch(function () { return ""; }); s.css({ color: CAT.red }).text("HTTP " + r.status); toast("error", "连接失败: " + r.status); } } catch (e) { s.css({ color: CAT.red }).text(e.message); toast("error", "连不上喵…"); } b.prop("disabled", false).text("🔌 测试连接"); });
+    renderAuxPanel(body);
   } else if (type === "comfy") {
     var h = '<div style="margin-bottom:8px;"><div style="font-size:11px;color:' + CAT.sub + ';margin-bottom:2px;">🎨 ComfyUI 地址</div><input id="sl_comfy_url" type="text" value="' + escAttr(settings.cUrl || "http://localhost:8181") + '" style="' + f + '"></div>';
     h += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;"><button id="sl_test_comfy" style="' + sbtn(CAT.accent) + '">🐾 测试连接</button><span id="sl_comfy_status" style="font-size:11px;color:' + CAT.sub + ';"></span></div>';

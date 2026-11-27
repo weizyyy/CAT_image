@@ -1,6 +1,6 @@
 // Frontend replies use the same scheduler and DOM slots as normal chat messages.
 // No property traps, global first-iframe target, pending-turn overwrite or tail append.
-import { settings, getSTContext, getActiveMode } from './settings.js';
+import { settings, getSTContext, getActiveMode, isAuxConfigured } from './settings.js';
 import { slLog, slErr } from './log.js';
 import { getChatId } from './archive.js';
 import { runRosterPipeline } from './pipeline/roster-pipeline.js';
@@ -100,7 +100,7 @@ function renderRecord(record) {
 function retryFrontendSlot(record, index, button) {
     const token = tokenizePlaceholders(record.text)[index];
     const block = record.slots[index];
-    if (!token || !block?.enhanced || !record.enhanced || !settings.auxUrl || !settings.auxModel) return;
+    if (!token || !block?.enhanced || !record.enhanced || !isAuxConfigured()) return;
     const restore = label => { button.disabled = false; button.textContent = label; };
     button.disabled = true; button.textContent = '重新解析中…';
     const job = reanalyzeSlot({

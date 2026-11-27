@@ -1176,3 +1176,154 @@ test('portrait editor persists the exact ComfyUI prompt and regenerates four vie
         globalThis.fetch = savedFetch;
     }
 });
+
+test('OpenAI assistant sends standard fields, preserves legacy defaults and merges gateway parameters', async () => {
+    const { auxApiCallRaw } = await import('../modules/pipeline/api.js');
+    const original = { ...settings }, originalFetch = fetch;
+    const requests = [];
+    const messages = [{ role: 'system', content: 'first\nline' }, { role: 'system', content: 'second' },
+        { role: 'user', content: 'request' }, { role: 'assistant', content: 'previous' }, { role: 'user', content: 'retry' }];
+    try {
+        fetch = async (url, options) => {
+            requests.push({ url, headers: options.headers, body: JSON.parse(options.body) });
+            if (requests.length === 1) return new Response('Unknown parameter: thinking', { status: 400 });
+            return response('Fixture prompt.');
+        };
+        Object.assign(settings, { auxFormat: 'openai', auxUrl: 'https://gateway.invalid/v1/', auxKey: 'gateway-test',
+            auxModel: 'fixture', auxOpenAI: {} });
+        await auxApiCallRaw(messages, null, 16384, 0.25);
+        assert.deepEqual(requests[0].body.thinking, { type: 'disabled' });
+        assert.equal(requests[0].body.temperature, 0.25);
+        assert.equal(requests[0].url, 'https://gateway.invalid/v1/chat/completions');
+        assert.equal(requests[0].headers.Authorization, 'Bearer gateway-test');
+        assert.deepEqual(requests[1].body, { messages, model: 'fixture', stream: false, temperature: 0.25, max_tokens: 16384 });
+
+        settings.auxUrl = 'https://api.openai.com/v1/chat/completions';
+        await auxApiCallRaw(messages, null, 16384, 0.25);
+        assert.deepEqual(requests[2].body, { messages, model: 'fixture', stream: false, temperature: 0.25, max_completion_tokens: 16384 });
+        settings.auxOpenAI = { topK: '40' };
+        await assert.rejects(auxApiCallRaw(messages, null, 16384, 0.25), /topK/);
+
+        settings.auxUrl = 'https://gateway.invalid/v1?route=fixture';
+        settings.auxOpenAI = { temperature: '0', topP: '0.9', topK: '40', thinking: 'on', thinkingLevel: 'gateway-custom',
+            omit: ['temperature'], additional: '"provider":{"only":["relace/fp4"],"allow_fallbacks":false}' };
+        await auxApiCallRaw(messages, null, 16384, 0.25);
+        assert.equal(requests[3].url, 'https://gateway.invalid/v1/chat/completions?route=fixture');
+        assert.deepEqual(requests[3].body, { messages, model: 'fixture', stream: false, top_p: 0.9, top_k: 40,
+            max_tokens: 16384, reasoning_effort: 'gateway-custom', provider: { only: ['relace/fp4'], allow_fallbacks: false } });
+        settings.auxOpenAI.omit = ['thinkingLevel'];
+        await auxApiCallRaw(messages, null, 16384, 0.25);
+        assert.equal(requests[4].body.temperature, 0);
+        assert.equal(Object.hasOwn(requests[4].body, 'reasoning_effort'), false);
+        settings.auxOpenAI.additional = '{"messages":[]}';
+        await assert.rejects(auxApiCallRaw(messages, null, 16384, 0.25), /messages/);
+        assert.equal(requests.length, 5);
+    } finally {
+        Object.assign(settings, original);
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('Gemini uses native role mapping for single-image retries and separates thoughts and finish reasons', async () => {
+    const { auxApiCallRaw } = await import('../modules/pipeline/api.js');
+    const original = { ...settings }, originalFetch = fetch;
+    const requests = [];
+    try {
+        Object.assign(settings, { auxFormat: 'gemini', modelType: 'zit', slPurgeLayered: true, nsfwEnhance: false,
+            auxGemini: { projectId: 'test-project', model: 'gemini-fixture', key: 'AIza-mock',
+                temperature: '0', topP: '0.8', topK: '27', omit: ['topK'], thinking: 'on', thinkingLevel: 'low' } });
+        const captures = [
+            { finishReason: 'STOP', content: { parts: [{ text: 'internal thought', thought: true },
+                { text: '---IMAGES---\nA previous prompt.\n---END---' }] } },
+            { finishReason: 'STOP', content: { parts: [{ text: '---PROFILE---\n{}\n---END---\n' },
+                { text: 'another thought', thought: true }, { text: '---IMAGES---\nA final prompt.\n---END---' }] } },
+            { finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'thought only', thought: true }] } },
+        ];
+        fetch = async (url, options) => {
+            requests.push({ url, headers: options.headers, body: JSON.parse(options.body) });
+            return Response.json({ candidates: [captures[requests.length - 1]] });
+        };
+        const end = await runRosterPipeline('前[img:测试场景]后', '0');
+        assert.equal(end.ok, true);
+        assert.match(end.enhanced, /A final prompt\./);
+        assert.doesNotMatch(end.enhanced, /another thought/);
+        assert.equal(requests.length, 2);
+        const [first, retry] = requests;
+        assert.equal(first.url, 'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/gemini-fixture:generateContent');
+        assert.equal(first.headers['x-goog-api-key'], 'AIza-mock');
+        assert.deepEqual(first.body.generationConfig, { temperature: 0, topP: 0.8, maxOutputTokens: 16384, thinkingConfig: { thinkingLevel: 'LOW' } });
+        assert.equal(first.body.systemInstruction.parts.length, 6);
+        assert.deepEqual(retry.body.systemInstruction, first.body.systemInstruction);
+        assert.equal(first.body.contents.length, 1);
+        assert.deepEqual(retry.body.contents.map(item => item.role), ['user', 'model', 'user']);
+        assert.deepEqual(retry.body.contents[0], first.body.contents[0]);
+        assert.match(retry.body.contents[1].parts[0].text, /A previous prompt/);
+        assert.doesNotMatch(retry.body.contents[1].parts[0].text, /internal thought/);
+
+        settings.auxGemini = { ...settings.auxGemini, key: 'Bearer oauth-fixture', thinkingLevel: '2048',
+            url: 'https://test.invalid/v1/projects/old/locations/us-central1/publishers/google/models/old:generateContent' };
+        const raw = await auxApiCallRaw('system', 'user');
+        assert.deepEqual(raw, { content: '', finish: 'length', reasoningLen: 12, truncated: true });
+        assert.equal(requests[2].url, 'https://test.invalid/v1/projects/test-project/locations/us-central1/publishers/google/models/gemini-fixture:generateContent');
+        assert.equal(requests[2].headers.Authorization, 'Bearer oauth-fixture');
+        assert.deepEqual(requests[2].body.generationConfig.thinkingConfig, { thinkingBudget: 2048 });
+    } finally {
+        Object.assign(settings, original);
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('assistant settings switch profiles, save omission controls and test the selected protocol', async () => {
+    const { fillSubPanel } = await import('../modules/ui/sub-panels.js');
+    const { isAuxConfigured } = await import('../modules/settings.js');
+    const original = { ...settings }, originalFetch = fetch;
+    const body = jQuery('<div>').appendTo(document.body);
+    const field = id => body.find('#sl_aux_' + id);
+    const enter = (id, value) => field(id).val(value).trigger('change');
+    try {
+        Object.assign(settings, { auxFormat: 'openai', auxUrl: 'https://open.invalid/v1', auxKey: 'open-fixture',
+            auxModel: 'open-model', auxOpenAI: {}, auxGemini: {} });
+        fillSubPanel('aux', body);
+        assert.equal(body.find('select,input,textarea').first()[0].id, 'sl_aux_format');
+        assert.equal(field('projectId').length, 0);
+        assert.equal(field('level_row').prop('hidden'), true);
+        enter('thinking', 'on');
+        enter('thinkingLevel', 'custom');
+        assert.equal(field('level_row').prop('hidden'), false);
+        enter('temperature', '0.8');
+        body.find('[data-aux-omit="temperature"]').prop('checked', true).trigger('change');
+        assert.equal(field('temperature').prop('disabled'), true);
+        enter('additional', '"provider":{"allow_fallbacks":False}');
+        assert.equal(field('additional').attr('aria-invalid'), 'true');
+        enter('additional', '"provider":{"allow_fallbacks":false}');
+        assert.equal(field('additional').attr('aria-invalid'), 'false');
+
+        enter('format', 'gemini');
+        assert.equal(field('projectId').length, 1);
+        assert.equal(field('key').val(), '');
+        assert.equal(field('additional').length, 0);
+        enter('projectId', 'ui-project');
+        enter('model', 'gemini-ui');
+        enter('thinking', 'omit');
+        assert.equal(isAuxConfigured(), true);
+        const requests = [];
+        fetch = async (url, options) => {
+            requests.push({ url, body: JSON.parse(options.body) });
+            return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'OK' }] } }] });
+        };
+        body.find('#sl_test_aux')[0].click();
+        await waitUntil(() => field('status').text() === '连接成功');
+        assert.match(requests[0].url, /\/projects\/ui-project\/locations\/global\//);
+        assert.equal(Object.hasOwn(requests[0].body.generationConfig, 'thinkingConfig'), false);
+        enter('format', 'openai');
+        assert.equal(field('model').val(), 'open-model');
+        assert.equal(field('key').val(), 'open-fixture');
+        assert.equal(field('thinkingLevel').val(), 'custom');
+        assert.equal(field('temperature').val(), '0.8');
+        assert.equal(field('temperature').prop('disabled'), true);
+    } finally {
+        body.remove();
+        Object.assign(settings, original);
+        globalThis.fetch = originalFetch;
+    }
+});

@@ -4,7 +4,7 @@ import { tokenizePlaceholders, replaceTokens } from '../placeholders.js';
 // 起为唯一管线（旧画师管线 runAuxPipeline 已移除）
 
 import { slLog, slErr } from '../log.js';
-import { settings, getActiveMode, isEnglishMode, isMossImageMode, MOSS_IMAGE_CG_MODE, MOSS_IMAGE_FREE_MODE, getMossCanvas } from '../settings.js';
+import { settings, getActiveMode, isEnglishMode, isMossImageMode, MOSS_IMAGE_CG_MODE, MOSS_IMAGE_FREE_MODE, getMossCanvas, getAuxiliaryConfig } from '../settings.js';
 import { parseMossLayout } from '../moss-layout.js';
 import { auxApiCallRaw } from './api.js';
 import { isPromptsLoaded, getPrompt } from '../../prompts/loader.js';
@@ -517,10 +517,10 @@ function _auditFacts(ph, prompt, idx) {
 // ── 入口 ──
 async function runSinglePipeline(bodyText, mesId, options) {
     const mode = getActiveMode(), canvas = getMossCanvas();
-    const callApi = async (...args) => {
+    const requestOptions = { signal: options.signal, config: getAuxiliaryConfig() };
+    const callApi = async (messages) => {
         if (!options.isCurrent()) throw new Error('回复版本已变更');
-        args[6] = options.signal;
-        const result = await auxApiCallRaw(...args);
+        const result = await auxApiCallRaw(messages, null, 16384, 0.25, undefined, requestOptions);
         if (!options.isCurrent()) throw new Error('回复版本已变更');
         return result;
     };
@@ -565,7 +565,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
         var expectN = placeholders.length;
         var baseMsgs = sysMsgs.concat([{ role: 'user', content: userContent }]);
 
-        var _res = await callApi(baseMsgs, null, 16384, 0.25);
+        var _res = await callApi(baseMsgs);
         slLog('首调: finish=' + _res.finish + ', content=' + _res.content.length + ' 字, reasoning=' + _res.reasoningLen + ' 字'
             + ', system 分层=' + sysMsgs.length + ' 条');
 
@@ -621,14 +621,14 @@ async function runSinglePipeline(bodyText, mesId, options) {
                     { role: 'assistant', content: output },
                     { role: 'user', content: _retryNote + '\n禁止输出拒绝、道歉、警告、元评论。' }
                 ]);
-                var _r2 = await callApi(_msgs, null, 16384, 0.25, undefined);
+                var _r2 = await callApi(_msgs);
                 output = _r2.content;
                 _meta = { finish: _r2.finish, truncated: _r2.truncated, reasoningLen: _r2.reasoningLen };
             } else {
                 var _retryContent = userContent
                     + '\n\n---\n【系统重试 · 上一次输出不合格（' + _fail + '）】\n'
                     + '按系统的「输出格式」重新交稿。IMAGES 只写本图的一条可用提示词。';
-                var _r3 = await callApi(sysMsgs.concat([{ role: 'user', content: _retryContent }]), null, 16384, 0.25, undefined);
+                var _r3 = await callApi(sysMsgs.concat([{ role: 'user', content: _retryContent }]));
                 output = _r3.content;
                 _meta = { finish: _r3.finish, truncated: _r3.truncated, reasoningLen: _r3.reasoningLen };
             }
