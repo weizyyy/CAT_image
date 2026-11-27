@@ -1,6 +1,6 @@
 import { isEnglishMode } from '../settings.js';
 import { PORTRAIT_VIEWS } from '../roster.js';
-import { auxApiCallRaw } from './api.js';
+import { auxApiCallRaw, withAuxiliaryFallback } from './api.js';
 
 export async function requestPortraitPrompts(anchor, mode) {
     const language = isEnglishMode(mode) ? '英文' : '中文';
@@ -11,7 +11,11 @@ export async function requestPortraitPrompts(anchor, mode) {
         '每条都是独立可用的' + language + '普通文本提示词，勿加入角色名、剧情、画风、艺术家或场景道具。',
         '只输出一个 JSON 对象，包含 front、left、right、back 四个非空字符串，分别为正面、左侧面、右侧面、背面。',
     ].join('\n');
-    const { content, truncated } = await auxApiCallRaw(system, anchor);
+    return withAuxiliaryFallback(config => generatePortraitPrompts(system, anchor, mode, config));
+}
+
+async function generatePortraitPrompts(system, anchor, mode, config) {
+    const { content, truncated } = await auxApiCallRaw(system, anchor, undefined, undefined, undefined, { config });
     let prompts;
     try {
         if (!truncated) prompts = JSON.parse(content.replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/, ''));

@@ -15,7 +15,8 @@ export async function runBrowserFixture() {
         eventSource, eventTypes, getRequestHeaders: () => ({}), setExtensionPrompt() {} };
     const extensionSettings = {};
     initSettings(() => ctx, extensionSettings);
-    Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'https://fixture.invalid', auxModel: 'fixture', autoGen: 0 });
+    Object.assign(settings, getDefaults(), { cWf: '{}', autoGen: 0,
+        auxProfiles: [{ name: 'Fixture', format: 'openai', url: 'https://fixture.invalid', model: 'fixture' }] });
     const { loadPrompts, getPrompt } = await import('../prompts/loader.js');
     await loadPrompts(new URL('../prompts/', import.meta.url).href);
     const scanner = await import('../modules/scanner.js');

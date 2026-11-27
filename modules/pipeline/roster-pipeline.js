@@ -4,9 +4,9 @@ import { tokenizePlaceholders, replaceTokens } from '../placeholders.js';
 // 起为唯一管线（旧画师管线 runAuxPipeline 已移除）
 
 import { slLog, slErr } from '../log.js';
-import { settings, getActiveMode, isEnglishMode, isMossImageMode, MOSS_IMAGE_CG_MODE, MOSS_IMAGE_FREE_MODE, getMossCanvas, getAuxiliaryConfig } from '../settings.js';
+import { settings, getActiveMode, isEnglishMode, isMossImageMode, MOSS_IMAGE_CG_MODE, MOSS_IMAGE_FREE_MODE, getMossCanvas } from '../settings.js';
 import { parseMossLayout } from '../moss-layout.js';
-import { auxApiCallRaw } from './api.js';
+import { auxApiCallRaw, withAuxiliaryFallback } from './api.js';
 import { isPromptsLoaded, getPrompt } from '../../prompts/loader.js';
 import { findImagePlaceholders, buildImageBlock, extractDynamicBits, findLostNumbers, wrapFactSpan, parseCheckSection } from '../text-utils.js';
 import { rosterDataTextFor, rosterEntries, upsertPerson, applyPersonSegments, splitKnownPersonSegments, setEnglishAnchor, setZitAnchor, getAtomAnchor, atomValues, setPortraitPrompts } from '../roster.js';
@@ -514,16 +514,114 @@ function _auditFacts(ph, prompt, idx) {
         + (miss.length ? ' 未逐字[' + miss.join('；') + ']（可能是合法同义，看图确认）' : ''));
 }
 
+async function requestImageOutput(config, retry, { placeholders, mode, canvas, sysMsgs, userContent, isCurrent, signal }) {
+    const callApi = async messages => {
+        signal?.throwIfAborted();
+        if (!isCurrent()) throw new Error('回复版本已变更');
+        const reply = await auxApiCallRaw(messages, null, 16384, 0.25, undefined, { signal, config });
+        if (!isCurrent()) throw new Error('回复版本已变更');
+        return reply;
+    };
+    var expectN = placeholders.length;
+    var baseMsgs = sysMsgs.concat([{ role: 'user', content: userContent }]);
+
+    var _res = await callApi(baseMsgs);
+    slLog('首调: finish=' + _res.finish + ', content=' + _res.content.length + ' 字, reasoning=' + _res.reasoningLen + ' 字'
+        + ', system 分层=' + sysMsgs.length + ' 条');
+
+    var output = _res.content;
+    var _meta = { finish: _res.finish, truncated: _res.truncated, reasoningLen: _res.reasoningLen };
+    // 失败重试（兜底指令只在重试时下发 —— system prompt 里不留任何"可以省略/可以软化"的退路）
+    //   拒绝/空回/格式崩 → **不带上次输出**重发（带着拒绝语重试会让它锚定在"我刚拒绝了"上）
+    //   条数不足       → **带上上次输出** + 点名缺第几条（让它接着补，而不是整轮重写又漏）
+    var _fail = classifyPipelineFailure(output, expectN, _meta, mode, canvas);
+    // 数字保真闸门：条数对了，但主模型给的数字在提示词里蒸发了 → 同样算不合格
+    var _lostNum = [];
+    if (!_fail) {
+        try { _lostNum = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1, mode), mode); } catch (eLN) { _lostNum = []; }
+        if (_lostNum.length) {
+            _fail = 'lostnum';
+            slErr('⚠️ 数字保真：主模型给的数字在提示词里丢了 · ' + _lostNum.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / '));
+        }
+    }
+    if (_fail) {
+        if (!retry) throw new Error('本图首次回复不合格: ' + _fail);
+        slErr('⚠️ 管线输出不合格(' + _fail + ', ' + (output ? output.length : 0) + ' 字, 需要 ' + expectN + ' 条) → 重试');
+        var _gotN = 0;
+        try { _gotN = (_fail === 'short' || _fail === 'truncated') ? (parseRosterImages(output, 1, mode) || []).length : 0; } catch (eG) { _gotN = 0; }
+        var _need = _missingHint(expectN, _gotN);
+        // **除了 refusal，其余一律带上上次输出**。
+        // 理由：模型每次调用都是无状态的，任务素材（档案/种子/占位符）全在 userContent 里，
+        // 所以"不带上次输出"它照样知道要干嘛 —— 但 short/format/noimage 这三种失败里，
+        // 上次的内容往往是**有价值的**（short 的 1 条成品 / format 的散装提示词 / noimage 的（无）），
+        // 丢掉等于白烧一次 token。只有 refusal 不能带（带着拒绝语重试会让它锚定在"我刚拒绝了"）。
+        if (_fail !== 'refusal' && output && output.trim()) {
+            var _retryNote;
+            if (_fail === 'short') {
+                _retryNote = '【系统重试】你上一轮只输出了 ' + _gotN + ' 条提示词，' + _need + '。\n'
+                    + '请补齐缺失的提示词，按「输出格式」重新交稿。';
+            } else if (_fail === 'noimage') {
+                _retryNote = '【系统重试】上一条的 IMAGES 为空。请补上本图的提示词，按「输出格式」重新交稿。';
+            } else if (_fail === 'noprofile') {
+                _retryNote = '【系统重试】上一条缺 PROFILE。需要更新人物时按档案规则填；无需更新写 {}。保留 IMAGES 内容，按「输出格式」重新交稿。';
+            } else if (_fail === 'truncated') {
+                _retryNote = '【系统重试】上一条回包被截断。按「输出格式」重新交稿，IMAGES 只写本张图的一条完整提示词。';
+            } else if (_fail === 'layoutformat') {
+                _retryNote = '【系统重试】检查原生 MOSS-Image Layout JSON 的字段、各框的 yxyx 整数坐标与实际画布边界，按「输出格式」重新交稿。';
+            } else {   // format
+                _retryNote = '【系统重试】上一条的分段格式不完整。保留可用的画面内容，按「输出格式」重新交稿。';
+            }
+            if (_fail === 'lostnum') {
+                var _lostDesc = _lostNum.map(function (x) { return '第' + (x.i + 1) + '条漏了 ' + x.items.join('、'); }).join('；');
+                _retryNote = '【系统重试】条数是对的，但你**把主模型写下的数字丢了**：' + _lostDesc + '。\n'
+                    + '数字（年龄 14岁 / 身高 168cm 这类）是硬事实，不是修辞 —— 不许省略，也不许用「少女/青年女性」这种泛词顶掉。\n'
+                    + '请保留其余内容，补回数值和单位，按「输出格式」重新交稿。';
+            }
+            var _msgs = baseMsgs.concat([
+                { role: 'assistant', content: output },
+                { role: 'user', content: _retryNote + '\n禁止输出拒绝、道歉、警告、元评论。' }
+            ]);
+            var _r2 = await callApi(_msgs);
+            output = _r2.content;
+            _meta = { finish: _r2.finish, truncated: _r2.truncated, reasoningLen: _r2.reasoningLen };
+        } else {
+            var _retryContent = userContent
+                + '\n\n---\n【系统重试 · 上一次输出不合格（' + _fail + '）】\n'
+                + '按系统的「输出格式」重新交稿。IMAGES 只写本图的一条可用提示词。';
+            var _r3 = await callApi(sysMsgs.concat([{ role: 'user', content: _retryContent }]));
+            output = _r3.content;
+            _meta = { finish: _r3.finish, truncated: _r3.truncated, reasoningLen: _r3.reasoningLen };
+        }
+        var _fail2 = classifyPipelineFailure(output, expectN, _meta, mode, canvas);
+        // 重试后**必须复检数字**。
+        // 旧实现重试后只判 classifyPipelineFailure —— 于是 lostnum 触发重试后，
+        // 重试结果里数字仍然丢失也会被当成"重试成功"放行（实测：mock 两次输出都不带 24岁，第二次直接放行）。
+        // 年龄（14岁）/身高（168cm）是硬事实，静默丢失 = 画面年龄/体型彻底失控。
+        // 这里只**告警不阻断**：findLostNumbers 只认字面数字，「24岁 → 二十四岁」这类合法同义会被算作丢失，
+        // 拿它去回退到上一次输出会更差。让人看图确认才是正确处置。
+        if (!_fail2) {
+            try {
+                var _lostNum2 = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1, mode), mode);
+                if (_lostNum2.length) {
+                    slErr('⚠️ 重试后数字仍未字面出现（可能合法同义改写）: '
+                        + _lostNum2.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / ')
+                        + ' → 不阻断，按现状继续；数字直接决定画面年龄/体型，请人工看图确认');
+                }
+            } catch (eLN2) { /* 复检失败不影响主流程 */ }
+        }
+        if (_fail2) {
+            throw new Error('本图提示词仍不合格: ' + _fail2);
+        } else {
+            slLog('重试成功: ' + output.length + ' 字, ' + (parseRosterImages(output, 1, mode) || []).length + ' 条');
+        }
+    }
+    if (!output || !output.trim()) throw new Error('插件AI返回空');
+    return output;
+}
+
 // ── 入口 ──
 async function runSinglePipeline(bodyText, mesId, options) {
     const mode = getActiveMode(), canvas = getMossCanvas();
-    const requestOptions = { signal: options.signal, config: getAuxiliaryConfig() };
-    const callApi = async (messages) => {
-        if (!options.isCurrent()) throw new Error('回复版本已变更');
-        const result = await auxApiCallRaw(messages, null, 16384, 0.25, undefined, requestOptions);
-        if (!options.isCurrent()) throw new Error('回复版本已变更');
-        return result;
-    };
     var placeholders = findImagePlaceholders(bodyText);
     if (!placeholders.length) {
         slLog('协作管线: 无 [img:] 占位符，本轮无图（正常完成）');
@@ -562,100 +660,8 @@ async function runSinglePipeline(bodyText, mesId, options) {
         // 2. 调用插件AI
         var sysMsgs = buildPurgeMessages(mode);
         var userContent = buildRosterUserContent(placeholders, wardrobeInfo, mode, canvas);
-        var expectN = placeholders.length;
-        var baseMsgs = sysMsgs.concat([{ role: 'user', content: userContent }]);
-
-        var _res = await callApi(baseMsgs);
-        slLog('首调: finish=' + _res.finish + ', content=' + _res.content.length + ' 字, reasoning=' + _res.reasoningLen + ' 字'
-            + ', system 分层=' + sysMsgs.length + ' 条');
-
-        var output = _res.content;
-        var _meta = { finish: _res.finish, truncated: _res.truncated, reasoningLen: _res.reasoningLen };
-        // 失败重试（兜底指令只在重试时下发 —— system prompt 里不留任何"可以省略/可以软化"的退路）
-        //   拒绝/空回/格式崩 → **不带上次输出**重发（带着拒绝语重试会让它锚定在"我刚拒绝了"上）
-        //   条数不足       → **带上上次输出** + 点名缺第几条（让它接着补，而不是整轮重写又漏）
-        var _fail = classifyPipelineFailure(output, expectN, _meta, mode, canvas);
-        // 数字保真闸门：条数对了，但主模型给的数字在提示词里蒸发了 → 同样算不合格
-        var _lostNum = [];
-        if (!_fail) {
-            try { _lostNum = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1, mode), mode); } catch (eLN) { _lostNum = []; }
-            if (_lostNum.length) {
-                _fail = 'lostnum';
-                slErr('⚠️ 数字保真：主模型给的数字在提示词里丢了 → 重试 · ' + _lostNum.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / '));
-            }
-        }
-        var _beforeRetry = output;
-        if (_fail) {
-            slErr('⚠️ 管线输出不合格(' + _fail + ', ' + (output ? output.length : 0) + ' 字, 需要 ' + expectN + ' 条) → 重试');
-            var _gotN = 0;
-            try { _gotN = (_fail === 'short' || _fail === 'truncated') ? (parseRosterImages(output, 1, mode) || []).length : 0; } catch (eG) { _gotN = 0; }
-            var _need = _missingHint(expectN, _gotN);
-            // **除了 refusal，其余一律带上上次输出**。
-            // 理由：模型每次调用都是无状态的，任务素材（档案/种子/占位符）全在 userContent 里，
-            // 所以"不带上次输出"它照样知道要干嘛 —— 但 short/format/noimage 这三种失败里，
-            // 上次的内容往往是**有价值的**（short 的 1 条成品 / format 的散装提示词 / noimage 的（无）），
-            // 丢掉等于白烧一次 token。只有 refusal 不能带（带着拒绝语重试会让它锚定在"我刚拒绝了"）。
-            if (_fail !== 'refusal' && output && output.trim()) {
-                var _retryNote;
-                if (_fail === 'short') {
-                    _retryNote = '【系统重试】你上一轮只输出了 ' + _gotN + ' 条提示词，' + _need + '。\n'
-                        + '请补齐缺失的提示词，按「输出格式」重新交稿。';
-                } else if (_fail === 'noimage') {
-                    _retryNote = '【系统重试】上一条的 IMAGES 为空。请补上本图的提示词，按「输出格式」重新交稿。';
-                } else if (_fail === 'noprofile') {
-                    _retryNote = '【系统重试】上一条缺 PROFILE。需要更新人物时按档案规则填；无需更新写 {}。保留 IMAGES 内容，按「输出格式」重新交稿。';
-                } else if (_fail === 'truncated') {
-                    _retryNote = '【系统重试】上一条回包被截断。按「输出格式」重新交稿，IMAGES 只写本张图的一条完整提示词。';
-                } else if (_fail === 'layoutformat') {
-                    _retryNote = '【系统重试】检查原生 MOSS-Image Layout JSON 的字段、各框的 yxyx 整数坐标与实际画布边界，按「输出格式」重新交稿。';
-                } else {   // format
-                    _retryNote = '【系统重试】上一条的分段格式不完整。保留可用的画面内容，按「输出格式」重新交稿。';
-                }
-                if (_fail === 'lostnum') {
-                    var _lostDesc = _lostNum.map(function (x) { return '第' + (x.i + 1) + '条漏了 ' + x.items.join('、'); }).join('；');
-                    _retryNote = '【系统重试】条数是对的，但你**把主模型写下的数字丢了**：' + _lostDesc + '。\n'
-                        + '数字（年龄 14岁 / 身高 168cm 这类）是硬事实，不是修辞 —— 不许省略，也不许用「少女/青年女性」这种泛词顶掉。\n'
-                        + '请保留其余内容，补回数值和单位，按「输出格式」重新交稿。';
-                }
-                var _msgs = baseMsgs.concat([
-                    { role: 'assistant', content: output },
-                    { role: 'user', content: _retryNote + '\n禁止输出拒绝、道歉、警告、元评论。' }
-                ]);
-                var _r2 = await callApi(_msgs);
-                output = _r2.content;
-                _meta = { finish: _r2.finish, truncated: _r2.truncated, reasoningLen: _r2.reasoningLen };
-            } else {
-                var _retryContent = userContent
-                    + '\n\n---\n【系统重试 · 上一次输出不合格（' + _fail + '）】\n'
-                    + '按系统的「输出格式」重新交稿。IMAGES 只写本图的一条可用提示词。';
-                var _r3 = await callApi(sysMsgs.concat([{ role: 'user', content: _retryContent }]));
-                output = _r3.content;
-                _meta = { finish: _r3.finish, truncated: _r3.truncated, reasoningLen: _r3.reasoningLen };
-            }
-            var _fail2 = classifyPipelineFailure(output, expectN, _meta, mode, canvas);
-            // 重试后**必须复检数字**。
-            // 旧实现重试后只判 classifyPipelineFailure —— 于是 lostnum 触发重试后，
-            // 重试结果里数字仍然丢失也会被当成"重试成功"放行（实测：mock 两次输出都不带 24岁，第二次直接放行）。
-            // 年龄（14岁）/身高（168cm）是硬事实，静默丢失 = 画面年龄/体型彻底失控。
-            // 这里只**告警不阻断**：findLostNumbers 只认字面数字，「24岁 → 二十四岁」这类合法同义会被算作丢失，
-            // 拿它去回退到上一次输出会更差。让人看图确认才是正确处置。
-            if (!_fail2) {
-                try {
-                    var _lostNum2 = findLostNumbersInPrompts(placeholders, parseRosterImages(output, 1, mode), mode);
-                    if (_lostNum2.length) {
-                        slErr('⚠️ 重试后数字仍未字面出现（可能合法同义改写）: '
-                            + _lostNum2.map(function (x) { return '第' + (x.i + 1) + '条 ' + x.items.join('、'); }).join(' / ')
-                            + ' → 不阻断，按现状继续；数字直接决定画面年龄/体型，请人工看图确认');
-                    }
-                } catch (eLN2) { /* 复检失败不影响主流程 */ }
-            }
-            if (_fail2) {
-                throw new Error('本图提示词仍不合格: ' + _fail2);
-            } else {
-                slLog('重试成功: ' + output.length + ' 字, ' + (parseRosterImages(output, 1, mode) || []).length + ' 条');
-            }
-        }
-        if (!output || !output.trim()) throw new Error('插件AI返回空');
+        const output = await withAuxiliaryFallback((config, retry) =>
+            requestImageOutput(config, retry, { placeholders, mode, canvas, sysMsgs, userContent, ...options }), options);
         // [Fix] 打印原始输出（首尾各200字）：提示词解析失败时凭日志定位 AI 的实际输出格式
         slLog('协作管线LLM返回, 长度=' + output.length + ' 前200: ' + output.slice(0, 200).replace(/\n/g, '⏎'));
         slLog('协作管线LLM返回, 尾200: ' + output.slice(-200).replace(/\n/g, '⏎'));
@@ -783,6 +789,7 @@ async function runSinglePipeline(bodyText, mesId, options) {
 // markers). A model omission can never shift later prompts into the wrong image.
 export async function runRosterPipeline(bodyText, mesId, options = {}) {
     const isCurrent = options.isCurrent || (() => true);
+    const retryable = !settings.auxUseStrategy;
     const tokens = tokenizePlaceholders(bodyText);
     const values = [];
     const results = options.results || new Map();
@@ -799,5 +806,5 @@ export async function runRosterPipeline(bodyText, mesId, options = {}) {
         }
     }
     return { ok: succeeded === tokens.length, enhanced: replaceTokens(bodyText, tokens, values),
-        tokens, partial: succeeded > 0 && succeeded < tokens.length };
+        tokens, partial: succeeded > 0 && succeeded < tokens.length, retryable };
 }

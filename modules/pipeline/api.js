@@ -1,6 +1,6 @@
 // 辅助 AI 传输层。调用方负责拼接消息和处理回包协议。
 import { slLog, slErr } from '../log.js';
-import { getAuxiliaryConfig, settings } from '../settings.js';
+import { getAuxiliaryAttempts, normalizeAuxiliaryConfig, settings } from '../settings.js';
 
 const OUT_MAXTOKENS = 16384;
 const OPENAI_MANAGED_FIELDS = new Set(['model', 'messages', 'stream', 'temperature', 'top_p', 'top_k', 'thinking', 'reasoning_effort']);
@@ -173,7 +173,8 @@ function readAuxiliaryResponse(data, format) {
         reasoningLen: (message?.reasoning_content || message?.reasoning || '').length };
 }
 
-async function sendAuxiliary(messages, { maxTokens, temperature = 0.3, forceModel, signal, config = getAuxiliaryConfig() }) {
+async function sendAuxiliary(messages, { maxTokens, temperature = 0.3, forceModel, signal,
+    config = getAuxiliaryAttempts()[0]?.config ?? normalizeAuxiliaryConfig() }) {
     const model = forceModel || config.model;
     const endpoint = auxiliaryEndpoint(config, model);
     const headers = requestHeaders(config);
@@ -220,11 +221,36 @@ export async function auxApiCallRaw(systemPrompt, userMessage, maxTokens, temper
 }
 
 export async function auxApiCall(systemPrompt, userMessage, maxTokens, temperature, forceModel) {
-    const result = await auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel);
-    return result.content;
+    return withAuxiliaryFallback(async config => {
+        const { content } = await auxApiCallRaw(systemPrompt, userMessage, maxTokens, temperature, forceModel, { config });
+        if (!content) throw new Error('辅助 AI 未返回文本。');
+        return content;
+    });
 }
 
-export async function testAuxConnection() {
-    const result = await sendAuxiliary([{ role: 'user', content: 'Reply only with OK.' }], { maxTokens: 256 });
+export async function withAuxiliaryFallback(run, { isCurrent = () => true, signal } = {}) {
+    const attempts = getAuxiliaryAttempts();
+    if (!attempts.length) throw new Error('请先保存 AI 助理的连接配置。');
+    const checkCurrent = () => {
+        signal?.throwIfAborted();
+        if (!isCurrent()) throw new Error('回复版本已变更');
+    };
+    for (const [index, { config, retry }] of attempts.entries()) {
+        checkCurrent();
+        try {
+            const result = await run(config, retry);
+            checkCurrent();
+            return result;
+        } catch (error) {
+            checkCurrent();
+            const next = attempts[index + 1];
+            if (!next) throw error;
+            slLog('AI 助理连接失败，切换至回落配置:', next.config.name);
+        }
+    }
+}
+
+export async function testAuxConnection(config) {
+    const result = await sendAuxiliary([{ role: 'user', content: 'Reply only with OK.' }], { maxTokens: 256, config });
     if (!result.content && !result.truncated) throw new Error('已连接，但模型未返回文本' + (result.finish ? '（' + result.finish + '）' : '') + '。');
 }

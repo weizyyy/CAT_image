@@ -36,12 +36,16 @@ export class ScanCoordinator {
                 try {
                     const result = await this.run(job.snapshot, current, job.controller.signal);
                     if (!current()) { job.state = job.cancelled ? 'cancelled' : 'stale'; continue; }
-                    if (!result?.ok) throw new Error('分析未完成，可在下一次检查时重试');
+                    if (!result?.ok) {
+                        const retryable = result?.retryable !== false;
+                        const message = retryable ? '分析未完成，可在下一次检查时重试' : '回落配置已用完，可点击重试';
+                        throw Object.assign(new Error(message), { retryable });
+                    }
                     await this.commit(job.snapshot, result);
                     job.state = 'done';
                 } catch (error) {
                     job.state = current() ? 'failed' : job.cancelled ? 'cancelled' : 'stale';
-                    job.retryAt = Date.now() + 10000 * job.attempts;
+                    job.retryAt = error?.retryable === false ? Infinity : Date.now() + 10000 * job.attempts;
                     if (current()) this.onError(error, job.snapshot);
                 } finally { job.snapshot.onSettled?.(); }
             }

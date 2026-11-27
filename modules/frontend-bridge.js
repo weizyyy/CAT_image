@@ -138,7 +138,7 @@ function submitRecord(record) {
     if (reuseGalleryImages(record) && record.slots.every(slot => slot.enhanced))
         record.enhanced = replaceTokens(record.text, tokenizePlaceholders(record.text), record.slots.map(slot => slot.enhanced));
     renderRecord(record);
-    if (record.enhanced) return;
+    if (record.enhanced || !isAuxConfigured()) return;
     scanCoordinator.submit({ owner: record.key, key: record.key, source: record.text,
         isCurrent: () => running && settings.feBridge !== false && settings.pluginOn !== false &&
             getChatId() === record.chatId && getActiveMode() === record.mode && !generationBusy() && !inflight.get(record.win) &&
@@ -154,8 +154,13 @@ function submitRecord(record) {
             record.enhanced = result.enhanced;
             renderRecord(record);
         },
-        onError() {
-            record.root.querySelectorAll('[role="status"]').forEach(n => { n.textContent = '🐱 分析失败，稍后重试'; });
+        onError(error) {
+            record.root.querySelectorAll('[role="status"][data-sl-slot]').forEach(node => {
+                if (error.retryable !== false) { node.textContent = '🐱 分析失败，稍后重试'; return; }
+                node.textContent = '🐱 分析失败，点击重试';
+                node.style.cursor = 'pointer';
+                node.onclick = () => { scanCoordinator.jobs.delete(record.key); submitRecord(record); };
+            });
         },
         onCancel() {
             record.cancelled = true;

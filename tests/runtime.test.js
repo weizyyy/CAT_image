@@ -17,7 +17,8 @@ const types = Object.fromEntries(['GENERATION_STARTED','GENERATION_ENDED','GENER
 const ctx = { chat: [], chatId: 'test', characters: [{ avatar: 'tester.png', data: { name: 'Tester' }, chat: 'test' }], characterId: 0,
     eventSource, eventTypes: types, getRequestHeaders: () => ({}), setExtensionPrompt() {} };
 initSettings(() => ctx, {});
-Object.assign(settings, getDefaults(), { cWf: '{}', auxUrl: 'http://analysis.local', auxModel: 'test', autoGen: 0 });
+Object.assign(settings, getDefaults(), { cWf: '{}', autoGen: 0,
+    auxProfiles: [{ name: 'Test', format: 'openai', url: 'http://analysis.local', model: 'test' }] });
 const { loadPrompts } = await import('../prompts/loader.js');
 globalThis.fetch = async url => ({ ok: true, text: () => readFile(new URL('../prompts/' + String(url).split('?')[0], import.meta.url), 'utf8') });
 await loadPrompts('');
@@ -1189,8 +1190,8 @@ test('OpenAI assistant sends standard fields, preserves legacy defaults and merg
             if (requests.length === 1) return new Response('Unknown parameter: thinking', { status: 400 });
             return response('Fixture prompt.');
         };
-        Object.assign(settings, { auxFormat: 'openai', auxUrl: 'https://gateway.invalid/v1/', auxKey: 'gateway-test',
-            auxModel: 'fixture', auxOpenAI: {} });
+        const profile = { name: 'Gateway', format: 'openai', url: 'https://gateway.invalid/v1/', key: 'gateway-test', model: 'fixture' };
+        settings.auxProfiles = [profile];
         await auxApiCallRaw(messages, null, 16384, 0.25);
         assert.deepEqual(requests[0].body.thinking, { type: 'disabled' });
         assert.equal(requests[0].body.temperature, 0.25);
@@ -1198,24 +1199,24 @@ test('OpenAI assistant sends standard fields, preserves legacy defaults and merg
         assert.equal(requests[0].headers.Authorization, 'Bearer gateway-test');
         assert.deepEqual(requests[1].body, { messages, model: 'fixture', stream: false, temperature: 0.25, max_tokens: 16384 });
 
-        settings.auxUrl = 'https://api.openai.com/v1/chat/completions';
+        profile.url = 'https://api.openai.com/v1/chat/completions';
         await auxApiCallRaw(messages, null, 16384, 0.25);
         assert.deepEqual(requests[2].body, { messages, model: 'fixture', stream: false, temperature: 0.25, max_completion_tokens: 16384 });
-        settings.auxOpenAI = { topK: '40' };
+        profile.topK = '40';
         await assert.rejects(auxApiCallRaw(messages, null, 16384, 0.25), /topK/);
 
-        settings.auxUrl = 'https://gateway.invalid/v1?route=fixture';
-        settings.auxOpenAI = { temperature: '0', topP: '0.9', topK: '40', thinking: 'on', thinkingLevel: 'gateway-custom',
-            omit: ['temperature'], additional: '"provider":{"only":["relace/fp4"],"allow_fallbacks":false}' };
+        profile.url = 'https://gateway.invalid/v1?route=fixture';
+        Object.assign(profile, { temperature: '0', topP: '0.9', thinking: 'on', thinkingLevel: 'gateway-custom',
+            omit: ['temperature'], additional: '"provider":{"only":["relace/fp4"],"allow_fallbacks":false}' });
         await auxApiCallRaw(messages, null, 16384, 0.25);
         assert.equal(requests[3].url, 'https://gateway.invalid/v1/chat/completions?route=fixture');
         assert.deepEqual(requests[3].body, { messages, model: 'fixture', stream: false, top_p: 0.9, top_k: 40,
             max_tokens: 16384, reasoning_effort: 'gateway-custom', provider: { only: ['relace/fp4'], allow_fallbacks: false } });
-        settings.auxOpenAI.omit = ['thinkingLevel'];
+        profile.omit = ['thinkingLevel'];
         await auxApiCallRaw(messages, null, 16384, 0.25);
         assert.equal(requests[4].body.temperature, 0);
         assert.equal(Object.hasOwn(requests[4].body, 'reasoning_effort'), false);
-        settings.auxOpenAI.additional = '{"messages":[]}';
+        profile.additional = '{"messages":[]}';
         await assert.rejects(auxApiCallRaw(messages, null, 16384, 0.25), /messages/);
         assert.equal(requests.length, 5);
     } finally {
@@ -1229,9 +1230,9 @@ test('Gemini uses projectless API-key requests for native single-image retries',
     const original = { ...settings }, originalFetch = fetch;
     const requests = [];
     try {
-        Object.assign(settings, { auxFormat: 'gemini', modelType: 'zit', slPurgeLayered: true, nsfwEnhance: false,
-            auxGemini: { model: 'gemini-fixture', key: 'AIza-mock',
-                temperature: '0', topP: '0.8', topK: '27', omit: ['topK'], thinking: 'on', thinkingLevel: 'low' } });
+        const profile = { name: 'Gemini', format: 'gemini', model: 'gemini-fixture', key: 'AIza-mock',
+            temperature: '0', topP: '0.8', topK: '27', omit: ['topK'], thinking: 'on', thinkingLevel: 'low' };
+        Object.assign(settings, { auxProfiles: [profile], modelType: 'zit', slPurgeLayered: true, nsfwEnhance: false });
         const captures = [
             { finishReason: 'STOP', content: { parts: [{ text: 'internal thought', thought: true },
                 { text: '---IMAGES---\nA previous prompt.\n---END---' }] } },
@@ -1261,8 +1262,8 @@ test('Gemini uses projectless API-key requests for native single-image retries',
         assert.match(retry.body.contents[1].parts[0].text, /A previous prompt/);
         assert.doesNotMatch(retry.body.contents[1].parts[0].text, /internal thought/);
 
-        settings.auxGemini = { ...settings.auxGemini, key: 'new+key/&', thinkingLevel: '2048', projectId: 'old-project',
-            url: 'https://us-central1-aiplatform.googleapis.com/v1/projects/old/locations/us-central1/publishers/google/models/old:generateContent?fixture=1&key=old-key' };
+        Object.assign(profile, { key: 'new+key/&', thinkingLevel: '2048',
+            url: 'https://us-central1-aiplatform.googleapis.com/v1/projects/old/locations/us-central1/publishers/google/models/old:generateContent?fixture=1&key=old-key' });
         const raw = await auxApiCallRaw('system', 'user');
         assert.deepEqual(raw, { content: '', finish: 'length', reasoningLen: 12, truncated: true });
         assert.equal(requests[2].url, 'https://us-central1-aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?fixture=1&key=new%2Bkey%2F%26');
@@ -1281,7 +1282,7 @@ test('Gemini keeps the query API key out of HTTP and network errors', async () =
     const key = 'secret-fixture+/&';
     const encoded = new URLSearchParams({ key }).toString();
     try {
-        Object.assign(settings, { auxFormat: 'gemini', auxGemini: { model: 'gemini-fixture', key } });
+        settings.auxProfiles = [{ name: 'Gemini', format: 'gemini', model: 'gemini-fixture', key }];
         fetch = async url => new Response(url + ' ' + key, { status: 403 });
         await assert.rejects(testAuxConnection(), error => error.message.includes('HTTP 403') &&
             !error.message.includes(key) && !error.message.includes(encoded));
@@ -1296,18 +1297,19 @@ test('Gemini keeps the query API key out of HTTP and network errors', async () =
     }
 });
 
-test('assistant settings switch profiles, save omission controls and test the selected protocol', async () => {
+test('assistant saves named connections, tests drafts and edits persistent fallback rows', async () => {
     const { fillSubPanel } = await import('../modules/ui/sub-panels.js');
-    const { isAuxConfigured } = await import('../modules/settings.js');
+    const { getAuxiliaryAttempts } = await import('../modules/settings.js');
     const original = { ...settings }, originalFetch = fetch;
     const body = jQuery('<div>').appendTo(document.body);
     const field = id => body.find('#sl_aux_' + id);
     const enter = (id, value) => field(id).val(value).trigger('change');
     try {
-        Object.assign(settings, { auxFormat: 'openai', auxUrl: 'https://open.invalid/v1', auxKey: 'open-fixture',
-            auxModel: 'open-model', auxOpenAI: {}, auxGemini: {} });
+        settings.auxProfiles = [{ name: 'OpenAI', format: 'openai', url: 'https://open.invalid/v1', key: 'open-fixture', model: 'open-model' }];
         fillSubPanel('aux', body);
-        assert.equal(body.find('select,input,textarea').first()[0].id, 'sl_aux_format');
+        assert.deepEqual(body.find('select,input,textarea').toArray().slice(0, 3).map(element => element.id),
+            ['sl_aux_profile', 'sl_aux_name', 'sl_aux_format']);
+        assert.equal(field('profile')[0].options[0].textContent, '连接策略');
         assert.equal(field('projectId').length, 0);
         assert.equal(field('level_row').prop('hidden'), true);
         enter('thinking', 'on');
@@ -1320,27 +1322,54 @@ test('assistant settings switch profiles, save omission controls and test the se
         assert.equal(field('additional').attr('aria-invalid'), 'true');
         enter('additional', '"provider":{"allow_fallbacks":false}');
         assert.equal(field('additional').attr('aria-invalid'), 'false');
+        assert.equal(getAuxiliaryAttempts()[0].config.thinkingLevel, undefined);
+        body.find('#sl_save_aux')[0].click();
+        assert.equal(getAuxiliaryAttempts()[0].config.thinkingLevel, 'custom');
 
+        enter('profile', 'new');
+        enter('name', 'Gemini');
         enter('format', 'gemini');
         assert.equal(field('projectId').length, 0);
         assert.equal(field('key').val(), '');
         assert.equal(field('additional').length, 0);
         enter('model', 'gemini-ui');
-        assert.equal(isAuxConfigured(), false);
         enter('url', 'https://us-west1-aiplatform.googleapis.com/');
         enter('key', 'ui-api-key');
         enter('thinking', 'omit');
-        assert.equal(isAuxConfigured(), true);
+        assert.equal(getAuxiliaryAttempts()[0].config.model, 'open-model');
         const requests = [];
         fetch = async (url, options) => {
             requests.push({ url, body: JSON.parse(options.body) });
             return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'OK' }] } }] });
         };
+        assert.equal(body.find('#sl_test_aux')[0].nextElementSibling.id, 'sl_save_aux');
+        assert.equal(body.find('#sl_test_aux')[0].parentElement.nextElementSibling.id, 'sl_aux_status');
         body.find('#sl_test_aux')[0].click();
         await waitUntil(() => field('status').text() === '连接成功');
         assert.equal(requests[0].url, 'https://us-west1-aiplatform.googleapis.com/v1/publishers/google/models/gemini-ui:generateContent?key=ui-api-key');
         assert.equal(Object.hasOwn(requests[0].body.generationConfig, 'thinkingConfig'), false);
-        enter('format', 'openai');
+        body.find('#sl_save_aux')[0].click();
+        assert.equal(getAuxiliaryAttempts()[0].config.model, 'gemini-ui');
+        enter('profile', 'strategy');
+        const rowNames = () => body.find('[data-aux-strategy-name]').toArray().map(row => row.value);
+        const retries = () => body.find('[data-aux-strategy-retry]').toArray().map(row => row.checked);
+        assert.deepEqual(rowNames(), ['Gemini']);
+        assert.deepEqual(retries(), [true]);
+        body.find('#sl_aux_add_strategy')[0].click();
+        body.find('#sl_aux_add_strategy')[0].click();
+        assert.deepEqual(rowNames(), ['Gemini', 'OpenAI', 'OpenAI']);
+        body.find('[data-aux-strategy-name="2"]').val('Gemini').trigger('change');
+        body.find('[data-aux-strategy-retry="0"]')[0].click();
+        assert.deepEqual(getAuxiliaryAttempts().map(({ config, retry }) => [config.name, retry]),
+            [['Gemini', false], ['OpenAI', true], ['Gemini', true]]);
+        fillSubPanel('aux', body);
+        assert.deepEqual(rowNames(), ['Gemini', 'OpenAI', 'Gemini']);
+        assert.deepEqual(retries(), [false, true, true]);
+        body.find('#sl_aux_reset_strategy')[0].click();
+        assert.deepEqual(rowNames(), ['Gemini']);
+        assert.deepEqual(retries(), [true]);
+        assert.equal(settings.auxProfiles.length, 2);
+        enter('profile', 'profile:OpenAI');
         assert.equal(field('model').val(), 'open-model');
         assert.equal(field('key').val(), 'open-fixture');
         assert.equal(field('thinkingLevel').val(), 'custom');
@@ -1348,6 +1377,91 @@ test('assistant settings switch profiles, save omission controls and test the se
         assert.equal(field('temperature').prop('disabled'), true);
     } finally {
         body.remove();
+        Object.assign(settings, original);
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('fallback strategy uses each profile in order and retries only the enabled row', async () => {
+    const { flushArchive } = await import('../modules/archive.js');
+    const original = { ...settings }, originalFetch = fetch;
+    const calls = [];
+    const source = '[img:回落测试]';
+    try {
+        Object.assign(settings, {
+            auxProfiles: [
+                { name: 'A', format: 'openai', url: 'https://a.invalid/v1', model: 'a' },
+                { name: 'B', format: 'gemini', url: 'https://b.invalid', key: 'fixture-key', model: 'b' },
+                { name: 'C', format: 'openai', url: 'https://c.invalid/v1', model: 'c' },
+                { name: 'D', format: 'openai', url: 'https://d.invalid/v1', model: 'd' },
+                { name: 'E', format: 'openai', url: 'https://e.invalid/v1', model: 'e' },
+            ],
+            auxUseStrategy: true, modelType: 'zit', slPurgeLayered: true,
+            auxStrategy: ['A', 'B', 'C', 'D', 'E'].map(name => ({ name, retry: name !== 'A' })),
+        });
+        const bad = '---IMAGES---\nDraft from previous attempt.\n---END---';
+        const blocked = { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: bad }] } }] };
+        fetch = async (url, options) => {
+            if (url === '/api/files/upload') return new Response(null, { status: 200 });
+            const host = new URL(url).hostname, payload = JSON.parse(options.body);
+            calls.push({ host, payload });
+            if (host === 'a.invalid') return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: bad } }] }));
+            if (host === 'b.invalid') return Response.json(blocked);
+            if (host === 'c.invalid') return new Response('Rate limit', { status: 429 });
+            assert.equal(host, 'd.invalid');
+            return response('Fallback image prompt.');
+        };
+        const result = await runRosterPipeline(source, '0');
+        assert.equal(result.ok, true);
+        assert.match(result.enhanced, /Fallback image prompt/);
+        assert.deepEqual(calls.map(({ host }) => host), ['a.invalid', 'b.invalid', 'b.invalid', 'c.invalid', 'd.invalid']);
+        assert.deepEqual(calls[1].payload.contents.map(({ role }) => role), ['user']);
+        assert.deepEqual(calls[2].payload.contents.map(({ role }) => role), ['user', 'model', 'user']);
+        assert.deepEqual(calls[4].payload.messages, calls[0].payload.messages);
+        await flushArchive();
+
+        const controller = new AbortController();
+        calls.length = 0;
+        fetch = async url => {
+            calls.push(new URL(url).hostname);
+            controller.abort();
+            return new Response('Cancelled', { status: 503 });
+        };
+        assert.equal((await runRosterPipeline(source, '0', { signal: controller.signal })).ok, false);
+        assert.deepEqual(calls, ['a.invalid']);
+    } finally {
+        Object.assign(settings, original);
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('exhausted fallback strategy waits for a manual retry instead of polling the same connection', async () => {
+    const original = { ...settings }, originalFetch = fetch;
+    try {
+        show('[img:回落无可用输出]');
+        settings.auxUseStrategy = true;
+        settings.auxStrategy = [{ name: 'Test', retry: false }];
+        let count = 0;
+        fetch = async url => {
+            if (url === '/api/files/upload') return new Response(null, { status: 200 });
+            assert.equal(url, 'http://analysis.local/chat/completions');
+            count++;
+            return response('（无）');
+        };
+        scanner.startPolling();
+        await scanner.runAuxImageScan(jQuery('.mes_text'));
+        await waitUntil(() => !!document.querySelector('.sl_scan_retry'));
+        const snapshot = scanner.readSnapshot(0);
+        const job = scanner.scanCoordinator.jobs.get(snapshot.key);
+        assert.equal(count, 1);
+        assert.equal(job.state, 'failed');
+        assert.equal(job.retryAt, Infinity);
+        scanner.checkLastMessage();
+        assert.equal(count, 1);
+        document.querySelector('.sl_scan_retry').click();
+        await waitUntil(() => count === 2 && !scanner.scanCoordinator.running);
+    } finally {
+        scanner.stopPolling();
         Object.assign(settings, original);
         globalThis.fetch = originalFetch;
     }

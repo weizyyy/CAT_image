@@ -29,12 +29,10 @@ export function getDefaults() {
         cTimeout: 180,
         cWf: '',
         cWfName: '',
-        auxFormat: 'openai',
-        auxUrl: '',
-        auxKey: '',
-        auxModel: '',
-        auxOpenAI: {},
-        auxGemini: {},
+        auxProfiles: [],
+        auxProfileName: '',
+        auxUseStrategy: false,
+        auxStrategy: [],
         stylePreset: '',
         enhancedTheme: '默认',
         nsfwEnhance: false,
@@ -58,19 +56,35 @@ export function getDefaults() {
     };
 }
 
-export function getAuxiliaryConfig() {
-    if (settings.auxFormat === 'gemini') {
-        const gemini = settings.auxGemini || {};
-        return { ...gemini, format: 'gemini', url: gemini.url?.trim() || GEMINI_AUX_URL,
-            model: gemini.model?.trim() || '', key: gemini.key?.trim() || '' };
-    }
-    return { ...settings.auxOpenAI, format: 'openai', url: settings.auxUrl?.trim() || '',
-        model: settings.auxModel?.trim() || '', key: settings.auxKey?.trim() || '' };
+export function normalizeAuxiliaryConfig(profile = {}) {
+    const format = profile.format === 'gemini' ? 'gemini' : 'openai';
+    return { ...profile, format, url: String(profile.url ?? '').trim() || (format === 'gemini' ? GEMINI_AUX_URL : ''),
+        model: String(profile.model ?? '').trim(), key: String(profile.key ?? '').trim() };
+}
+
+export function isAuxProfileConfigured({ format, url, model, key }) {
+    return !!(url && model && (format !== 'gemini' || key));
+}
+
+export function preferredAuxiliaryProfile() {
+    return settings.auxProfiles.find(profile => profile.name === settings.auxProfileName) ?? settings.auxProfiles[0];
+}
+
+export function getAuxiliaryStrategy() {
+    const names = new Set(settings.auxProfiles.map(profile => profile.name));
+    const rows = settings.auxStrategy.filter(row => names.has(row.name));
+    return rows.length ? rows : [{ name: preferredAuxiliaryProfile()?.name ?? '', retry: true }];
+}
+
+export function getAuxiliaryAttempts() {
+    const rows = settings.auxUseStrategy ? getAuxiliaryStrategy() : [{ name: preferredAuxiliaryProfile()?.name, retry: true }];
+    const profiles = new Map(settings.auxProfiles.map(profile => [profile.name, profile]));
+    return rows.filter(row => profiles.has(row.name))
+        .map(row => ({ config: normalizeAuxiliaryConfig(profiles.get(row.name)), retry: row.retry !== false }));
 }
 
 export function isAuxConfigured() {
-    const { format, url, model, key } = getAuxiliaryConfig();
-    return !!(url && model && (format !== 'gemini' || key));
+    return getAuxiliaryAttempts().some(({ config }) => isAuxProfileConfigured(config));
 }
 
 export var COLORS = {
@@ -121,8 +135,23 @@ function preferences(source) {
 }
 
 export function loadPreferences() {
-    Object.assign(settings, preferences(_extensionSettings?.cat_image || {}));
+    const source = _extensionSettings?.cat_image || {};
+    Object.assign(settings, preferences(source));
+    if (!Object.hasOwn(source, 'auxProfiles')) importAuxiliaryConnections(source);
     if (settings.modelType === 'minimax_h3_image') settings.modelType = MOSS_IMAGE_CG_MODE;
+}
+
+function importAuxiliaryConnections(source) {
+    const oldOpenAI = {
+        ...source.auxOpenAI, url: source.auxUrl || '', key: source.auxKey || '', model: source.auxModel || '',
+    };
+    const { projectId: _oldProjectId, ...oldGemini } = source.auxGemini || {};
+    for (const [format, label, old] of [['openai', 'OpenAI', oldOpenAI], ['gemini', 'Gemini', oldGemini]]) {
+        if (!Object.values(old).some(Boolean)) continue;
+        const name = old.model?.trim() ? label + ' · ' + old.model.trim() : label;
+        settings.auxProfiles.push({ ...old, name, format });
+        if ((source.auxFormat || 'openai') === format) settings.auxProfileName = name;
+    }
 }
 
 export function saveSettings() {
