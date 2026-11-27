@@ -16,7 +16,8 @@ const types = Object.fromEntries(['GENERATION_STARTED','GENERATION_ENDED','GENER
     'MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED','CHARACTER_MESSAGE_RENDERED','CHAT_CHANGED'].map(x => [x, x]));
 const ctx = { chat: [], chatId: 'test', characters: [{ avatar: 'tester.png', data: { name: 'Tester' }, chat: 'test' }], characterId: 0,
     eventSource, eventTypes: types, getRequestHeaders: () => ({}), setExtensionPrompt() {} };
-initSettings(() => ctx, {});
+const extensionPreferences = {};
+initSettings(() => ctx, extensionPreferences);
 Object.assign(settings, getDefaults(), { cWf: '{}', autoGen: 0,
     auxProfiles: [{ name: 'Test', format: 'openai', url: 'http://analysis.local', model: 'test' }] });
 const { loadPrompts } = await import('../prompts/loader.js');
@@ -1467,6 +1468,57 @@ test('fallback strategy uses each profile in order and retries only the enabled 
     } finally {
         Object.assign(settings, original);
         globalThis.fetch = originalFetch;
+    }
+});
+
+test('deleting a saved assistant connection removes its strategy references and persists the next selection', async () => {
+    const { fillSubPanel } = await import('../modules/ui/sub-panels.js');
+    const { CAT } = await import('../modules/ui/theme.js');
+    const { isAuxConfigured } = await import('../modules/settings.js');
+    const before = { ...settings }, originalConfirm = window.confirm;
+    const savedPreferences = extensionPreferences.cat_image;
+    const body = jQuery('<div>').appendTo(document.body);
+    const field = id => body.find('#sl_aux_' + id);
+    const remove = () => body.find('#sl_delete_aux')[0];
+    try {
+        Object.assign(settings, {
+            auxProfiles: ['A', 'B', 'C'].map(name => ({ name, format: 'openai', url: 'https://' + name.toLowerCase() + '.invalid', model: name })),
+            auxProfileName: 'B',
+            auxStrategy: [{ name: 'B', retry: true }, { name: 'C', retry: false }, { name: 'B', retry: false }, { name: 'A', retry: true }],
+        });
+        fillSubPanel('aux', body);
+        assert.equal(body.find('#sl_save_aux')[0].nextElementSibling, remove());
+        assert.ok(remove().getAttribute('style').includes('background:' + CAT.red + ';'));
+        field('name').val('Unsaved edit').trigger('input');
+        window.confirm = message => { assert.match(message, /「B」/); return false; };
+        remove().click();
+        assert.deepEqual(settings.auxProfiles.map(profile => profile.name), ['A', 'B', 'C']);
+
+        window.confirm = () => true;
+        remove().click();
+        assert.deepEqual(settings.auxProfiles.map(profile => profile.name), ['A', 'C']);
+        assert.deepEqual(settings.auxStrategy, [{ name: 'C', retry: false }, { name: 'A', retry: true }]);
+        assert.deepEqual(extensionPreferences.cat_image.auxProfiles, settings.auxProfiles);
+        assert.deepEqual(extensionPreferences.cat_image.auxStrategy, settings.auxStrategy);
+        assert.equal(extensionPreferences.cat_image.auxProfileName, 'A');
+        assert.equal(field('profile').val(), 'profile:A');
+        assert.equal(field('name').val(), 'A');
+        assert.match(field('status').text(), /已删除连接「B」/);
+
+        remove().click();
+        assert.equal(field('profile').val(), 'profile:C');
+        remove().click();
+        assert.equal(field('profile').val(), 'new');
+        assert.equal(remove(), undefined);
+        assert.deepEqual(extensionPreferences.cat_image.auxProfiles, []);
+        assert.deepEqual(extensionPreferences.cat_image.auxStrategy, []);
+        assert.equal(extensionPreferences.cat_image.auxProfileName, '');
+        assert.equal(isAuxConfigured(), false);
+    } finally {
+        body.remove();
+        window.confirm = originalConfirm;
+        extensionPreferences.cat_image = savedPreferences;
+        Object.assign(settings, before);
     }
 });
 

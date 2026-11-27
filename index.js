@@ -12,7 +12,7 @@ import { startPolling } from './modules/scanner.js';
 import { refreshCoopCards } from './modules/sync-cards.js';
 import { initFrontendBridge } from './modules/frontend-bridge.js';
 
-window.SILLYLAB_VERSION = 'v2.4.4';
+window.SILLYLAB_VERSION = 'v2.4.5';
 initSettings(getContext, extension_settings);
 loadPreferences();
 setEnqueueGen(enqueueGen);

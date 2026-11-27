@@ -27,7 +27,7 @@ export function renderAuxPanel(body, slot, editor) {
     const profile = settings.auxProfiles.find(({ name }) => profileSlot(name) === slot);
     editor ??= { name: profile?.name ?? '', format: profile?.format ?? 'openai',
       drafts: profile ? { [profile.format]: structuredClone(profile) } : {} };
-    renderProfile(body, header, slot, editor);
+    renderProfile(body, header, slot, editor, profile?.name);
   }
   body.find('#sl_aux_profile').on('change', function () {
     const next = this.value;
@@ -77,7 +77,7 @@ function renderStrategy(body, header) {
     update([...rows]);
   });
 }
-function renderProfile(body, header, slot, editor) {
+function renderProfile(body, header, slot, editor, savedName) {
   const current = editor.drafts[editor.format] ||= { format: editor.format };
   const gemini = editor.format === 'gemini', inputStyle = fi(), hint = hintStyle();
   const entry = (key, label, value, type = 'text', placeholder = '') => '<div style="' + block +
@@ -125,7 +125,9 @@ function renderProfile(body, header, slot, editor) {
       esc(current.additional || '') + '</textarea><div id="sl_aux_additional_error" role="status" style="' + hint + 'color:' + CAT.red + ';"></div></div>';
   }
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" id="sl_test_aux" style="' + sbtn(CAT.accent) +
-    '">测试连接</button><button type="button" id="sl_save_aux" style="' + sbtn(CAT.accent) + '">保存连接</button></div>';
+    '">测试连接</button><button type="button" id="sl_save_aux" style="' + sbtn(CAT.accent) + '">保存连接</button>';
+  if (savedName) html += '<button type="button" id="sl_delete_aux" style="' + sbtn(CAT.red) + '">删除连接</button>';
+  html += '</div>';
   html += '<div id="sl_aux_status" role="status" style="' + hint + 'overflow-wrap:anywhere;"></div>';
   body.html(html);
 
@@ -192,5 +194,14 @@ function renderProfile(body, header, slot, editor) {
     } catch (error) {
       status.css('color', CAT.red).text(error.message);
     }
+  });
+  body.find('#sl_delete_aux').on('click', () => {
+    if (!window.confirm('删除连接「' + savedName + '」并移除回落策略中的对应项？')) return;
+    settings.auxProfiles = settings.auxProfiles.filter(profile => profile.name !== savedName);
+    settings.auxStrategy = settings.auxStrategy.filter(row => row.name !== savedName);
+    settings.auxProfileName = preferredAuxiliaryProfile()?.name ?? '';
+    saveSettings();
+    renderAuxPanel(body);
+    body.find('#sl_aux_status').css('color', CAT.green).text('已删除连接「' + savedName + '」');
   });
 }
