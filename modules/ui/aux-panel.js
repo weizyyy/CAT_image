@@ -99,10 +99,12 @@ function renderProfile(body, header, slot, editor) {
     option('gemini', 'Gemini Enterprise Agent Platform', editor.format) + '</select></div>';
   html += entry('url', 'API 地址', current.url, 'text', gemini ? GEMINI_AUX_URL : 'https://api.openai.com/v1');
   html += entry('key', gemini ? 'Google Cloud API Key' : 'API Key', current.key, 'password');
-  html += entry('model', gemini ? 'Gemini 模型 ID' : '聊天分析模型', current.model);
   if (gemini) {
-    html += '<div style="' + hint + '">API 地址留空使用美国多区域端点。也可填写其他端点地址。</div>';
+    html += entry('projectId', '项目 ID', current.projectId);
+    html += entry('region', '地区', current.region || 'global');
+    html += '<div style="' + hint + '">填写项目 ID 后可指定地区。API 地址留空时按地区自动选址。项目 ID 留空时，Google 使用快速模式账号的地区。</div>';
   }
+  html += entry('model', gemini ? 'Gemini 模型 ID' : '聊天分析模型', current.model);
   html += '<div style="' + hint + 'margin-bottom:8px;">留空沿用默认值（配图 temperature 为 0.25）。勾选「不发送」可省略该字段。' +
     (gemini ? '' : ' topK 由兼容网关提供。') + '</div>';
   html += optionalEntry('temperature', 'temperature', 'number', '当前任务默认');

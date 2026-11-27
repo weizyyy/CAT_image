@@ -17,7 +17,7 @@ try {
     report.runningVersion = result.version;
     report.version = 'v' + (await page.evaluate(async () => (await (await fetch('/scripts/extensions/third-party/CAT_image/manifest.json?test=' + Date.now())).json()).version));
     report.checks.push(...result.checks);
-    if (report.version !== 'v2.4.3' || (!fixtureOnly && result.version !== 'v2.4.3')) throw new Error('Expected v2.4.3');
+    if (report.version !== 'v2.4.4' || (!fixtureOnly && result.version !== 'v2.4.4')) throw new Error('Expected v2.4.4');
     // Avoid the live host bridge intercepting the isolated fixture's helper.
     savedBridge = await page.evaluate(async () => {
         const { settings } = await import('/scripts/extensions/third-party/CAT_image/modules/settings.js');

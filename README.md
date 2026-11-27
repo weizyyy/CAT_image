@@ -1,10 +1,10 @@
-# CAT_image 2.4.3
+# CAT_image 2.4.4
 
 SillyTavern 1.18+ 和 Tauritavern 的第三方文生图扩展。主模型在回复中放置 `[img:…]`，扩展在回复完成后逐个分析占位符，并在原位显示图卡。
 
 ## 设置与使用
 
-1. 在「AI 助理」选择 OpenAI Chat Completions 或 Gemini Enterprise Agent Platform，配置聊天分析模型。Gemini 填写 Google Cloud API Key 和模型 ID，API 地址留空时使用美国多区域端点 `https://aiplatform.us.rep.googleapis.com`。在「ComfyUI 与工作流」配置服务并导入 API 工作流，将 `%prompt%` 放在工作流接收提示词的位置。
+1. 在「AI 助理」选择 OpenAI Chat Completions 或 Gemini Enterprise Agent Platform，配置聊天分析模型。Gemini 填写 Google Cloud API Key 和模型 ID。填写项目 ID 后，插件按所选地区构造请求，地区默认是 `global`，API 地址留空时自动选择对应主机。项目 ID 留空时使用快速模式账号的地区。在「ComfyUI 与工作流」配置服务并导入 API 工作流，将 `%prompt%` 放在工作流接收提示词的位置。
    在 AI 助理中填写「配置名称」并点击「保存连接」。可直接选择已保存的配置，也可选择「连接策略」按列表顺序回落。「是否重试」决定当前连接的配图回包不合格时是否纠正一次。
 2. 在「模型与偏好」选择图像模型，复制「小猫指令」到预设、角色卡或世界书。
 3. 手动模式可从图卡生成图片。自动模式只排最新 AI 楼层的新图位。使用「重新解析」可按当前模型重写单张图的提示词。在主面板的「一键排图」下方输入楼层（如 `56,58-60,62`），点击「手动排图」可补解析这些楼层并排队生成缺少的图片。

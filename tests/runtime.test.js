@@ -1225,12 +1225,12 @@ test('OpenAI assistant sends standard fields, preserves legacy defaults and merg
     }
 });
 
-test('Gemini uses projectless API-key requests for native single-image retries', async () => {
+test('Gemini uses the explicit global project route for native single-image retries', async () => {
     const { auxApiCallRaw } = await import('../modules/pipeline/api.js');
     const original = { ...settings }, originalFetch = fetch;
     const requests = [];
     try {
-        const profile = { name: 'Gemini', format: 'gemini', model: 'gemini-fixture', key: 'AIza-mock',
+        const profile = { name: 'Gemini', format: 'gemini', model: 'gemini-fixture', key: 'AIza-mock', projectId: 'demo-project',
             temperature: '0', topP: '0.8', topK: '27', omit: ['topK'], thinking: 'on', thinkingLevel: 'low' };
         Object.assign(settings, { auxProfiles: [profile], modelType: 'zit', slPurgeLayered: true, nsfwEnhance: false });
         const captures = [
@@ -1250,7 +1250,7 @@ test('Gemini uses projectless API-key requests for native single-image retries',
         assert.doesNotMatch(end.enhanced, /another thought/);
         assert.equal(requests.length, 2);
         const [first, retry] = requests;
-        assert.equal(first.url, 'https://aiplatform.us.rep.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?key=AIza-mock');
+        assert.equal(first.url, 'https://aiplatform.googleapis.com/v1/projects/demo-project/locations/global/publishers/google/models/gemini-fixture:generateContent?key=AIza-mock');
         assert.deepEqual(first.headers, { 'Content-Type': 'application/json' });
         assert.equal(retry.url, first.url);
         assert.deepEqual(first.body.generationConfig, { temperature: 0, topP: 0.8, maxOutputTokens: 16384, thinkingConfig: { thinkingLevel: 'LOW' } });
@@ -1262,13 +1262,43 @@ test('Gemini uses projectless API-key requests for native single-image retries',
         assert.match(retry.body.contents[1].parts[0].text, /A previous prompt/);
         assert.doesNotMatch(retry.body.contents[1].parts[0].text, /internal thought/);
 
-        Object.assign(profile, { key: 'new+key/&', thinkingLevel: '2048',
-            url: 'https://us-central1-aiplatform.googleapis.com/v1/projects/old/locations/us-central1/publishers/google/models/old:generateContent?fixture=1&key=old-key' });
+        Object.assign(profile, { key: 'new+key/&', thinkingLevel: '2048', region: ' US-CENTRAL1 ',
+            url: 'https://proxy.invalid/vertex/v1/projects/old/locations/europe-west1/publishers/google/models/old:generateContent?fixture=1&key=old-key' });
         const raw = await auxApiCallRaw('system', 'user');
         assert.deepEqual(raw, { content: '', finish: 'length', reasoningLen: 12, truncated: true });
-        assert.equal(requests[2].url, 'https://us-central1-aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?fixture=1&key=new%2Bkey%2F%26');
+        assert.equal(requests[2].url, 'https://proxy.invalid/vertex/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-fixture:generateContent?fixture=1&key=new%2Bkey%2F%26');
         assert.deepEqual(requests[2].headers, { 'Content-Type': 'application/json' });
         assert.deepEqual(requests[2].body.generationConfig.thinkingConfig, { thinkingBudget: 2048 });
+    } finally {
+        Object.assign(settings, original);
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('Gemini route selection supports regional, multi-region and projectless Express requests', async () => {
+    const { testAuxConnection } = await import('../modules/pipeline/api.js');
+    const original = { ...settings }, originalFetch = fetch;
+    const profile = { name: 'Vertex fixture', format: 'gemini', model: 'gemini-fixture', key: 'test-key', projectId: 'demo-project' };
+    let called;
+    try {
+        settings.auxProfiles = [profile];
+        fetch = async url => {
+            called = new URL(url);
+            return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'OK' }] } }] });
+        };
+        for (const [region, host] of [['us-west1', 'us-west1-aiplatform.googleapis.com'],
+            ['us', 'aiplatform.us.rep.googleapis.com'], ['eu', 'aiplatform.eu.rep.googleapis.com']]) {
+            profile.region = region;
+            await testAuxConnection();
+            assert.equal(called.hostname, host);
+            assert.match(called.pathname, new RegExp('/projects/demo-project/locations/' + region + '/'));
+        }
+        profile.projectId = '';
+        await testAuxConnection();
+        assert.equal(called.href, 'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?key=test-key');
+        profile.projectId = 'demo-project';
+        profile.region = 'global/invalid';
+        await assert.rejects(testAuxConnection(), /地区格式/);
     } finally {
         Object.assign(settings, original);
         globalThis.fetch = originalFetch;
@@ -1311,6 +1341,7 @@ test('assistant saves named connections, tests drafts and edits persistent fallb
             ['sl_aux_profile', 'sl_aux_name', 'sl_aux_format']);
         assert.equal(field('profile')[0].options[0].textContent, '连接策略');
         assert.equal(field('projectId').length, 0);
+        assert.equal(field('region').length, 0);
         assert.equal(field('level_row').prop('hidden'), true);
         enter('thinking', 'on');
         enter('thinkingLevel', 'custom');
@@ -1329,11 +1360,13 @@ test('assistant saves named connections, tests drafts and edits persistent fallb
         enter('profile', 'new');
         enter('name', 'Gemini');
         enter('format', 'gemini');
-        assert.equal(field('projectId').length, 0);
+        assert.equal(field('projectId').val(), '');
+        assert.equal(field('region').val(), 'global');
         assert.equal(field('key').val(), '');
         assert.equal(field('additional').length, 0);
         enter('model', 'gemini-ui');
-        enter('url', 'https://us-west1-aiplatform.googleapis.com/');
+        enter('projectId', 'demo-ui-project');
+        enter('region', 'us-west1');
         enter('key', 'ui-api-key');
         enter('thinking', 'omit');
         assert.equal(getAuxiliaryAttempts()[0].config.model, 'open-model');
@@ -1346,10 +1379,12 @@ test('assistant saves named connections, tests drafts and edits persistent fallb
         assert.equal(body.find('#sl_test_aux')[0].parentElement.nextElementSibling.id, 'sl_aux_status');
         body.find('#sl_test_aux')[0].click();
         await waitUntil(() => field('status').text() === '连接成功');
-        assert.equal(requests[0].url, 'https://us-west1-aiplatform.googleapis.com/v1/publishers/google/models/gemini-ui:generateContent?key=ui-api-key');
+        assert.equal(requests[0].url, 'https://us-west1-aiplatform.googleapis.com/v1/projects/demo-ui-project/locations/us-west1/publishers/google/models/gemini-ui:generateContent?key=ui-api-key');
         assert.equal(Object.hasOwn(requests[0].body.generationConfig, 'thinkingConfig'), false);
         body.find('#sl_save_aux')[0].click();
         assert.equal(getAuxiliaryAttempts()[0].config.model, 'gemini-ui');
+        assert.equal(getAuxiliaryAttempts()[0].config.projectId, 'demo-ui-project');
+        assert.equal(getAuxiliaryAttempts()[0].config.region, 'us-west1');
         enter('profile', 'strategy');
         const rowNames = () => body.find('[data-aux-strategy-name]').toArray().map(row => row.value);
         const retries = () => body.find('[data-aux-strategy-retry]').toArray().map(row => row.checked);

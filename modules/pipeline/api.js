@@ -27,6 +27,10 @@ export function parseAuxAdditionalParams(input) {
 
 function auxiliaryEndpoint(config, model) {
     if (!config.url || !model) throw new Error('请填写 AI 助理的 API 地址和模型。');
+    if (config.format === 'gemini' && config.projectId) {
+        if (!/^[a-z0-9][a-z0-9-]*$/i.test(config.projectId)) throw new Error('Gemini 项目 ID 格式不正确。');
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.region)) throw new Error('Gemini 地区格式不正确。');
+    }
     let endpoint;
     try { endpoint = new URL(config.url, globalThis.window?.location?.href); }
     catch { throw new Error('AI 助理的 API 地址格式不正确。'); }
@@ -35,11 +39,12 @@ function auxiliaryEndpoint(config, model) {
     if (config.format === 'gemini') {
         if (!config.key) throw new Error('请填写 Gemini 的 Google Cloud API Key。');
         // Reuse the endpoint even when a saved URL includes a version or a resource path.
-        const base = path.replace(/\/v1(?:beta1)?(?:\/(?:projects\/[^/]+\/locations\/[^/]+\/)?publishers\/google\/models\/[^/]+:generateContent)?$/, '');
+        const base = path.replace(/\/v1(?:beta1)?(?:\/projects\/[^/]+\/locations\/[^/]+)?(?:\/publishers\/google\/models\/[^/]+:generateContent)?$/, '');
         if (base.includes('/projects/') || base.endsWith(':generateContent')) {
             throw new Error('请在 Gemini 的 API 地址栏填写端点的基础地址。');
         }
-        endpoint.pathname = base + '/v1/publishers/google/models/' + encodeURIComponent(model) + ':generateContent';
+        const scope = config.projectId ? '/projects/' + config.projectId + '/locations/' + config.region : '';
+        endpoint.pathname = base + '/v1' + scope + '/publishers/google/models/' + encodeURIComponent(model) + ':generateContent';
         endpoint.searchParams.set('key', config.key);
     } else {
         endpoint.pathname = path.endsWith('/chat/completions') ? path : path + '/chat/completions';
@@ -190,7 +195,7 @@ async function sendAuxiliary(messages, { maxTokens, temperature = 0.3, forceMode
     const timeoutMs = (settings.cTimeout || 180) * 1000;
     const queryKey = config.format === 'gemini' ? config.key : '';
     const post = () => _post(endpoint.href, headers, request.body, timeoutMs, signal, queryKey);
-    slLog('auxApiCall →', endpoint.origin + endpoint.pathname, 'model:', model);
+    slLog('auxApiCall →', endpoint.origin + endpoint.pathname.replace(/(\/projects\/)[^/]+/, '$1…'), 'model:', model);
     let response = await post();
     if (!response.ok && request.legacyDefault && [400, 422].includes(response.status) &&
         /\bthinking\b/i.test(response.text) && /unknown|unsupported|unrecognized|not supported|not (?:permitted|allowed)|extra.forbidden|unexpected/i.test(response.text)) {

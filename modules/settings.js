@@ -2,7 +2,7 @@
 export var settings = {};
 export const MOSS_IMAGE_CG_MODE = 'moss_image';
 export const MOSS_IMAGE_FREE_MODE = 'moss_image_free';
-export const GEMINI_AUX_URL = 'https://aiplatform.us.rep.googleapis.com';
+export const GEMINI_AUX_URL = 'https://aiplatform.googleapis.com';
 const defaultMossCanvas = { width: 1536, height: 864 };
 
 export function isMossImageMode(mode) {
@@ -58,8 +58,20 @@ export function getDefaults() {
 
 export function normalizeAuxiliaryConfig(profile = {}) {
     const format = profile.format === 'gemini' ? 'gemini' : 'openai';
-    return { ...profile, format, url: String(profile.url ?? '').trim() || (format === 'gemini' ? GEMINI_AUX_URL : ''),
+    const config = { ...profile, format, url: String(profile.url ?? '').trim(),
         model: String(profile.model ?? '').trim(), key: String(profile.key ?? '').trim() };
+    if (format === 'gemini') {
+        config.projectId = String(profile.projectId ?? '').trim();
+        config.region = String(profile.region ?? '').trim().toLowerCase() || 'global';
+        config.url ||= geminiBaseUrl(config.projectId ? config.region : 'global');
+    }
+    return config;
+}
+
+function geminiBaseUrl(region) {
+    if (region === 'global') return GEMINI_AUX_URL;
+    if (region === 'us' || region === 'eu') return 'https://aiplatform.' + region + '.rep.googleapis.com';
+    return 'https://' + region + '-aiplatform.googleapis.com';
 }
 
 export function isAuxProfileConfigured({ format, url, model, key }) {
@@ -145,7 +157,7 @@ function importAuxiliaryConnections(source) {
     const oldOpenAI = {
         ...source.auxOpenAI, url: source.auxUrl || '', key: source.auxKey || '', model: source.auxModel || '',
     };
-    const { projectId: _oldProjectId, ...oldGemini } = source.auxGemini || {};
+    const oldGemini = source.auxGemini || {};
     for (const [format, label, old] of [['openai', 'OpenAI', oldOpenAI], ['gemini', 'Gemini', oldGemini]]) {
         if (!Object.values(old).some(Boolean)) continue;
         const name = old.model?.trim() ? label + ' · ' + old.model.trim() : label;

@@ -120,7 +120,7 @@ test('preferences write only to the host namespace and request a host save', () 
 test('existing assistant settings migrate into separate named profiles with the current connection selected', async () => {
     const { getAuxiliaryAttempts } = await import('../modules/settings.js');
     const openAI = { temperature: '0.6', additional: '{"provider":{"allow_fallbacks":false}}' };
-    const gemini = { model: 'gemini-test', key: 'fixture-key', omit: ['topP'] };
+    const gemini = { model: 'gemini-test', key: 'fixture-key', projectId: 'demo-project', omit: ['topP'] };
     const config = { cat_image: { auxFormat: 'gemini', auxUrl: 'https://open.invalid', auxModel: 'open-test',
         auxKey: 'open-key', auxOpenAI: openAI, auxGemini: gemini } };
     initSettings(() => ({}), config);
@@ -130,6 +130,8 @@ test('existing assistant settings migrate into separate named profiles with the 
         { ...gemini, name: 'Gemini · gemini-test', format: 'gemini' },
     ]);
     assert.equal(getAuxiliaryAttempts()[0].config.model, 'gemini-test');
+    assert.equal(getAuxiliaryAttempts()[0].config.projectId, 'demo-project');
+    assert.equal(getAuxiliaryAttempts()[0].config.region, 'global');
     saveSettings();
     assert.equal(Object.hasOwn(config.cat_image, 'auxKey'), false);
     loadPreferences();
