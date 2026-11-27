@@ -1249,7 +1249,7 @@ test('Gemini uses projectless API-key requests for native single-image retries',
         assert.doesNotMatch(end.enhanced, /another thought/);
         assert.equal(requests.length, 2);
         const [first, retry] = requests;
-        assert.equal(first.url, 'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?key=AIza-mock');
+        assert.equal(first.url, 'https://aiplatform.us.rep.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?key=AIza-mock');
         assert.deepEqual(first.headers, { 'Content-Type': 'application/json' });
         assert.equal(retry.url, first.url);
         assert.deepEqual(first.body.generationConfig, { temperature: 0, topP: 0.8, maxOutputTokens: 16384, thinkingConfig: { thinkingLevel: 'LOW' } });

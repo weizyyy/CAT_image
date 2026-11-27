@@ -2,7 +2,7 @@
 export var settings = {};
 export const MOSS_IMAGE_CG_MODE = 'moss_image';
 export const MOSS_IMAGE_FREE_MODE = 'moss_image_free';
-export const GEMINI_AUX_URL = 'https://aiplatform.googleapis.com';
+export const GEMINI_AUX_URL = 'https://aiplatform.us.rep.googleapis.com';
 const defaultMossCanvas = { width: 1536, height: 864 };
 
 export function isMossImageMode(mode) {

@@ -1,3 +1,7 @@
+## v2.4.2 — 2026-11-27
+
+- Gemini AI 助理的默认 API 地址改为 `https://aiplatform.us.rep.googleapis.com`。
+
 ## v2.4.1 — 2026-11-27
 
 - Gemini AI 助理改用无项目路径的 API Key 请求，移除 Project ID 栏。API 地址留空时使用全局端点，也可填写地区端点。
