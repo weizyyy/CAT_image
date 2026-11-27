@@ -37,11 +37,10 @@ function renderAuxPanel(body) {
     '<select id="sl_aux_format" style="' + inputStyle + '">' + option('openai', 'OpenAI Chat Completions', config.format) +
     option('gemini', 'Gemini Enterprise Agent Platform', config.format) + '</select></div>';
   html += entry('url', 'API 地址', gemini ? current.url : settings.auxUrl, 'text', gemini ? GEMINI_AUX_URL : 'https://api.openai.com/v1');
-  html += entry('key', gemini ? 'Google Cloud API Key / OAuth 访问令牌' : 'API Key', config.key, 'password');
+  html += entry('key', gemini ? 'Google Cloud API Key' : 'API Key', config.key, 'password');
   html += entry('model', gemini ? 'Gemini 模型 ID' : '聊天分析模型', config.model);
   if (gemini) {
-    html += entry('projectId', 'Project ID', config.projectId);
-    html += '<div style="' + hint + '">API 地址留空使用全局端点。也可填完整的 generateContent 地址。</div>';
+    html += '<div style="' + hint + '">API 地址留空使用全局端点。指定地区时填入该地区的端点地址。</div>';
   }
   html += '<div style="' + hint + 'margin-bottom:8px;">留空沿用默认值（配图 temperature 为 0.25）。勾选「不发送」可省略该字段。' +
     (gemini ? '' : ' topK 由兼容网关提供。') + '</div>';

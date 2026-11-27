@@ -1,3 +1,7 @@
+## v2.4.1 — 2026-11-27
+
+- Gemini AI 助理改用无项目路径的 API Key 请求，移除 Project ID 栏。API 地址留空时使用全局端点，也可填写地区端点。
+
 ## v2.4.0 — 2026-11-27
 
 - AI 助理可在 OpenAI Chat Completions 和 Gemini Enterprise Agent Platform 之间切换，两套配置独立保存。Gemini 可填写 Project ID 并调用原生 generateContent 接口。

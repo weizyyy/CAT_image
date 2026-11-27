@@ -1224,13 +1224,13 @@ test('OpenAI assistant sends standard fields, preserves legacy defaults and merg
     }
 });
 
-test('Gemini uses native role mapping for single-image retries and separates thoughts and finish reasons', async () => {
+test('Gemini uses projectless API-key requests for native single-image retries', async () => {
     const { auxApiCallRaw } = await import('../modules/pipeline/api.js');
     const original = { ...settings }, originalFetch = fetch;
     const requests = [];
     try {
         Object.assign(settings, { auxFormat: 'gemini', modelType: 'zit', slPurgeLayered: true, nsfwEnhance: false,
-            auxGemini: { projectId: 'test-project', model: 'gemini-fixture', key: 'AIza-mock',
+            auxGemini: { model: 'gemini-fixture', key: 'AIza-mock',
                 temperature: '0', topP: '0.8', topK: '27', omit: ['topK'], thinking: 'on', thinkingLevel: 'low' } });
         const captures = [
             { finishReason: 'STOP', content: { parts: [{ text: 'internal thought', thought: true },
@@ -1249,8 +1249,9 @@ test('Gemini uses native role mapping for single-image retries and separates tho
         assert.doesNotMatch(end.enhanced, /another thought/);
         assert.equal(requests.length, 2);
         const [first, retry] = requests;
-        assert.equal(first.url, 'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/gemini-fixture:generateContent');
-        assert.equal(first.headers['x-goog-api-key'], 'AIza-mock');
+        assert.equal(first.url, 'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?key=AIza-mock');
+        assert.deepEqual(first.headers, { 'Content-Type': 'application/json' });
+        assert.equal(retry.url, first.url);
         assert.deepEqual(first.body.generationConfig, { temperature: 0, topP: 0.8, maxOutputTokens: 16384, thinkingConfig: { thinkingLevel: 'LOW' } });
         assert.equal(first.body.systemInstruction.parts.length, 6);
         assert.deepEqual(retry.body.systemInstruction, first.body.systemInstruction);
@@ -1260,13 +1261,35 @@ test('Gemini uses native role mapping for single-image retries and separates tho
         assert.match(retry.body.contents[1].parts[0].text, /A previous prompt/);
         assert.doesNotMatch(retry.body.contents[1].parts[0].text, /internal thought/);
 
-        settings.auxGemini = { ...settings.auxGemini, key: 'Bearer oauth-fixture', thinkingLevel: '2048',
-            url: 'https://test.invalid/v1/projects/old/locations/us-central1/publishers/google/models/old:generateContent' };
+        settings.auxGemini = { ...settings.auxGemini, key: 'new+key/&', thinkingLevel: '2048', projectId: 'old-project',
+            url: 'https://us-central1-aiplatform.googleapis.com/v1/projects/old/locations/us-central1/publishers/google/models/old:generateContent?fixture=1&key=old-key' };
         const raw = await auxApiCallRaw('system', 'user');
         assert.deepEqual(raw, { content: '', finish: 'length', reasoningLen: 12, truncated: true });
-        assert.equal(requests[2].url, 'https://test.invalid/v1/projects/test-project/locations/us-central1/publishers/google/models/gemini-fixture:generateContent');
-        assert.equal(requests[2].headers.Authorization, 'Bearer oauth-fixture');
+        assert.equal(requests[2].url, 'https://us-central1-aiplatform.googleapis.com/v1/publishers/google/models/gemini-fixture:generateContent?fixture=1&key=new%2Bkey%2F%26');
+        assert.deepEqual(requests[2].headers, { 'Content-Type': 'application/json' });
         assert.deepEqual(requests[2].body.generationConfig.thinkingConfig, { thinkingBudget: 2048 });
+    } finally {
+        Object.assign(settings, original);
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('Gemini keeps the query API key out of HTTP and network errors', async () => {
+    const { testAuxConnection } = await import('../modules/pipeline/api.js');
+    const { slLogDump } = await import('../modules/log.js');
+    const original = { ...settings }, originalFetch = fetch;
+    const key = 'secret-fixture+/&';
+    const encoded = new URLSearchParams({ key }).toString();
+    try {
+        Object.assign(settings, { auxFormat: 'gemini', auxGemini: { model: 'gemini-fixture', key } });
+        fetch = async url => new Response(url + ' ' + key, { status: 403 });
+        await assert.rejects(testAuxConnection(), error => error.message.includes('HTTP 403') &&
+            !error.message.includes(key) && !error.message.includes(encoded));
+        assert.equal(slLogDump().includes(key), false);
+        assert.equal(slLogDump().includes(encoded), false);
+        fetch = async url => { throw new Error('Failed to fetch ' + url); };
+        await assert.rejects(testAuxConnection(), error => error.message.includes('Failed to fetch') &&
+            !error.message.includes(encoded));
     } finally {
         Object.assign(settings, original);
         globalThis.fetch = originalFetch;
@@ -1299,11 +1322,13 @@ test('assistant settings switch profiles, save omission controls and test the se
         assert.equal(field('additional').attr('aria-invalid'), 'false');
 
         enter('format', 'gemini');
-        assert.equal(field('projectId').length, 1);
+        assert.equal(field('projectId').length, 0);
         assert.equal(field('key').val(), '');
         assert.equal(field('additional').length, 0);
-        enter('projectId', 'ui-project');
         enter('model', 'gemini-ui');
+        assert.equal(isAuxConfigured(), false);
+        enter('url', 'https://us-west1-aiplatform.googleapis.com/');
+        enter('key', 'ui-api-key');
         enter('thinking', 'omit');
         assert.equal(isAuxConfigured(), true);
         const requests = [];
@@ -1313,7 +1338,7 @@ test('assistant settings switch profiles, save omission controls and test the se
         };
         body.find('#sl_test_aux')[0].click();
         await waitUntil(() => field('status').text() === '连接成功');
-        assert.match(requests[0].url, /\/projects\/ui-project\/locations\/global\//);
+        assert.equal(requests[0].url, 'https://us-west1-aiplatform.googleapis.com/v1/publishers/google/models/gemini-ui:generateContent?key=ui-api-key');
         assert.equal(Object.hasOwn(requests[0].body.generationConfig, 'thinkingConfig'), false);
         enter('format', 'openai');
         assert.equal(field('model').val(), 'open-model');

@@ -33,17 +33,14 @@ function auxiliaryEndpoint(config, model) {
     if (!['https:', 'http:'].includes(endpoint.protocol)) throw new Error('API 地址须使用 HTTP 或 HTTPS。');
     const path = endpoint.pathname.replace(/\/+$/, '');
     if (config.format === 'gemini') {
-        if (!config.projectId) throw new Error('请填写 Gemini 的 Project ID。');
-        if (!/^[a-z0-9][a-z0-9-]*$/i.test(config.projectId)) throw new Error('Gemini 的 Project ID 格式不正确。');
-        // Accept a base URL, a versioned base URL, or the full resource URL.
-        const resource = path.match(/^(.*\/v1(?:beta1)?)\/projects\/[^/]+\/locations\/([^/]+)\/publishers\/google\/models\/[^/]+:generateContent$/);
-        if (!resource && (path.includes('/projects/') || path.endsWith(':generateContent'))) {
-            throw new Error('Gemini 的 API 地址须是基础地址或完整的 generateContent 地址。');
+        if (!config.key) throw new Error('请填写 Gemini 的 Google Cloud API Key。');
+        // Reuse the endpoint even when a saved URL includes a version or a resource path.
+        const base = path.replace(/\/v1(?:beta1)?(?:\/(?:projects\/[^/]+\/locations\/[^/]+\/)?publishers\/google\/models\/[^/]+:generateContent)?$/, '');
+        if (base.includes('/projects/') || base.endsWith(':generateContent')) {
+            throw new Error('请在 Gemini 的 API 地址栏填写端点的基础地址。');
         }
-        const base = resource?.[1] ?? (/\/v1(?:beta1)?$/.test(path) ? path : path + '/v1');
-        const location = resource?.[2] ?? 'global';
-        endpoint.pathname = base + '/projects/' + config.projectId + '/locations/' + location +
-            '/publishers/google/models/' + encodeURIComponent(model) + ':generateContent';
+        endpoint.pathname = base + '/v1/publishers/google/models/' + encodeURIComponent(model) + ':generateContent';
+        endpoint.searchParams.set('key', config.key);
     } else {
         endpoint.pathname = path.endsWith('/chat/completions') ? path : path + '/chat/completions';
     }
@@ -104,16 +101,17 @@ function openaiBody(endpoint, config, model, messages, { temperature, topP, topK
 
 function requestHeaders(config) {
     const headers = { 'Content-Type': 'application/json' };
-    if (!config.key) return headers;
-    const explicitKey = config.format === 'gemini' && config.key.match(/^x-goog-api-key:\s*(\S+)$/i);
-    if (explicitKey || (config.format === 'gemini' && config.key.startsWith('AIza'))) {
-        headers['x-goog-api-key'] = explicitKey?.[1] || config.key;
-    } else {
+    if (config.format === 'openai' && config.key) {
         headers.Authorization = /^Bearer\s/i.test(config.key) ? config.key : 'Bearer ' + config.key;
     }
     return headers;
 }
 
+function hideApiKey(text, key) {
+    if (!key) return text;
+    const encoded = new URLSearchParams({ key }).toString().slice('key='.length);
+    return text.replaceAll(encoded, '[API Key 已隐藏]').replaceAll(key, '[API Key 已隐藏]');
+}
 
 // ── CoT（思维链）剥离 ──
 // DeepSeek 把思考放在独立的 reasoning_content 字段（正常不会混进 content）；
@@ -142,7 +140,7 @@ export function stripCoT(text) {
     return t.trim();
 }
 
-async function _post(endpoint, headers, body, timeoutMs, signal) {
+async function _post(endpoint, headers, body, timeoutMs, signal, queryKey) {
     var ctrl = new AbortController();
     var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs);
     const abort = () => ctrl.abort();
@@ -153,7 +151,9 @@ async function _post(endpoint, headers, body, timeoutMs, signal) {
         const text = await response.text();
         return { ok: response.ok, status: response.status, text };
     } catch (e) {
-        throw new Error(signal?.aborted ? '回复版本已变更，请求已取消' : e && e.name === 'AbortError' ? '辅助API请求超时(' + timeoutMs + 'ms)' : (e ? e.message : 'fetch失败'));
+        const message = signal?.aborted ? '回复版本已变更，请求已取消'
+            : e?.name === 'AbortError' ? '辅助API请求超时(' + timeoutMs + 'ms)' : (e?.message || 'fetch失败');
+        throw new Error(hideApiKey(message, queryKey));
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 
@@ -187,18 +187,21 @@ async function sendAuxiliary(messages, { maxTokens, temperature = 0.3, forceMode
         ? { body: geminiBody(messages, config, sampling, maxTokens, level) }
         : openaiBody(endpoint, config, model, messages, sampling, maxTokens, level);
     const timeoutMs = (settings.cTimeout || 180) * 1000;
+    const queryKey = config.format === 'gemini' ? config.key : '';
+    const post = () => _post(endpoint.href, headers, request.body, timeoutMs, signal, queryKey);
     slLog('auxApiCall →', endpoint.origin + endpoint.pathname, 'model:', model);
-    let response = await _post(endpoint.href, headers, request.body, timeoutMs, signal);
+    let response = await post();
     if (!response.ok && request.legacyDefault && [400, 422].includes(response.status) &&
         /\bthinking\b/i.test(response.text) && /unknown|unsupported|unrecognized|not supported|not (?:permitted|allowed)|extra.forbidden|unexpected/i.test(response.text)) {
         // Existing compatible endpoints may implement the legacy thinking flag.
         slLog('辅助 API 不支持默认 thinking 字段，使用服务端默认设置重试');
         delete request.body.thinking;
-        response = await _post(endpoint.href, headers, request.body, timeoutMs, signal);
+        response = await post();
     }
     if (!response.ok) {
-        slErr('auxApiCall 失败:', response.status, response.text.slice(0, 500));
-        throw new Error('HTTP ' + response.status + ': ' + response.text.slice(0, 300));
+        const detail = hideApiKey(response.text, queryKey);
+        slErr('auxApiCall 失败:', response.status, detail.slice(0, 500));
+        throw new Error('HTTP ' + response.status + ': ' + detail.slice(0, 300));
     }
     let data;
     try { data = JSON.parse(response.text); }

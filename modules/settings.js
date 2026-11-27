@@ -62,15 +62,15 @@ export function getAuxiliaryConfig() {
     if (settings.auxFormat === 'gemini') {
         const gemini = settings.auxGemini || {};
         return { ...gemini, format: 'gemini', url: gemini.url?.trim() || GEMINI_AUX_URL,
-            model: gemini.model?.trim() || '', key: gemini.key?.trim() || '', projectId: gemini.projectId?.trim() || '' };
+            model: gemini.model?.trim() || '', key: gemini.key?.trim() || '' };
     }
     return { ...settings.auxOpenAI, format: 'openai', url: settings.auxUrl?.trim() || '',
         model: settings.auxModel?.trim() || '', key: settings.auxKey?.trim() || '' };
 }
 
 export function isAuxConfigured() {
-    const { format, url, model, projectId } = getAuxiliaryConfig();
-    return !!(url && model && (format !== 'gemini' || projectId));
+    const { format, url, model, key } = getAuxiliaryConfig();
+    return !!(url && model && (format !== 'gemini' || key));
 }
 
 export var COLORS = {
